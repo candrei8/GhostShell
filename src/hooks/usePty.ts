@@ -1,0 +1,587 @@
+import { useEffect, useRef } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { useAgentStore } from '../stores/agentStore'
+import { useTerminalStore } from '../stores/terminalStore'
+import { useHistoryStore } from '../stores/historyStore'
+import { useNotificationStore } from '../stores/notificationStore'
+import { useActivityStore } from '../stores/activityStore'
+import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel } from '../lib/providers'
+import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
+import { Provider, SubAgentOutputLine } from '../lib/types'
+import { detectDomain } from '../lib/domain-detector'
+
+interface UsePtyOptions {
+  sessionId: string
+  terminal: Terminal | null
+  cwd?: string
+  shell?: string
+  agentId?: string
+  autoLaunch?: boolean
+}
+
+// Detect CWD from PowerShell/bash prompt patterns
+const PS_CWD_REGEX = /PS\s+([A-Z]:\\[^\r\n>]*?)>/
+const BASH_CWD_REGEX = /:\s*([~\/][^\$\r\n]*?)\s*\$/
+
+// Detect when Claude CLI is waiting for user input (idle prompt)
+const CLAUDE_IDLE_PATTERNS = [
+  />\s*$/,
+  /\$ $/,
+  /PS [A-Z]:\\[^>]*>\s*$/,
+]
+
+// Detect Claude CLI confirmation prompts that should be auto-confirmed
+const CLAUDE_AUTO_CONFIRM_PATTERNS = [
+  /clear.*context.*\(y\/n\)/i,
+  /bypass.*\(y\/n\)/i,
+  /Do you want to proceed\?.*\(y\/n\)/i,
+  /Continue\?.*\(y\/n\)/i,
+  /\(y\)es.*\(n\)o/i,
+  /Has the issue been fixed\?.*\(y\/n\)/i,
+  /Do you want to.*\?.*\(y\/n\)/i,
+  /\? \(Y\/n\)/,
+  /\? \(y\/N\)/,
+]
+
+// Detect when Claude CLI is actively working
+const CLAUDE_WORKING_PATTERNS = [
+  /\u280B/,
+  /\u2819/,
+  /\u2838/,
+  /\u2834/,
+  /\u2826/,
+  /\u2807/,
+  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
+  /Thinking/,
+  /Reading/,
+  /Writing/,
+  /Editing/,
+  /Searching/,
+  /Running/,
+]
+
+// --- Gemini CLI patterns ---
+// Note: Gemini's banner and UI uses decorative ✦ and > characters liberally.
+// Patterns must be specific enough to avoid matching static UI elements.
+const GEMINI_IDLE_PATTERNS = [
+  /gemini>\s*$/,              // Gemini's actual input prompt
+  /\$ $/,                     // bash prompt
+  /PS [A-Z]:\\[^>]*>\s*$/,   // PowerShell prompt
+]
+
+const GEMINI_AUTO_CONFIRM_PATTERNS = [
+  /\(Y\/n\)/,
+  /\(y\/n\)/i,
+  /Do you want to proceed/i,
+]
+
+const GEMINI_WORKING_PATTERNS = [
+  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,  // Braille spinner characters (reliable)
+  /\u280B|\u2819|\u2838|\u2834|\u2826|\u2807/, // More braille spinners
+  /Generating\.\.\./,        // "Generating..." with ellipsis
+  /Thinking\.\.\./,          // "Thinking..." with ellipsis
+  /Reading file/i,           // Specific tool actions
+  /Writing to/i,
+  /Editing file/i,
+  /Searching/i,
+  /Running command/i,
+]
+
+// Detect "command not found" errors — returns the binary name if matched, null otherwise
+function detectCliNotFound(data: string): 'gemini' | 'claude' | null {
+  // PowerShell patterns: "'gemini' is not recognized" / "'gemini' no se reconoce"
+  const psMatch = data.match(/['"]?(gemini|claude)['"]?\s*:\s*(?:.*(?:is not recognized|no se reconoce|CommandNotFoundException))/i)
+  if (psMatch) return psMatch[1].toLowerCase() as 'gemini' | 'claude'
+  // Bash/zsh: "gemini: command not found" / "gemini: not found"
+  const bashMatch = data.match(/(gemini|claude)\s*:\s*(?:command\s+)?not found/i)
+  if (bashMatch) return bashMatch[1].toLowerCase() as 'gemini' | 'claude'
+  return null
+}
+
+function getWorkingPatterns(provider: Provider): RegExp[] {
+  return provider === 'gemini' ? GEMINI_WORKING_PATTERNS : CLAUDE_WORKING_PATTERNS
+}
+
+function getIdlePatterns(provider: Provider): RegExp[] {
+  return provider === 'gemini' ? GEMINI_IDLE_PATTERNS : CLAUDE_IDLE_PATTERNS
+}
+
+function getAutoConfirmPatterns(provider: Provider): RegExp[] {
+  return provider === 'gemini' ? GEMINI_AUTO_CONFIRM_PATTERNS : CLAUDE_AUTO_CONFIRM_PATTERNS
+}
+
+// Debounce timer for idle detection
+let idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+
+function scheduleIdleCheck(agentId: string, delayMs: number) {
+  const existing = idleTimers.get(agentId)
+  if (existing) clearTimeout(existing)
+
+  const timer = setTimeout(() => {
+    idleTimers.delete(agentId)
+    // Guard: agent may have been deleted while timer was pending
+    const agent = useAgentStore.getState().getAgent(agentId)
+    if (!agent) return
+    if (agent.status === 'working') {
+      useAgentStore.getState().setAgentStatus(agentId, 'idle')
+      useActivityStore.getState().setActivity(agentId, 'idle')
+      useNotificationStore.getState().addNotification(
+        'success',
+        `PUM! ${agent.name} ha acabado`,
+        'Agent is ready for input'
+      )
+    }
+  }, delayMs)
+
+  idleTimers.set(agentId, timer)
+}
+
+function cancelIdleCheck(agentId: string) {
+  const existing = idleTimers.get(agentId)
+  if (existing) {
+    clearTimeout(existing)
+    idleTimers.delete(agentId)
+  }
+}
+
+export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }: UsePtyOptions) {
+  const connectedRef = useRef(false)
+
+  useEffect(() => {
+    if (!terminal || connectedRef.current || !window.ghostshell) return
+
+    connectedRef.current = true
+    const cleanups: (() => void)[] = []
+    const { setAgentStatus, getAgent, updateAgent } = useAgentStore.getState()
+
+    let lastDetectedCwd = cwd || ''
+
+    // Determine provider for this agent
+    const agent = agentId ? getAgent(agentId) : undefined
+    const provider: Provider = agent ? resolveProvider(agent) : 'claude'
+    const workingPatterns = getWorkingPatterns(provider)
+    const idlePatterns = getIdlePatterns(provider)
+    const autoConfirmPatterns = getAutoConfirmPatterns(provider)
+
+    // Track active subagent IDs for completion detection
+    let lastSubAgentId: string | null = null
+
+    // Line accumulator for sub-agent output capture
+    let lineBuffer = ''
+    let pendingOutputLines: SubAgentOutputLine[] = []
+    let outputFlushTimer: ReturnType<typeof setTimeout> | null = null
+    const OUTPUT_FLUSH_MS = 200
+
+    function flushOutputLines() {
+      if (pendingOutputLines.length > 0 && lastSubAgentId && agentId) {
+        useActivityStore.getState().appendSubAgentOutput(agentId, lastSubAgentId, pendingOutputLines)
+        pendingOutputLines = []
+      }
+      outputFlushTimer = null
+    }
+
+    function accumulateOutput(rawData: string) {
+      if (!lastSubAgentId || !agentId) return
+      lineBuffer += rawData
+      const lines = lineBuffer.split('\n')
+      // Keep the last incomplete line in the buffer
+      lineBuffer = lines.pop() || ''
+      const now = Date.now()
+      for (const line of lines) {
+        const stripped = stripAnsi(line).trim()
+        if (stripped.length === 0) continue
+        pendingOutputLines.push({ timestamp: now, text: stripped })
+      }
+      if (pendingOutputLines.length > 0 && !outputFlushTimer) {
+        outputFlushTimer = setTimeout(flushOutputLines, OUTPUT_FLUSH_MS)
+      }
+    }
+
+    // Cooldown: prevent rapid working/idle status flip-flops
+    let lastWorkingSet = 0
+    const WORKING_COOLDOWN_MS = 500
+
+    // Track if we already detected CLI-not-found (show notification once)
+    let cliNotFoundDetected = false
+
+    // Create batch parser for output detection (provider-aware)
+    const batchParser = agentId
+      ? createBatchParser((results) => {
+          const store = useActivityStore.getState()
+          for (const result of results) {
+            store.setActivity(agentId, result.activity, result.detail)
+            if (result.fileTouch) {
+              store.addFileTouch(agentId, result.fileTouch.path, result.fileTouch.operation)
+            }
+            store.addEvent(agentId, result.activity, result.tool, result.detail)
+
+            // Track subagent spawning
+            if (result.subAgent) {
+              // Flush pending output for previous subagent
+              if (lastSubAgentId && pendingOutputLines.length > 0) {
+                flushOutputLines()
+              }
+              // Complete previous subagent if still running
+              if (lastSubAgentId) {
+                store.completeSubAgent(agentId, lastSubAgentId)
+              }
+              const domain = detectDomain(result.subAgent.description)
+              lastSubAgentId = store.addSubAgent(agentId, {
+                agentId,
+                type: result.subAgent.type,
+                description: result.subAgent.description,
+                status: 'running',
+                model: result.subAgent.model,
+                domain,
+              })
+              lineBuffer = ''
+            }
+
+            // Handle sub-agent completion
+            if (result.subAgentCompleted && lastSubAgentId) {
+              flushOutputLines()
+              store.completeSubAgent(agentId, lastSubAgentId)
+              lastSubAgentId = null
+              lineBuffer = ''
+            }
+
+            // Track task actions
+            if (result.taskAction) {
+              if (result.taskAction.action === 'create' && result.taskAction.subject) {
+                store.addTask(agentId, {
+                  agentId,
+                  subject: result.taskAction.subject,
+                  status: 'pending',
+                  activeForm: result.taskAction.activeForm,
+                })
+              }
+            }
+
+            // Update context metrics
+            if (result.contextUpdate) {
+              store.updateContextMetrics(agentId, result.contextUpdate)
+            }
+          }
+        }, 100, provider)
+      : null
+
+    const init = async () => {
+      try {
+        const cols = terminal.cols || 80
+        const rows = terminal.rows || 24
+
+        // Output buffer for export (last 50K chars)
+        let outputBuffer = ''
+        const OUTPUT_BUFFER_MAX = 50000
+        const bufferKey = `__ghostshell_output_${sessionId}`
+
+        await window.ghostshell.ptyCreate({
+          id: sessionId,
+          shell,
+          cwd,
+          cols,
+          rows,
+        })
+
+        // PTY -> Terminal
+        const removeDataListener = window.ghostshell.ptyOnData(sessionId, (data) => {
+          terminal.write(data)
+
+          // Buffer output for export
+          outputBuffer += data
+          if (outputBuffer.length > OUTPUT_BUFFER_MAX) {
+            outputBuffer = outputBuffer.slice(-OUTPUT_BUFFER_MAX)
+          }
+          ;(window as unknown as Record<string, unknown>)[bufferKey] = outputBuffer
+
+          // Feed data to batch parser for activity detection
+          if (batchParser) {
+            batchParser.push(data)
+          }
+
+          // Accumulate output for active sub-agent
+          if (agentId && lastSubAgentId) {
+            accumulateOutput(data)
+          }
+
+          // Track CWD from prompt output
+          const psMatch = data.match(PS_CWD_REGEX)
+          if (psMatch && psMatch[1]) {
+            const detected = psMatch[1].trim()
+            if (detected !== lastDetectedCwd) {
+              lastDetectedCwd = detected
+              useTerminalStore.getState().updateSession(sessionId, { cwd: detected })
+              if (agentId) {
+                updateAgent(agentId, { cwd: detected })
+              }
+            }
+          } else {
+            const bashMatch = data.match(BASH_CWD_REGEX)
+            if (bashMatch && bashMatch[1]) {
+              const detected = bashMatch[1].trim()
+              if (detected !== lastDetectedCwd) {
+                lastDetectedCwd = detected
+                useTerminalStore.getState().updateSession(sessionId, { cwd: detected })
+                if (agentId) {
+                  updateAgent(agentId, { cwd: detected })
+                }
+              }
+            }
+          }
+
+          // Auto-confirm CLI prompts (provider-aware)
+          if (agentId) {
+            const needsAutoConfirm = autoConfirmPatterns.some((p) => p.test(data))
+            if (needsAutoConfirm) {
+              setTimeout(() => {
+                try {
+                  window.ghostshell.ptyWrite(sessionId, 'y\r')
+                } catch {
+                  // PTY may have closed
+                }
+              }, 150)
+            }
+          }
+
+          // Detect CLI not found — detect actual binary from error, show helpful notification once
+          if (agentId && !cliNotFoundDetected) {
+            const missingBinary = detectCliNotFound(data)
+            if (missingBinary) {
+              cliNotFoundDetected = true
+              const detectedProvider: Provider = missingBinary === 'gemini' ? 'gemini' : 'claude'
+              const label = getProviderLabel(detectedProvider)
+              const installCmd = getInstallCommand(detectedProvider)
+              setAgentStatus(agentId, 'error')
+              useActivityStore.getState().setActivity(agentId, 'idle')
+              useNotificationStore.getState().addNotification(
+                'error',
+                `${label} CLI not installed`,
+                `Run: ${installCmd} — or go to Settings > AI Providers > Install`,
+              )
+              // Write a helpful message directly in the terminal
+              terminal.writeln('')
+              terminal.writeln(`\x1b[33m[GhostShell] ${label} CLI not found.\x1b[0m`)
+              terminal.writeln(`\x1b[33mRun this to install:\x1b[0m \x1b[36m${installCmd}\x1b[0m`)
+              terminal.writeln(`\x1b[33mOr go to Settings > AI Providers > Install\x1b[0m`)
+              terminal.writeln('')
+            }
+          }
+
+          // Agent status tracking (fallback - batch parser handles granular activity)
+          if (agentId) {
+            const now = Date.now()
+            const isWorking = workingPatterns.some((p) => p.test(data))
+
+            if (isWorking && now - lastWorkingSet > WORKING_COOLDOWN_MS) {
+              cancelIdleCheck(agentId)
+              const currentAgent = getAgent(agentId)
+              if (currentAgent && currentAgent.status !== 'working') {
+                setAgentStatus(agentId, 'working')
+                lastWorkingSet = now
+              }
+              if (currentAgent && !currentAgent.hasConversation) {
+                updateAgent(agentId, { hasConversation: true })
+              }
+              scheduleIdleCheck(agentId, 3000)
+            }
+
+            const isPrompt = idlePatterns.some((p) => p.test(data))
+            if (isPrompt) {
+              const currentAgent = getAgent(agentId)
+              if (currentAgent && currentAgent.status === 'working') {
+                scheduleIdleCheck(agentId, 500)
+              }
+            }
+          }
+        })
+        cleanups.push(removeDataListener)
+
+        // Clipboard: copy/paste support (Ctrl+C with selection, Ctrl+Shift+C/V, Ctrl+V, right-click paste)
+        const writeToPty = (text: string) => {
+          const { syncInputsMode, sessions } = useTerminalStore.getState()
+          if (syncInputsMode === 'all') {
+            sessions.forEach((s) => {
+              try { window.ghostshell.ptyWrite(s.id, text) } catch {}
+            })
+          } else {
+            window.ghostshell.ptyWrite(sessionId, text)
+          }
+        }
+
+        terminal.attachCustomKeyEventHandler((e) => {
+          if (e.type !== 'keydown') return true
+
+          // Ctrl+Shift+C: Copy selection
+          if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
+            const sel = terminal.getSelection()
+            if (sel) navigator.clipboard.writeText(sel)
+            return false
+          }
+
+          // Ctrl+C with active selection: Copy instead of SIGINT
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyC') {
+            const sel = terminal.getSelection()
+            if (sel) {
+              navigator.clipboard.writeText(sel)
+              terminal.clearSelection()
+              return false
+            }
+            return true // No selection → normal SIGINT
+          }
+
+          // Ctrl+Shift+V or Ctrl+V: Paste from clipboard
+          if (e.ctrlKey && e.code === 'KeyV') {
+            navigator.clipboard.readText().then((text) => {
+              if (text) writeToPty(text)
+            }).catch(() => {})
+            return false
+          }
+
+          return true
+        })
+        cleanups.push(() => terminal.attachCustomKeyEventHandler(() => true))
+
+        // Right-click paste
+        const termEl = terminal.element
+        const handleContextMenu = (e: MouseEvent) => {
+          e.preventDefault()
+          const sel = terminal.getSelection()
+          if (sel) {
+            navigator.clipboard.writeText(sel)
+          } else {
+            navigator.clipboard.readText().then((text) => {
+              if (text) writeToPty(text)
+            }).catch(() => {})
+          }
+        }
+        if (termEl) {
+          termEl.addEventListener('contextmenu', handleContextMenu)
+          cleanups.push(() => termEl.removeEventListener('contextmenu', handleContextMenu))
+        }
+
+        // Terminal -> PTY (with sync support + history tracking)
+        let inputBuffer = ''
+        const onDataDisposable = terminal.onData((data) => {
+          const { syncInputsMode, sessions } = useTerminalStore.getState()
+
+          // Track command history on Enter
+          if (data === '\r' || data === '\n') {
+            if (inputBuffer.trim()) {
+              const agent = agentId ? getAgent(agentId) : undefined
+              useHistoryStore.getState().addEntry(inputBuffer, sessionId, agent?.name)
+              inputBuffer = ''
+            }
+          } else if (data === '\x7f') {
+            inputBuffer = inputBuffer.slice(0, -1)
+          } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            inputBuffer += data
+          } else if (data === '\x03') {
+            inputBuffer = ''
+          }
+
+          if (syncInputsMode === 'all') {
+            sessions.forEach((s) => {
+              try {
+                window.ghostshell.ptyWrite(s.id, data)
+              } catch {
+                // Session may not have PTY yet
+              }
+            })
+          } else {
+            window.ghostshell.ptyWrite(sessionId, data)
+          }
+        })
+        cleanups.push(() => onDataDisposable.dispose())
+
+        // Resize
+        const onResizeDisposable = terminal.onResize(({ cols, rows }) => {
+          window.ghostshell.ptyResize(sessionId, cols, rows)
+        })
+        cleanups.push(() => onResizeDisposable.dispose())
+
+        // Exit - set offline
+        const removeExitListener = window.ghostshell.ptyOnExit(sessionId, (_exitCode) => {
+          terminal.writeln('\r\n\x1b[90m[Process exited]\x1b[0m')
+          if (agentId) {
+            cancelIdleCheck(agentId)
+            const agent = getAgent(agentId)
+            setAgentStatus(agentId, 'offline')
+            useActivityStore.getState().setActivity(agentId, 'idle')
+            updateAgent(agentId, { terminalId: undefined })
+            if (agent) {
+              useNotificationStore.getState().addNotification(
+                'warning',
+                `${agent.name} went offline`,
+                'Process exited'
+              )
+            }
+          }
+        })
+        cleanups.push(removeExitListener)
+
+        // Auto-launch CLI with agent config (auto-installs Gemini if needed)
+        if (autoLaunch && agentId) {
+          const launchAgent = getAgent(agentId)
+          if (launchAgent) {
+            const launchProvider = resolveProvider(launchAgent)
+            const hasConfig = launchProvider === 'gemini' ? !!launchAgent.geminiConfig : !!launchAgent.claudeConfig
+            if (hasConfig || launchProvider === 'gemini') {
+              const cmd = buildLaunchCommand(launchAgent)
+              setTimeout(() => {
+                if (cancelled) return
+                try {
+                  window.ghostshell.ptyWrite(sessionId, cmd + '\r')
+                  setAgentStatus(agentId, 'working')
+                } catch {
+                  // PTY may not be ready yet
+                }
+              }, 500)
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to create PTY:', err)
+        terminal.writeln('\r\n\x1b[31m[Failed to create terminal process]\x1b[0m')
+        if (agentId) {
+          setAgentStatus(agentId, 'error')
+        }
+      }
+    }
+
+    // Initialize activity tracking immediately (not deferred) so AgentCard can render
+    if (agentId) {
+      useActivityStore.getState().initAgent(agentId)
+    }
+
+    // Defer PTY init to avoid double PTY creation in React StrictMode (dev mode).
+    // StrictMode unmounts immediately after first mount — the cleanup cancels
+    // the timer before the PTY is ever created, so only the second mount wins.
+    let cancelled = false
+    const initTimer = setTimeout(() => {
+      if (!cancelled) init()
+    }, 50)
+
+    return () => {
+      cancelled = true
+      clearTimeout(initTimer)
+      connectedRef.current = false
+      if (agentId) {
+        cancelIdleCheck(agentId)
+        useActivityStore.getState().removeAgent(agentId)
+      }
+      if (batchParser) {
+        batchParser.destroy()
+      }
+      if (outputFlushTimer) {
+        clearTimeout(outputFlushTimer)
+      }
+      cleanups.forEach((fn) => fn())
+      delete (window as unknown as Record<string, unknown>)[`__ghostshell_output_${sessionId}`]
+      try {
+        window.ghostshell.ptyKill(sessionId)
+      } catch {
+        // ignore
+      }
+    }
+  }, [sessionId, terminal])
+}

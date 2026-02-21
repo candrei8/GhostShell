@@ -1,0 +1,189 @@
+import { Theme } from './types'
+
+export const themes: Theme[] = [
+  {
+    id: 'ghostshell-dark',
+    name: 'GhostShell Dark',
+    colors: {
+      bg: '#1a1025',
+      surface: '#221533',
+      sidebar: '#13091d',
+      border: '#2d1f3d',
+      text: '#e8e0f0',
+      textDim: '#8b7fa0',
+      accent: '#a855f7',
+      accent2: '#22d3ee',
+      accent3: '#f472b6',
+      success: '#4ade80',
+      warning: '#fbbf24',
+      error: '#f87171',
+    },
+    terminalColors: {
+      background: '#1a1025',
+      foreground: '#e8e0f0',
+      cursor: '#a855f7',
+      cursorAccent: '#1a1025',
+      selectionBackground: '#a855f740',
+      black: '#13091d',
+      red: '#f87171',
+      green: '#4ade80',
+      yellow: '#fbbf24',
+      blue: '#60a5fa',
+      magenta: '#c084fc',
+      cyan: '#22d3ee',
+      white: '#e8e0f0',
+      brightBlack: '#6b5a80',
+      brightRed: '#fca5a5',
+      brightGreen: '#86efac',
+      brightYellow: '#fde68a',
+      brightBlue: '#93c5fd',
+      brightMagenta: '#d8b4fe',
+      brightCyan: '#67e8f9',
+      brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    colors: {
+      bg: '#0a0a1a',
+      surface: '#12122a',
+      sidebar: '#06061a',
+      border: '#1a1a3a',
+      text: '#e0e0ff',
+      textDim: '#6060a0',
+      accent: '#ff00ff',
+      accent2: '#00ffff',
+      accent3: '#ffff00',
+      success: '#00ff88',
+      warning: '#ff8800',
+      error: '#ff0044',
+    },
+    terminalColors: {
+      background: '#0a0a1a',
+      foreground: '#e0e0ff',
+      cursor: '#ff00ff',
+      cursorAccent: '#0a0a1a',
+      selectionBackground: '#ff00ff40',
+      black: '#06061a',
+      red: '#ff0044',
+      green: '#00ff88',
+      yellow: '#ffff00',
+      blue: '#0088ff',
+      magenta: '#ff00ff',
+      cyan: '#00ffff',
+      white: '#e0e0ff',
+      brightBlack: '#404080',
+      brightRed: '#ff4488',
+      brightGreen: '#44ffaa',
+      brightYellow: '#ffff44',
+      brightBlue: '#44aaff',
+      brightMagenta: '#ff44ff',
+      brightCyan: '#44ffff',
+      brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'neon',
+    name: 'Neon',
+    colors: {
+      bg: '#0d1117',
+      surface: '#161b22',
+      sidebar: '#010409',
+      border: '#30363d',
+      text: '#f0f6fc',
+      textDim: '#8b949e',
+      accent: '#39d353',
+      accent2: '#58a6ff',
+      accent3: '#f778ba',
+      success: '#39d353',
+      warning: '#d29922',
+      error: '#f85149',
+    },
+    terminalColors: {
+      background: '#0d1117',
+      foreground: '#f0f6fc',
+      cursor: '#39d353',
+      cursorAccent: '#0d1117',
+      selectionBackground: '#39d35340',
+      black: '#010409',
+      red: '#f85149',
+      green: '#39d353',
+      yellow: '#d29922',
+      blue: '#58a6ff',
+      magenta: '#f778ba',
+      cyan: '#56d4dd',
+      white: '#f0f6fc',
+      brightBlack: '#484f58',
+      brightRed: '#ff7b72',
+      brightGreen: '#56d364',
+      brightYellow: '#e3b341',
+      brightBlue: '#79c0ff',
+      brightMagenta: '#ff9bce',
+      brightCyan: '#76e3ea',
+      brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'midnight',
+    name: 'Midnight',
+    colors: {
+      bg: '#0f172a',
+      surface: '#1e293b',
+      sidebar: '#020617',
+      border: '#334155',
+      text: '#f1f5f9',
+      textDim: '#94a3b8',
+      accent: '#818cf8',
+      accent2: '#2dd4bf',
+      accent3: '#fb923c',
+      success: '#34d399',
+      warning: '#fbbf24',
+      error: '#fb7185',
+    },
+    terminalColors: {
+      background: '#0f172a',
+      foreground: '#f1f5f9',
+      cursor: '#818cf8',
+      cursorAccent: '#0f172a',
+      selectionBackground: '#818cf840',
+      black: '#020617',
+      red: '#fb7185',
+      green: '#34d399',
+      yellow: '#fbbf24',
+      blue: '#60a5fa',
+      magenta: '#c084fc',
+      cyan: '#2dd4bf',
+      white: '#f1f5f9',
+      brightBlack: '#475569',
+      brightRed: '#fda4af',
+      brightGreen: '#6ee7b7',
+      brightYellow: '#fde68a',
+      brightBlue: '#93c5fd',
+      brightMagenta: '#d8b4fe',
+      brightCyan: '#5eead4',
+      brightWhite: '#ffffff',
+    },
+  },
+]
+
+export function getTheme(id: string): Theme {
+  return themes.find(t => t.id === id) || themes[0]
+}
+
+export function applyTheme(theme: Theme): void {
+  const root = document.documentElement
+  const c = theme.colors
+  root.style.setProperty('--ghost-bg', c.bg)
+  root.style.setProperty('--ghost-surface', c.surface)
+  root.style.setProperty('--ghost-sidebar', c.sidebar)
+  root.style.setProperty('--ghost-border', c.border)
+  root.style.setProperty('--ghost-text', c.text)
+  root.style.setProperty('--ghost-text-dim', c.textDim)
+  root.style.setProperty('--ghost-accent', c.accent)
+  root.style.setProperty('--ghost-accent-2', c.accent2)
+  root.style.setProperty('--ghost-accent-3', c.accent3)
+  root.style.setProperty('--ghost-success', c.success)
+  root.style.setProperty('--ghost-warning', c.warning)
+  root.style.setProperty('--ghost-error', c.error)
+}

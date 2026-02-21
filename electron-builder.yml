@@ -1,0 +1,42 @@
+appId: com.ghostshell.app
+productName: GhostShell
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron/*'
+  - '!scripts/*'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+# node-pty 1.1.0 ships N-API prebuilds — no Visual Studio rebuild needed
+npmRebuild: false
+# node-pty native bindings must be outside the asar archive
+asarUnpack:
+  - 'node_modules/node-pty/**/*'
+win:
+  executableName: GhostShell
+  icon: build/icon.ico
+  target:
+    - nsis
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: GhostShell
+  uninstallDisplayName: GhostShell
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+publish:
+  provider: github
+  owner: candrei8
+  repo: GhostShell
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - dmg
+linux:
+  target:
+    - AppImage
+  maintainer: ghostshell
+  category: Utility

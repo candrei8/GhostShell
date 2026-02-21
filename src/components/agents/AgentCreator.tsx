@@ -1,0 +1,341 @@
+import { useState } from 'react'
+import { X, FolderOpen, Zap } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { animals } from '../../lib/animals'
+import { agentTemplates, AgentTemplate } from '../../lib/agent-templates'
+import { AnimalAvatar, ClaudeConfig, GeminiConfig, Provider } from '../../lib/types'
+import { useAgent } from '../../hooks/useAgent'
+import { useThreadStore } from '../../stores/threadStore'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { getModelsForProvider, getDefaultModel, getProviderColor } from '../../lib/providers'
+
+interface AgentCreatorProps {
+  onClose: () => void
+}
+
+type Tab = 'templates' | 'custom'
+
+export function AgentCreator({ onClose }: AgentCreatorProps) {
+  const defaultProvider = useSettingsStore((s) => s.defaultProvider)
+  const [tab, setTab] = useState<Tab>('templates')
+  const [provider, setProvider] = useState<Provider>(defaultProvider)
+  const [name, setName] = useState('')
+  const [selectedAvatar, setSelectedAvatar] = useState<AnimalAvatar>(animals[0])
+  const [selectedThread, setSelectedThread] = useState('')
+  const [projectPath, setProjectPath] = useState(useWorkspaceStore.getState().currentPath)
+  const models = getModelsForProvider(provider)
+  const [model, setModel] = useState(getDefaultModel(provider))
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [skipPermissions, setSkipPermissions] = useState(false)
+  const [yoloMode, setYoloMode] = useState(false)
+  const [sandboxMode, setSandboxMode] = useState(false)
+  const { createAgent } = useAgent()
+  const threads = useThreadStore((s) => s.threads)
+  const setCurrentPath = useWorkspaceStore((s) => s.setCurrentPath)
+
+  const handleProviderChange = (p: Provider) => {
+    setProvider(p)
+    setModel(getDefaultModel(p))
+  }
+
+  const selectProject = async () => {
+    const path = await window.ghostshell.selectDirectory()
+    if (path) {
+      setProjectPath(path)
+      setCurrentPath(path)
+    }
+  }
+
+  /** Parse --allowedTools from claudeFlags so the config reflects the template tool restrictions */
+  const extractAllowedTools = (flags: string[]): string[] => {
+    const idx = flags.indexOf('--allowedTools')
+    if (idx !== -1 && idx + 1 < flags.length) {
+      return flags[idx + 1].split(',')
+    }
+    return []
+  }
+
+  const handleTemplateCreate = (template: AgentTemplate) => {
+    const templateProvider = template.provider || provider
+    if (templateProvider === 'gemini') {
+      const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
+      createAgent(
+        template.name, template.avatar, template.avatar.color,
+        {}, projectPath || undefined, template.id, selectedThread || undefined, true,
+        'gemini', geminiCfg,
+      )
+    } else {
+      const config: ClaudeConfig = {
+        model,
+        dangerouslySkipPermissions: skipPermissions,
+        systemPrompt: template.systemPrompt,
+        allowedTools: extractAllowedTools(template.claudeFlags),
+        customFlags: template.claudeFlags,
+      }
+      createAgent(
+        template.name, template.avatar, template.avatar.color,
+        config, projectPath || undefined, template.id, selectedThread || undefined, true,
+        'claude',
+      )
+    }
+    onClose()
+  }
+
+  const handleCustomCreate = () => {
+    if (!name.trim()) return
+    if (provider === 'gemini') {
+      const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
+      createAgent(
+        name.trim(), selectedAvatar, selectedAvatar.color,
+        {}, projectPath || undefined, undefined, selectedThread || undefined, true,
+        'gemini', geminiCfg,
+      )
+    } else {
+      const config: ClaudeConfig = {
+        model,
+        dangerouslySkipPermissions: skipPermissions,
+        systemPrompt: systemPrompt.trim() || undefined,
+      }
+      createAgent(
+        name.trim(), selectedAvatar, selectedAvatar.color,
+        config, projectPath || undefined, undefined, selectedThread || undefined, true,
+        'claude',
+      )
+    }
+    onClose()
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[560px] max-h-[85vh] bg-ghost-surface border border-ghost-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+          <h2 className="text-sm font-semibold text-ghost-text">New Agent</h2>
+          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10">
+            <X className="w-4 h-4 text-ghost-text-dim" />
+          </button>
+        </div>
+
+        {/* Provider Toggle */}
+        <div className="flex px-5 gap-1 mb-3">
+          <div className="flex gap-1 p-0.5 bg-ghost-bg rounded-lg border border-ghost-border mr-3">
+            <button
+              onClick={() => handleProviderChange('claude')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                provider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+              }`}
+              style={provider === 'claude' ? { backgroundColor: getProviderColor('claude') } : undefined}
+            >
+              Claude
+            </button>
+            <button
+              onClick={() => handleProviderChange('gemini')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                provider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+              }`}
+              style={provider === 'gemini' ? { backgroundColor: getProviderColor('gemini') } : undefined}
+            >
+              Gemini
+            </button>
+          </div>
+
+          <button
+            onClick={() => setTab('templates')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              tab === 'templates' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-white/5'
+            }`}
+          >
+            Templates
+          </button>
+          <button
+            onClick={() => setTab('custom')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              tab === 'custom' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-white/5'
+            }`}
+          >
+            Custom
+          </button>
+        </div>
+
+        {/* Shared: Project dir + options */}
+        <div className="px-5 mb-3 flex flex-col gap-3">
+          <div className="flex gap-2">
+            <button
+              onClick={selectProject}
+              className="flex-1 h-9 px-3 bg-ghost-bg border border-ghost-border rounded-lg flex items-center gap-2 hover:border-ghost-accent/50 transition-colors text-left"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-ghost-text-dim shrink-0" />
+              <span className="text-xs text-ghost-text truncate">{projectPath || 'Select project...'}</span>
+            </button>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="h-9 px-2 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Provider-specific options */}
+          {provider === 'claude' ? (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={skipPermissions} onChange={(e) => setSkipPermissions(e.target.checked)} className="sr-only" />
+              <div className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${skipPermissions ? 'bg-orange-500' : 'bg-ghost-border'}`}>
+                <div className={`w-3 h-3 rounded-full bg-white transition-transform ${skipPermissions ? 'translate-x-4' : 'translate-x-0'}`} />
+              </div>
+              <span className="text-xs text-ghost-text">--dangerously-skip-permissions</span>
+            </label>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={yoloMode} onChange={(e) => setYoloMode(e.target.checked)} className="sr-only" />
+                <div className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${yoloMode ? 'bg-orange-500' : 'bg-ghost-border'}`}>
+                  <div className={`w-3 h-3 rounded-full bg-white transition-transform ${yoloMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                </div>
+                <span className="text-xs text-ghost-text">--yolo (auto-approve)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={sandboxMode} onChange={(e) => setSandboxMode(e.target.checked)} className="sr-only" />
+                <div className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${sandboxMode ? 'bg-blue-500' : 'bg-ghost-border'}`}>
+                  <div className={`w-3 h-3 rounded-full bg-white transition-transform ${sandboxMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                </div>
+                <span className="text-xs text-ghost-text">--sandbox</span>
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto px-5 pb-5">
+          {tab === 'templates' ? (
+            <div className="grid grid-cols-2 gap-2">
+              {agentTemplates
+                .filter((t) => !t.provider || t.provider === provider)
+                .map((template) => (
+                <button
+                  key={template.id}
+                  onClick={() => handleTemplateCreate(template)}
+                  className="p-3 bg-ghost-bg border border-ghost-border rounded-lg text-left hover:border-ghost-accent/50 hover:bg-ghost-accent/5 transition-all group"
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-lg">{template.avatar.emoji}</span>
+                    <span className="text-xs font-medium text-ghost-text group-hover:text-ghost-accent">{template.name}</span>
+                    {template.provider && (
+                      <span
+                        className="text-[10px] px-1.5 py-px rounded-full font-medium text-white/90"
+                        style={{ backgroundColor: getProviderColor(template.provider) }}
+                      >
+                        {template.provider === 'gemini' ? 'G' : 'C'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-2xs text-ghost-text-dim leading-relaxed mb-1.5">{template.description}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {template.tags.slice(0, 3).map((tag) => (
+                      <span key={tag} className="text-2xs px-1 py-0.5 rounded bg-ghost-border/50 text-ghost-text-dim">{tag}</span>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {/* Name */}
+              <div>
+                <label className="text-2xs text-ghost-text-dim uppercase tracking-wider mb-1 block">Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={provider === 'gemini' ? 'e.g. Gemini Agent' : 'e.g. Frontend Agent'}
+                  className="w-full h-9 px-3 bg-ghost-bg border border-ghost-border rounded-lg text-sm text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors"
+                  autoFocus
+                />
+              </div>
+
+              {/* Avatar */}
+              <div>
+                <label className="text-2xs text-ghost-text-dim uppercase tracking-wider mb-1.5 block">Avatar</label>
+                <div className="grid grid-cols-8 gap-1">
+                  {animals.map((animal) => (
+                    <button
+                      key={animal.id}
+                      onClick={() => setSelectedAvatar(animal)}
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-all ${
+                        selectedAvatar.id === animal.id ? 'bg-ghost-accent/20 ring-2 ring-ghost-accent' : 'hover:bg-white/10'
+                      }`}
+                      title={animal.name}
+                    >
+                      {animal.emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* System Prompt (Claude only — Gemini uses GEMINI.md) */}
+              {provider === 'claude' && (
+                <div>
+                  <label className="text-2xs text-ghost-text-dim uppercase tracking-wider mb-1 block">System Prompt (optional)</label>
+                  <textarea
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    placeholder="Custom instructions for Claude..."
+                    rows={4}
+                    className="w-full px-3 py-2 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors resize-none font-mono"
+                  />
+                </div>
+              )}
+              {provider === 'gemini' && (
+                <div className="px-3 py-2 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                  <p className="text-2xs text-blue-300/70">Gemini uses GEMINI.md files for system instructions. Place a GEMINI.md in your project root.</p>
+                </div>
+              )}
+
+              {/* Thread */}
+              {threads.length > 0 && (
+                <div>
+                  <label className="text-2xs text-ghost-text-dim uppercase tracking-wider mb-1 block">Thread</label>
+                  <select
+                    value={selectedThread}
+                    onChange={(e) => setSelectedThread(e.target.value)}
+                    className="w-full h-9 px-3 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+                  >
+                    <option value="">None</option>
+                    {threads.map((t) => (
+                      <option key={t.id} value={t.id}>{t.icon} {t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                onClick={handleCustomCreate}
+                disabled={!name.trim()}
+                className="w-full h-10 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-1"
+                style={{ backgroundColor: getProviderColor(provider) }}
+              >
+                <Zap className="w-4 h-4" />
+                Create {provider === 'gemini' ? 'Gemini' : 'Claude'} Agent
+              </button>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
