@@ -4,8 +4,12 @@ node_modules/
 
 # Build outputs
 dist/
-build/
 out/
+
+# Build resources (keep icons for CI)
+build/*
+!build/icon.ico
+!build/icon.png
 *.tsbuildinfo
 
 # Development
