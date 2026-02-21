@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Theme, Provider } from '../lib/types'
 import { themes, getTheme, applyTheme } from '../lib/themes'
+import { electronStorage } from '../lib/electronStorage'
 
 interface SettingsState {
   themeId: string
@@ -72,6 +73,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'ghostshell-settings',
       version: 1,
+      storage: electronStorage,
       partialize: (state) => ({
         themeId: state.themeId,
         fontSize: state.fontSize,

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { Workspace } from '../lib/types'
+import { electronStorage } from '../lib/electronStorage'
 
 interface WorkspaceState {
   workspaces: Workspace[]
@@ -76,6 +77,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: 'ghostshell-workspaces',
+      storage: electronStorage,
     }
   )
 )

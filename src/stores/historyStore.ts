@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { electronStorage } from '../lib/electronStorage'
 
 export interface HistoryEntry {
   id: string
@@ -54,6 +55,9 @@ export const useHistoryStore = create<HistoryState>()(
         return get().entries.filter((e) => e.command.toLowerCase().includes(q)).reverse()
       },
     }),
-    { name: 'ghostshell-history' }
+    {
+      name: 'ghostshell-history',
+      storage: electronStorage,
+    }
   )
 )

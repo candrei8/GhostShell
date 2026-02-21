@@ -26,8 +26,8 @@ export function useKeyboardShortcuts({ onToggleCommandPalette, onNavigate, onTog
         return
       }
 
-      // New terminal: Ctrl+Shift+T
-      if (ctrl && shift && e.key === 'T') {
+      // New terminal: Ctrl+T or Ctrl+Shift+T
+      if (ctrl && !alt && e.key.toLowerCase() === 't') {
         e.preventDefault()
         const currentPath = useWorkspaceStore.getState().currentPath
         useTerminalStore.getState().addSession({

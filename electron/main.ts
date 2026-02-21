@@ -260,6 +260,48 @@ function setupIPC(): void {
     }
   })
 
+  // Persistent storage handlers for Zustand stores
+  ipcMain.handle('storage:get', async (_event, key: string) => {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    try {
+      const storageDir = path.join(app.getPath('userData'), 'storage')
+      await fs.mkdir(storageDir, { recursive: true })
+      const filePath = path.join(storageDir, `${key}.json`)
+      const data = await fs.readFile(filePath, 'utf-8')
+      return JSON.parse(data)
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('storage:set', async (_event, key: string, value: unknown) => {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    try {
+      const storageDir = path.join(app.getPath('userData'), 'storage')
+      await fs.mkdir(storageDir, { recursive: true })
+      const filePath = path.join(storageDir, `${key}.json`)
+      await fs.writeFile(filePath, JSON.stringify(value, null, 2), 'utf-8')
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('storage:remove', async (_event, key: string) => {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    try {
+      const storageDir = path.join(app.getPath('userData'), 'storage')
+      const filePath = path.join(storageDir, `${key}.json`)
+      await fs.unlink(filePath)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   // Directory picker
   ipcMain.handle('dialog:selectDirectory', async () => {
     if (!mainWindow) return null
@@ -272,6 +314,9 @@ function setupIPC(): void {
   })
 }
 
+// Set app name to ensure consistent userData path across dev/prod
+// This fixes localStorage persistence - without this, dev mode uses shared "Electron" directory
+app.setName('GhostShell')
 app.setAppUserModelId('com.ghostshell.app')
 
 app.whenReady().then(() => {

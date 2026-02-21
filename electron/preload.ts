@@ -45,6 +45,11 @@ const api = {
   // Native notifications
   showNotification: (title: string, body?: string) => ipcRenderer.send('notify:show', { title, body }),
 
+  // Persistent storage (for Zustand stores)
+  storageGet: (key: string) => ipcRenderer.invoke('storage:get', key),
+  storageSet: (key: string, value: unknown) => ipcRenderer.invoke('storage:set', key, value),
+  storageRemove: (key: string) => ipcRenderer.invoke('storage:remove', key),
+
   // Updater
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
   updaterDownload: () => ipcRenderer.invoke('updater:download'),

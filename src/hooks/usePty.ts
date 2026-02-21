@@ -113,6 +113,9 @@ function getAutoConfirmPatterns(provider: Provider): RegExp[] {
 // Debounce timer for idle detection
 let idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
+// Track agents that have reached idle at least once — skip notification on initial CLI startup
+const agentsReachedFirstIdle = new Set<string>()
+
 function scheduleIdleCheck(agentId: string, delayMs: number) {
   const existing = idleTimers.get(agentId)
   if (existing) clearTimeout(existing)
@@ -125,11 +128,16 @@ function scheduleIdleCheck(agentId: string, delayMs: number) {
     if (agent.status === 'working') {
       useAgentStore.getState().setAgentStatus(agentId, 'idle')
       useActivityStore.getState().setActivity(agentId, 'idle')
-      useNotificationStore.getState().addNotification(
-        'success',
-        `PUM! ${agent.name} ha acabado`,
-        'Agent is ready for input'
-      )
+      // Only notify after the first idle (skip initial CLI startup notification)
+      if (agentsReachedFirstIdle.has(agentId)) {
+        useNotificationStore.getState().addNotification(
+          'success',
+          `PUM! ${agent.name} ha acabado`,
+          'Agent is ready for input'
+        )
+      } else {
+        agentsReachedFirstIdle.add(agentId)
+      }
     }
   }, delayMs)
 
@@ -429,6 +437,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             return true // No selection → normal SIGINT
           }
 
+          // Ctrl+T: New terminal tab (intercept so xterm doesn't send \x14 to PTY)
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyT') {
+            return false
+          }
+
           // Ctrl+Shift+V or Ctrl+V: Paste from clipboard
           if (e.ctrlKey && e.code === 'KeyV') {
             navigator.clipboard.readText().then((text) => {
@@ -504,6 +517,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           terminal.writeln('\r\n\x1b[90m[Process exited]\x1b[0m')
           if (agentId) {
             cancelIdleCheck(agentId)
+            agentsReachedFirstIdle.delete(agentId)
             const agent = getAgent(agentId)
             setAgentStatus(agentId, 'offline')
             useActivityStore.getState().setActivity(agentId, 'idle')

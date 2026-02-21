@@ -36,7 +36,13 @@ export function initUpdater(win: BrowserWindow): void {
   })
 
   autoUpdater.on('error', (err) => {
-    send({ status: 'error', error: err.message })
+    // Suppress error when there are simply no releases published yet
+    const msg = err.message || ''
+    if (msg.includes('404') || msg.includes('No published versions') || msg.includes('HttpError')) {
+      send({ status: 'not-available' })
+      return
+    }
+    send({ status: 'error', error: msg })
   })
 
   // IPC handlers
