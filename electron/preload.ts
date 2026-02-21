@@ -42,6 +42,9 @@ const api = {
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
 
+  // App info
+  getVersion: () => ipcRenderer.invoke('app:getVersion') as Promise<string>,
+
   // Native notifications
   showNotification: (title: string, body?: string) => ipcRenderer.send('notify:show', { title, body }),
 

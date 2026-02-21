@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { Theme, Provider } from '../lib/types'
 import { themes, getTheme, applyTheme } from '../lib/themes'
 import { electronStorage } from '../lib/electronStorage'
@@ -73,7 +73,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'ghostshell-settings',
       version: 1,
-      storage: electronStorage,
+      storage: createJSONStorage(() => electronStorage),
       partialize: (state) => ({
         themeId: state.themeId,
         fontSize: state.fontSize,

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { electronStorage } from '../lib/electronStorage'
 
 export interface HistoryEntry {
@@ -57,7 +57,7 @@ export const useHistoryStore = create<HistoryState>()(
     }),
     {
       name: 'ghostshell-history',
-      storage: electronStorage,
+      storage: createJSONStorage(() => electronStorage),
     }
   )
 )

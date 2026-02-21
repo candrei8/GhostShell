@@ -269,6 +269,10 @@ declare global {
       workspaceList: () => Promise<string[]>
       fsPreview: (filePath: string, maxLines?: number) => Promise<{ success: boolean; content: string; totalLines: number; error?: string }>
       showNotification: (title: string, body?: string) => void
+      getVersion: () => Promise<string>
+      storageGet: (key: string) => Promise<unknown | null>
+      storageSet: (key: string, value: unknown) => Promise<{ success: boolean; error?: string }>
+      storageRemove: (key: string) => Promise<{ success: boolean; error?: string }>
       updaterCheck: () => Promise<{ success: boolean; version?: string; error?: string }>
       updaterDownload: () => Promise<{ success: boolean; error?: string }>
       updaterInstall: () => void

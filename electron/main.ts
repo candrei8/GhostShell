@@ -302,6 +302,9 @@ function setupIPC(): void {
     }
   })
 
+  // App version
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+
   // Directory picker
   ipcMain.handle('dialog:selectDirectory', async () => {
     if (!mainWindow) return null

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { Workspace } from '../lib/types'
 import { electronStorage } from '../lib/electronStorage'
 
@@ -77,7 +77,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: 'ghostshell-workspaces',
-      storage: electronStorage,
+      storage: createJSONStorage(() => electronStorage),
     }
   )
 )

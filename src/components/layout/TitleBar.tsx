@@ -11,6 +11,12 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
   const currentPath = useWorkspaceStore((s) => s.currentPath)
   const [isMaximized, setIsMaximized] = useState(false)
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null)
+  const [appVersion, setAppVersion] = useState('')
+
+  // Fetch app version
+  useEffect(() => {
+    window.ghostshell.getVersion().then(setAppVersion).catch(() => {})
+  }, [])
 
   // Check maximized state
   useEffect(() => {
@@ -68,6 +74,7 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
       <div className="flex items-center gap-1.5 shrink-0">
         <Terminal className="w-3.5 h-3.5 text-ghost-accent" />
         <span className="text-xs font-semibold text-ghost-text">{projectName}</span>
+        {appVersion && <span className="text-[10px] text-ghost-text-dim/50">v{appVersion}</span>}
       </div>
 
       {/* Git info */}
