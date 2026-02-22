@@ -11,11 +11,16 @@ import {
   Users,
   FolderOpen,
   Clock,
-  GitBranch,
+  XOctagon,
+  Cpu,
+  PanelLeftClose,
+  Bell,
+  BellOff,
 } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAgentStore } from '../../stores/agentStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 interface CommandAction {
   id: string
@@ -31,9 +36,11 @@ interface CommandPaletteProps {
   isOpen: boolean
   onClose: () => void
   onNavigate?: (view: string) => void
+  onToggleMonitor?: () => void
+  onToggleSidebar?: () => void
 }
 
-export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPaletteProps) {
+export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, onToggleSidebar }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -183,6 +190,60 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
           window.dispatchEvent(e)
         },
         category: 'Terminal',
+      },
+      // --- Absorbed actions from removed UI elements ---
+      {
+        id: 'kill-all-agents',
+        label: 'Kill All Agents',
+        description: 'Terminate all agents and close their terminals',
+        icon: <XOctagon className="w-4 h-4" />,
+        action: () => {
+          const sessionsState = useTerminalStore.getState()
+          const agentsState = useAgentStore.getState()
+          sessionsState.sessions.forEach((s) => {
+            try { window.ghostshell.ptyKill(s.id) } catch {}
+          })
+          sessionsState.sessions.forEach((s) => sessionsState.removeSession(s.id))
+          agentsState.agents.forEach((a) => agentsState.removeAgent(a.id))
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'toggle-monitor',
+        label: 'Toggle Sub-Agent Monitor',
+        description: 'Show or hide the sub-agent monitor panel',
+        icon: <Cpu className="w-4 h-4" />,
+        shortcut: 'Ctrl+Shift+M',
+        action: () => {
+          onToggleMonitor?.()
+          onClose()
+        },
+        category: 'Navigation',
+      },
+      {
+        id: 'toggle-sidebar',
+        label: 'Toggle Sidebar',
+        description: 'Show or hide the secondary sidebar',
+        icon: <PanelLeftClose className="w-4 h-4" />,
+        shortcut: 'Ctrl+B',
+        action: () => {
+          onToggleSidebar?.()
+          onClose()
+        },
+        category: 'Navigation',
+      },
+      {
+        id: 'toggle-mute',
+        label: useSettingsStore.getState().muteNotifications ? 'Unmute Notifications' : 'Mute Notifications',
+        description: 'Toggle notification muting',
+        icon: useSettingsStore.getState().muteNotifications ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />,
+        action: () => {
+          const current = useSettingsStore.getState().muteNotifications
+          useSettingsStore.getState().setMuteNotifications(!current)
+          onClose()
+        },
+        category: 'Navigation',
       },
     ]
 

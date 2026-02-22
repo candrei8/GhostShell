@@ -3,9 +3,10 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useSettingsStore } from '../stores/settingsStore'
 
-export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>) {
+export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>, isActive?: boolean) {
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -15,28 +16,45 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
   const fitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rafRef = useRef<number | null>(null)
 
+  // Check if the terminal element is actually visible in the DOM
+  // visibility:hidden preserves layout dimensions but rendering is pointless
+  const isElementVisible = useCallback((el: HTMLElement): boolean => {
+    try {
+      return window.getComputedStyle(el).visibility !== 'hidden'
+    } catch {
+      return true // assume visible if check fails
+    }
+  }, [])
+
   // Scroll-safe fit: preserves scroll position so resize/animations don't yank the viewport
-  const safeFit = useCallback(() => {
+  const safeFit = useCallback((force = false) => {
     const addon = fitAddonRef.current
     const term = termRef.current
     if (!addon || !term) return
 
-    // Skip fit if container is too small (mid-collapse animation)
     const el = term.element
-    if (el && (el.clientWidth < 10 || el.clientHeight < 10)) return
+    if (!el) return
+
+    // Skip fit if container is too small (mid-collapse animation)
+    if (el.clientWidth < 10 || el.clientHeight < 10) return
+
+    // Skip fit if terminal is hidden (inactive tab) — unless forced (e.g., initial mount)
+    if (!force && !isElementVisible(el)) return
 
     const buf = term.buffer.active
-    const wasAtBottom = buf.viewportY === buf.baseY
+    const wasAtBottom = buf.viewportY >= buf.baseY - 1
     const savedViewportY = buf.viewportY
 
     try { addon.fit() } catch {}
 
-    // Restore scroll if user was reading history (not following output)
-    if (!wasAtBottom && buf.viewportY !== savedViewportY) {
+    if (wasAtBottom) {
+      term.scrollToBottom()
+    } else if (buf.viewportY !== savedViewportY) {
+      // Restore scroll if user was reading history (not following output)
       const maxScroll = term.buffer.active.baseY
       term.scrollToLine(Math.min(savedViewportY, maxScroll))
     }
-  }, [])
+  }, [isElementVisible])
 
   const fit = useCallback(() => {
     safeFit()
@@ -108,7 +126,13 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
     term.loadAddon(searchAddon)
     searchAddonRef.current = searchAddon
 
-    // Delay fit to ensure container has dimensions
+    // Load Web Links addon (Ctrl+Click opens URLs in browser)
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      if (event.ctrlKey || event.metaKey) window.open(uri, '_blank')
+    })
+    term.loadAddon(webLinksAddon)
+
+    // Delay fit to ensure container has dimensions (force=true to allow initial hidden mount)
     requestAnimationFrame(() => {
       try { fitAddon.fit() } catch {}
     })
@@ -142,6 +166,49 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
       fitAddonRef.current = null
     }
   }, [containerRef, debouncedFit])
+
+  // Refit + focus + refresh when tab becomes active
+  // visibility:hidden → visible doesn't trigger ResizeObserver, so we force refit here.
+  // Three stagger timings cover: immediate paint (rAF), CSS transition mid (200ms), final settle (400ms).
+  // Also refreshes terminal content to fix WebGL blank-canvas after being hidden.
+  useEffect(() => {
+    if (!isActive || !terminal) return
+
+    const timers: ReturnType<typeof setTimeout>[] = []
+    const rafs: number[] = []
+
+    // Immediate fit via rAF
+    rafs.push(requestAnimationFrame(() => {
+      safeFit(true)
+    }))
+
+    // 200ms — covers most CSS transitions mid-point
+    timers.push(setTimeout(() => {
+      rafs.push(requestAnimationFrame(() => {
+        safeFit(true)
+      }))
+    }, 200))
+
+    // 400ms — final settle: refit + force full content re-render + focus
+    timers.push(setTimeout(() => {
+      rafs.push(requestAnimationFrame(() => {
+        safeFit(true)
+        // Force re-render all lines (fixes WebGL blank canvas after visibility change)
+        try { terminal.refresh(0, terminal.rows - 1) } catch {}
+        // Focus terminal so keyboard input works immediately after tab switch
+        // Only steal focus if no input element is focused (respect search bar, rename input, etc.)
+        const active = document.activeElement
+        if (!active || active === document.body || active.closest('[data-terminal-pane]')) {
+          try { terminal.focus() } catch {}
+        }
+      }))
+    }, 400))
+
+    return () => {
+      rafs.forEach((r) => cancelAnimationFrame(r))
+      timers.forEach((t) => clearTimeout(t))
+    }
+  }, [isActive, terminal, safeFit])
 
   // Live-sync settings changes to the terminal
   useEffect(() => {

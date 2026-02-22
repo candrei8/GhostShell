@@ -5,6 +5,7 @@ import { useTerminalStore } from '../stores/terminalStore'
 import { useHistoryStore } from '../stores/historyStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useActivityStore } from '../stores/activityStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel } from '../lib/providers'
 import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
 import { Provider, SubAgentOutputLine } from '../lib/types'
@@ -116,7 +117,13 @@ let idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 // Track agents that have reached idle at least once — skip notification on initial CLI startup
 const agentsReachedFirstIdle = new Set<string>()
 
-function scheduleIdleCheck(agentId: string, delayMs: number) {
+// Track last time a working pattern was seen per agent (prevents false idle during active work)
+const lastWorkingPatternTime = new Map<string, number>()
+
+// Dedup guard: last idle notification time per agent (10s cooldown)
+const lastIdleNotificationTime = new Map<string, number>()
+
+function scheduleIdleCheck(agentId: string, delayMs: number, agentName: string) {
   const existing = idleTimers.get(agentId)
   if (existing) clearTimeout(existing)
 
@@ -125,16 +132,24 @@ function scheduleIdleCheck(agentId: string, delayMs: number) {
     // Guard: agent may have been deleted while timer was pending
     const agent = useAgentStore.getState().getAgent(agentId)
     if (!agent) return
+    // Re-check mute at fire time (user may have toggled since scheduling)
+    const muted = useSettingsStore.getState().muteNotifications
     if (agent.status === 'working') {
       useAgentStore.getState().setAgentStatus(agentId, 'idle')
       useActivityStore.getState().setActivity(agentId, 'idle')
       // Only notify after the first idle (skip initial CLI startup notification)
       if (agentsReachedFirstIdle.has(agentId)) {
-        useNotificationStore.getState().addNotification(
-          'success',
-          `PUM! ${agent.name} ha acabado`,
-          'Agent is ready for input'
-        )
+        // Dedup: skip if we notified this agent in the last 10 seconds
+        const lastNotifTime = lastIdleNotificationTime.get(agentId) || 0
+        const now = Date.now()
+        if (!muted && now - lastNotifTime > 10000) {
+          lastIdleNotificationTime.set(agentId, now)
+          useNotificationStore.getState().addNotification(
+            'success',
+            `PUM! ${agentName} ha acabado`,
+            'Agent is ready for input'
+          )
+        }
       } else {
         agentsReachedFirstIdle.add(agentId)
       }
@@ -166,6 +181,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
     // Determine provider for this agent
     const agent = agentId ? getAgent(agentId) : undefined
+    const agentName = agent?.name || 'Agent'
     const provider: Provider = agent ? resolveProvider(agent) : 'claude'
     const workingPatterns = getWorkingPatterns(provider)
     const idlePatterns = getIdlePatterns(provider)
@@ -382,6 +398,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
             if (isWorking && now - lastWorkingSet > WORKING_COOLDOWN_MS) {
               cancelIdleCheck(agentId)
+              lastWorkingPatternTime.set(agentId, now)
               const currentAgent = getAgent(agentId)
               if (currentAgent && currentAgent.status !== 'working') {
                 setAgentStatus(agentId, 'working')
@@ -390,14 +407,18 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               if (currentAgent && !currentAgent.hasConversation) {
                 updateAgent(agentId, { hasConversation: true })
               }
-              scheduleIdleCheck(agentId, 3000)
+              scheduleIdleCheck(agentId, 3000, agentName)
             }
 
             const isPrompt = idlePatterns.some((p) => p.test(data))
             if (isPrompt) {
-              const currentAgent = getAgent(agentId)
-              if (currentAgent && currentAgent.status === 'working') {
-                scheduleIdleCheck(agentId, 500)
+              // Only schedule short idle if no working pattern in the last 2 seconds
+              const lastWorking = lastWorkingPatternTime.get(agentId) || 0
+              if (now - lastWorking > 2000) {
+                const currentAgent = getAgent(agentId)
+                if (currentAgent && currentAgent.status === 'working') {
+                  scheduleIdleCheck(agentId, 3000, agentName)
+                }
               }
             }
           }
@@ -442,11 +463,31 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             return false
           }
 
-          // Ctrl+Shift+V or Ctrl+V: Paste from clipboard
+          // Ctrl+Shift+V or Ctrl+V: Paste from clipboard (image-aware)
           if (e.ctrlKey && e.code === 'KeyV') {
-            navigator.clipboard.readText().then((text) => {
-              if (text) writeToPty(text)
-            }).catch(() => {})
+            ;(async () => {
+              try {
+                const items = await navigator.clipboard.read()
+                for (const item of items) {
+                  const imageType = item.types.find((t) => t.startsWith('image/'))
+                  if (imageType) {
+                    const blob = await item.getType(imageType)
+                    const buffer = await blob.arrayBuffer()
+                    const filePath = await (window.ghostshell as any).saveTempImage(buffer, imageType) as string
+                    if (filePath) writeToPty(filePath)
+                    return
+                  }
+                }
+                // No image — fall back to text paste
+                const text = await navigator.clipboard.readText()
+                if (text) writeToPty(text)
+              } catch {
+                // Fallback if clipboard.read() not available
+                navigator.clipboard.readText().then((text) => {
+                  if (text) writeToPty(text)
+                }).catch(() => {})
+              }
+            })()
             return false
           }
 
@@ -470,6 +511,38 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         if (termEl) {
           termEl.addEventListener('contextmenu', handleContextMenu)
           cleanups.push(() => termEl.removeEventListener('contextmenu', handleContextMenu))
+
+          // Drag-and-drop: drop files/images onto terminal writes their path to PTY
+          const handleDragOver = (e: DragEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+          }
+          const handleDrop = (e: DragEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (!e.dataTransfer) return
+            const files = e.dataTransfer.files
+            if (files.length > 0) {
+              const paths: string[] = []
+              for (let i = 0; i < files.length; i++) {
+                // Electron File objects have .path with the full system path
+                const filePath = (files[i] as File & { path?: string }).path
+                if (filePath) paths.push(filePath)
+              }
+              if (paths.length > 0) {
+                // Quote paths with spaces, join with space
+                const text = paths.map((p) => p.includes(' ') ? `"${p}"` : p).join(' ')
+                writeToPty(text)
+              }
+            }
+          }
+          termEl.addEventListener('dragover', handleDragOver)
+          termEl.addEventListener('drop', handleDrop)
+          cleanups.push(() => {
+            termEl.removeEventListener('dragover', handleDragOver)
+            termEl.removeEventListener('drop', handleDrop)
+          })
         }
 
         // Terminal -> PTY (with sync support + history tracking)
@@ -518,17 +591,16 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           if (agentId) {
             cancelIdleCheck(agentId)
             agentsReachedFirstIdle.delete(agentId)
-            const agent = getAgent(agentId)
+            lastWorkingPatternTime.delete(agentId)
+            lastIdleNotificationTime.delete(agentId)
             setAgentStatus(agentId, 'offline')
             useActivityStore.getState().setActivity(agentId, 'idle')
             updateAgent(agentId, { terminalId: undefined })
-            if (agent) {
-              useNotificationStore.getState().addNotification(
-                'warning',
-                `${agent.name} went offline`,
-                'Process exited'
-              )
-            }
+            useNotificationStore.getState().addNotification(
+              'warning',
+              `${agentName} went offline`,
+              'Process exited'
+            )
           }
         })
         cleanups.push(removeExitListener)
@@ -581,6 +653,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       connectedRef.current = false
       if (agentId) {
         cancelIdleCheck(agentId)
+        lastWorkingPatternTime.delete(agentId)
+        lastIdleNotificationTime.delete(agentId)
         useActivityStore.getState().removeAgent(agentId)
       }
       if (batchParser) {

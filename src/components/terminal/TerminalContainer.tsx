@@ -20,6 +20,7 @@ import {
   SquareSlash,
   Download,
   Trash2,
+  XOctagon,
 } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useAgentStore } from '../../stores/agentStore'
@@ -128,12 +129,10 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   }, [activeGroupId, groups, sessions])
 
   const currentPath = useWorkspaceStore((s) => s.currentPath)
-  const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [tabContextMenu, setTabContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null)
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const addMenuRef = useRef<HTMLDivElement>(null)
-  const addButtonRef = useRef<HTMLButtonElement>(null)
+  const renameFinishedRef = useRef(false)
   const tabContextRef = useRef<HTMLDivElement>(null)
   const prevSessionCount = useRef(sessions.length)
 
@@ -258,35 +257,36 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
       onShowQuickLaunch(false)
     }
     if (prevSessionCount.current !== sessions.length) {
-      const t1 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 30)
-      const t2 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 100)
+      const t1 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 50)
+      const t2 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 200)
+      const t3 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 400)
       prevSessionCount.current = sessions.length
-      return () => { clearTimeout(t1); clearTimeout(t2) }
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
     }
     prevSessionCount.current = sessions.length
   }, [sessions.length, showQuickLaunch, onShowQuickLaunch])
 
-  // Refit on state changes
+  // Refit on state changes (staggered to cover CSS transitions + layout settlement)
   useEffect(() => {
-    const t = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 50)
-    return () => clearTimeout(t)
+    const t1 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 50)
+    const t2 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 200)
+    const t3 = setTimeout(() => window.dispatchEvent(new Event('ghostshell:refit')), 400)
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
   }, [maximizedSessionId, activeSessionId, viewMode, activeGroupId, showQuickLaunch])
 
   // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (addMenuOpen && addMenuRef.current && !addMenuRef.current.contains(e.target as Node) && addButtonRef.current && !addButtonRef.current.contains(e.target as Node)) {
-        setAddMenuOpen(false)
-      }
       if (tabContextMenu && tabContextRef.current && !tabContextRef.current.contains(e.target as Node)) {
         setTabContextMenu(null)
       }
     }
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setAddMenuOpen(false)
         setTabContextMenu(null)
-        setRenamingTabId(null)
+        if (renamingTabId) {
+          cancelRename()
+        }
         setSplitDialogSessionId(null)
         setHeaderMenuOpen(false)
         // Dismiss QuickLaunch overlay with Escape
@@ -301,7 +301,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [addMenuOpen, tabContextMenu, showQuickLaunch, sessions.length, onShowQuickLaunch])
+  }, [tabContextMenu, renamingTabId, showQuickLaunch, sessions.length, onShowQuickLaunch])
 
   // Listen for split-request event (Ctrl+Shift+D)
   useEffect(() => {
@@ -342,14 +342,27 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   const handleNewTerminal = () => {
     const id = `term-standalone-${Date.now()}`
     addSession({ id, title: 'Terminal', cwd: currentPath })
-    setAddMenuOpen(false)
     onShowQuickLaunch(false)
   }
 
-  const handleOpenQuickLaunch = () => {
-    onShowQuickLaunch(true)
-    setAddMenuOpen(false)
-  }
+  // Kill All Agents handler (absorbed from IconSidebar)
+  const [confirmKill, setConfirmKill] = useState(false)
+  const handleKillAll = useCallback(() => {
+    if (!confirmKill) {
+      setConfirmKill(true)
+      setTimeout(() => setConfirmKill(false), 3000)
+      return
+    }
+    const sessionsState = useTerminalStore.getState()
+    const agentsState = useAgentStore.getState()
+    sessionsState.sessions.forEach((s) => {
+      try { window.ghostshell.ptyKill(s.id) } catch {}
+    })
+    sessionsState.sessions.forEach((s) => sessionsState.removeSession(s.id))
+    agentsState.agents.forEach((a) => agentsState.removeAgent(a.id))
+    setConfirmKill(false)
+    setHeaderMenuOpen(false)
+  }, [confirmKill])
 
   const handleQuickLaunchDone = () => {
     onShowQuickLaunch(false)
@@ -430,6 +443,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   const handleRenameTab = (sessionId: string) => {
     const session = sessions.find((s) => s.id === sessionId)
     if (session) {
+      renameFinishedRef.current = false
       setRenamingTabId(sessionId)
       setRenameValue(session.title)
     }
@@ -437,9 +451,18 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   }
 
   const commitRename = () => {
+    // Guard: only commit once (Enter fires commit, then removing the input fires onBlur again)
+    if (renameFinishedRef.current) return
+    renameFinishedRef.current = true
     if (renamingTabId && renameValue.trim()) {
       useTerminalStore.getState().updateSession(renamingTabId, { title: renameValue.trim() })
     }
+    setRenamingTabId(null)
+    setRenameValue('')
+  }
+
+  const cancelRename = () => {
+    renameFinishedRef.current = true // Prevent onBlur from committing
     setRenamingTabId(null)
     setRenameValue('')
   }
@@ -620,12 +643,16 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             onChange={(e) => setRenameValue(e.target.value)}
             onBlur={commitRename}
             onKeyDown={(e) => {
+              e.stopPropagation() // Isolate from global keyboard handlers
               if (e.key === 'Enter') commitRename()
-              if (e.key === 'Escape') setRenamingTabId(null)
+              if (e.key === 'Escape') cancelRename()
             }}
-            className="w-20 bg-transparent border-b border-ghost-accent text-xs text-ghost-text outline-none"
+            onFocus={(e) => e.target.select()}
+            className="min-w-[60px] max-w-[160px] bg-ghost-bg/80 border border-ghost-accent/50 rounded px-1 text-xs text-ghost-text outline-none"
             autoFocus
+            size={Math.max(8, renameValue.length + 1)}
             onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
           />
         ) : (
           <span className="truncate max-w-[160px]">{session.title}</span>
@@ -734,6 +761,19 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
 
           {/* Ungrouped session tabs */}
           {ungroupedSessions.map((session) => renderSessionTab(session))}
+
+          {/* Inline + button */}
+          <button
+            onClick={handleNewTerminal}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              onShowQuickLaunch(true)
+            }}
+            className="flex items-center justify-center w-6 h-6 rounded text-ghost-text-dim hover:bg-white/10 hover:text-ghost-text transition-colors shrink-0 ml-0.5"
+            title="New Terminal (right-click: Quick Launch)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Active pane info */}
@@ -821,6 +861,12 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                     <Trash2 className="w-3.5 h-3.5" />
                     Kill Process
                   </button>
+                  {agents.length > 0 && (
+                    <button onClick={handleKillAll} className={`w-full px-3 py-1.5 flex items-center gap-2 text-xs transition-colors ${confirmKill ? 'text-red-400 bg-red-500/10' : 'text-ghost-error hover:bg-ghost-error/10'}`}>
+                      <XOctagon className="w-3.5 h-3.5" />
+                      {confirmKill ? 'Confirm Kill ALL' : 'Kill All Agents'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -867,47 +913,6 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             </button>
           )}
 
-          {/* Add dropdown */}
-          <div className="relative">
-            <button
-              ref={addButtonRef}
-              onClick={() => setAddMenuOpen((prev) => !prev)}
-              className={`flex items-center gap-0.5 h-6 px-1.5 rounded transition-colors ${
-                addMenuOpen ? 'bg-white/10 text-ghost-text' : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
-              }`}
-              title="Add terminal"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <ChevronDown className="w-2.5 h-2.5" />
-            </button>
-
-            {addMenuOpen && (
-              <div ref={addMenuRef} className="absolute top-full right-0 mt-1 w-48 py-1 bg-ghost-surface border border-ghost-border rounded-lg shadow-lg z-50">
-                <button onClick={handleNewTerminal} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
-                  <TerminalIcon className="w-3.5 h-3.5" />
-                  New Terminal
-                  <span className="ml-auto text-xs text-ghost-text-dim/50">Ctrl+Shift+T</span>
-                </button>
-                <button onClick={handleOpenQuickLaunch} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
-                  <Zap className="w-3.5 h-3.5" />
-                  Quick Launch
-                </button>
-                {activeSessionId && (
-                  <>
-                    <div className="h-px bg-ghost-border my-1" />
-                    <button
-                      onClick={() => { handleDuplicateTab(activeSessionId); setAddMenuOpen(false) }}
-                      className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      Duplicate Tab
-                      <span className="ml-auto text-xs text-ghost-text-dim/50">Ctrl+Shift+D</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       </div>}
 

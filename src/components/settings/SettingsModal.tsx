@@ -32,6 +32,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     terminalFontSize,
     cursorBlink,
     cursorStyle,
+    muteNotifications,
     claudeCliPath,
     defaultModel,
     defaultSkipPermissions,
@@ -42,6 +43,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setTerminalFontSize,
     setCursorBlink,
     setCursorStyle,
+    setMuteNotifications,
     setClaudeCliPath,
     setDefaultModel,
     setDefaultSkipPermissions,
@@ -386,6 +388,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       checked={cursorBlink}
                       onChange={setCursorBlink}
                       label="Cursor Blink"
+                    />
+
+                    <Toggle
+                      checked={muteNotifications}
+                      onChange={setMuteNotifications}
+                      label="Mute Notifications"
+                      description="Suppress all toast and OS notifications."
                     />
                   </motion.div>
                 )}

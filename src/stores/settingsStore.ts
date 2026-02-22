@@ -17,6 +17,7 @@ interface SettingsState {
   defaultProvider: Provider
   geminiCliPath: string
   defaultGeminiModel: string
+  muteNotifications: boolean
 
   setTheme: (id: string) => void
   setFontSize: (size: number) => void
@@ -30,6 +31,7 @@ interface SettingsState {
   setDefaultProvider: (provider: Provider) => void
   setGeminiCliPath: (path: string) => void
   setDefaultGeminiModel: (model: string) => void
+  setMuteNotifications: (mute: boolean) => void
   getTheme: () => Theme
   getAvailableThemes: () => Theme[]
   initTheme: () => void
@@ -50,6 +52,7 @@ export const useSettingsStore = create<SettingsState>()(
       defaultProvider: 'claude',
       geminiCliPath: 'gemini',
       defaultGeminiModel: 'flash',
+      muteNotifications: false,
 
       setTheme: (id) => {
         set({ themeId: id })
@@ -66,6 +69,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultProvider: (provider) => set({ defaultProvider: provider }),
       setGeminiCliPath: (path) => set({ geminiCliPath: path }),
       setDefaultGeminiModel: (model) => set({ defaultGeminiModel: model }),
+      setMuteNotifications: (mute) => set({ muteNotifications: mute }),
       getTheme: () => getTheme(get().themeId),
       getAvailableThemes: () => themes,
       initTheme: () => applyTheme(getTheme(get().themeId)),
@@ -87,6 +91,7 @@ export const useSettingsStore = create<SettingsState>()(
         defaultProvider: state.defaultProvider,
         geminiCliPath: state.geminiCliPath,
         defaultGeminiModel: state.defaultGeminiModel,
+        muteNotifications: state.muteNotifications,
       }),
       onRehydrateStorage: () => {
         return (state) => {

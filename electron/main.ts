@@ -302,6 +302,19 @@ function setupIPC(): void {
     }
   })
 
+  // Save clipboard image to temp file (returns the file path)
+  ipcMain.handle('file:saveTempImage', async (_event, buffer: ArrayBuffer, mimeType: string) => {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const ext = mimeType === 'image/png' ? '.png' : mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/gif' ? '.gif' : mimeType === 'image/webp' ? '.webp' : '.png'
+    const dir = path.join(app.getPath('userData'), 'temp-images')
+    await fs.mkdir(dir, { recursive: true })
+    const fileName = `clipboard-${Date.now()}${ext}`
+    const filePath = path.join(dir, fileName)
+    await fs.writeFile(filePath, Buffer.from(buffer))
+    return filePath
+  })
+
   // App version
   ipcMain.handle('app:getVersion', () => app.getVersion())
 

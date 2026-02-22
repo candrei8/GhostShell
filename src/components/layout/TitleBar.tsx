@@ -1,22 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Minus, Square, X, Terminal, GitBranch, Search, FolderOpen, Copy as CopyIcon } from 'lucide-react'
+import { Minus, Square, X, Terminal, GitBranch, Bell, BellOff, Copy as CopyIcon } from 'lucide-react'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { GitStatus } from '../../lib/types'
 
-interface TitleBarProps {
-  onToggleCommandPalette: () => void
-}
-
-export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
+export function TitleBar() {
   const currentPath = useWorkspaceStore((s) => s.currentPath)
   const [isMaximized, setIsMaximized] = useState(false)
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null)
-  const [appVersion, setAppVersion] = useState('')
-
-  // Fetch app version
-  useEffect(() => {
-    window.ghostshell.getVersion().then(setAppVersion).catch(() => {})
-  }, [])
+  const muteNotifications = useSettingsStore((s) => s.muteNotifications)
+  const setMuteNotifications = useSettingsStore((s) => s.setMuteNotifications)
 
   // Check maximized state
   useEffect(() => {
@@ -28,7 +21,6 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
       } catch {}
     }
     check()
-    // Re-check on resize events
     const onResize = () => check()
     window.addEventListener('resize', onResize)
     return () => { mounted = false; window.removeEventListener('resize', onResize) }
@@ -46,14 +38,12 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
       }
     }
     fetchGit()
-    // Refresh git status every 10 seconds
     const interval = setInterval(fetchGit, 10000)
     return () => { mounted = false; clearInterval(interval) }
   }, [currentPath])
 
   const handleMaximize = useCallback(async () => {
     window.ghostshell.windowMaximize()
-    // Small delay to let the window state change
     setTimeout(async () => {
       try {
         const maximized = await window.ghostshell.windowIsMaximized()
@@ -74,7 +64,6 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
       <div className="flex items-center gap-1.5 shrink-0">
         <Terminal className="w-3.5 h-3.5 text-ghost-accent" />
         <span className="text-xs font-semibold text-ghost-text">{projectName}</span>
-        {appVersion && <span className="text-[10px] text-ghost-text-dim/50">v{appVersion}</span>}
       </div>
 
       {/* Git info */}
@@ -103,31 +92,27 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
         </div>
       )}
 
-      {/* Workspace path (truncated, click to copy) */}
-      <div className="titlebar-no-drag flex items-center gap-1 ml-1.5 min-w-0 flex-1">
-        <button
-          onClick={() => navigator.clipboard.writeText(currentPath).catch(() => {})}
-          className="flex items-center gap-1 text-[11px] text-ghost-text-dim hover:text-ghost-text transition-colors truncate max-w-[300px] group"
-          title={`${currentPath} (click to copy)`}
-        >
-          <FolderOpen className="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100" />
-          <span className="truncate">{currentPath}</span>
-        </button>
-      </div>
+      {/* Drag area spacer */}
+      <div className="flex-1" />
 
-      {/* Command palette + Window controls */}
+      {/* Bell mute + Window controls */}
       <div className="titlebar-no-drag flex items-center gap-0.5 shrink-0">
-        {/* Command palette */}
+        {/* Notification mute toggle */}
         <button
-          onClick={onToggleCommandPalette}
-          className="h-6 px-2 flex items-center gap-1.5 rounded text-ghost-text-dim hover:bg-white/10 hover:text-ghost-text transition-colors"
-          title="Command Palette (Ctrl+Shift+P)"
+          onClick={() => setMuteNotifications(!muteNotifications)}
+          className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+            muteNotifications ? 'text-ghost-text-dim/50 hover:bg-white/10' : 'text-ghost-text-dim hover:bg-white/10'
+          }`}
+          title={muteNotifications ? 'Unmute Notifications' : 'Mute Notifications'}
         >
-          <Search className="w-3 h-3" />
-          <span className="text-[11px]">Ctrl+Shift+P</span>
+          {muteNotifications ? (
+            <BellOff className="w-3 h-3" />
+          ) : (
+            <Bell className="w-3 h-3" />
+          )}
         </button>
 
-        <div className="w-px h-4 bg-ghost-border mx-1" />
+        <div className="w-px h-4 bg-ghost-border mx-0.5" />
 
         {/* Window controls */}
         <button
@@ -143,7 +128,6 @@ export function TitleBar({ onToggleCommandPalette }: TitleBarProps) {
           title={isMaximized ? 'Restore' : 'Maximize'}
         >
           {isMaximized ? (
-            // Restore icon - two overlapping squares
             <CopyIcon className="w-3 h-3 text-ghost-text-dim" />
           ) : (
             <Square className="w-2.5 h-2.5 text-ghost-text-dim" />

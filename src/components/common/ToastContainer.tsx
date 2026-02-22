@@ -52,6 +52,7 @@ function Toast({ notification }: { notification: Notification }) {
 
 export function ToastContainer() {
   const notifications = useNotificationStore((s) => s.notifications)
+  const clearAll = useNotificationStore((s) => s.clearAll)
 
   if (notifications.length === 0) return null
 
@@ -60,6 +61,14 @@ export function ToastContainer() {
       {notifications.map((n) => (
         <Toast key={n.id} notification={n} />
       ))}
+      {notifications.length >= 2 && (
+        <button
+          onClick={clearAll}
+          className="self-end text-2xs text-ghost-text-dim hover:text-ghost-text px-2 py-1 rounded bg-ghost-surface/80 border border-ghost-border hover:bg-white/10 transition-colors"
+        >
+          Dismiss all
+        </button>
+      )}
     </div>
   )
 }

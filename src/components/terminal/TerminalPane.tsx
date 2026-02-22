@@ -36,7 +36,7 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
     const a = s.activities[agentId]
     return a ? (a.currentDetail || null) : null
   })
-  const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerRef)
+  const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerRef, isActive)
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const [labelHovered, setLabelHovered] = useState(false)
 
@@ -79,6 +79,7 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
 
   return (
     <div
+      data-terminal-pane
       className={`relative flex flex-col h-full overflow-hidden ${
         isActive !== undefined
           ? isActive

@@ -53,6 +53,10 @@ const api = {
   storageSet: (key: string, value: unknown) => ipcRenderer.invoke('storage:set', key, value),
   storageRemove: (key: string) => ipcRenderer.invoke('storage:remove', key),
 
+  // Save clipboard image to temp file
+  saveTempImage: (buffer: ArrayBuffer, mimeType: string) =>
+    ipcRenderer.invoke('file:saveTempImage', buffer, mimeType) as Promise<string>,
+
   // Updater
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
   updaterDownload: () => ipcRenderer.invoke('updater:download'),

@@ -96,14 +96,15 @@ export function useKeyboardShortcuts({ onToggleCommandPalette, onNavigate, onTog
       }
 
       // Switch to tab 1-9: Ctrl+1 through Ctrl+9
+      // If index exceeds tab count, clamp to last tab (e.g. Ctrl+5 with 4 tabs → goes to tab 4)
       if (ctrl && !shift && !alt && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const { sessions, setActiveSession } = useTerminalStore.getState()
+        if (sessions.length === 0) return
         const index = parseInt(e.key) - 1
-        if (index === 8) {
-          // Ctrl+9 goes to last tab
-          if (sessions.length > 0) setActiveSession(sessions[sessions.length - 1].id)
-        } else if (index < sessions.length) {
+        if (index >= sessions.length) {
+          setActiveSession(sessions[sessions.length - 1].id)
+        } else {
           setActiveSession(sessions[index].id)
         }
         return
