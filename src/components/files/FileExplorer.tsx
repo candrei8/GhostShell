@@ -66,7 +66,7 @@ export function FileExplorer() {
     if (!window.ghostshell) return
     window.ghostshell.fsReadDir(path).then(setFiles).catch(() => {
       setFiles([])
-      addNotification('error', 'Cannot read directory', path)
+      addNotification('error', 'Cannot read directory', path, 4000, 'toast')
     })
     window.ghostshell.gitStatus(path).then(setGitStatus).catch(() => setGitStatus(null))
   }, [addNotification])
@@ -190,10 +190,9 @@ export function FileExplorer() {
       ? await window.ghostshell.fsCreateDir(fullPath)
       : await window.ghostshell.fsCreateFile(fullPath)
     if (result.success) {
-      addNotification('success', `Created ${creating}`, newName.trim())
       loadFiles(browsePath)
     } else {
-      addNotification('error', `Failed to create ${creating}`, result.error)
+      addNotification('error', `Failed to create ${creating}`, result.error, 4000, 'toast')
     }
     setCreating(null)
     setNewName('')
@@ -203,11 +202,10 @@ export function FileExplorer() {
     if (!window.ghostshell) return
     const result = await window.ghostshell.fsDelete(entry.path)
     if (result.success) {
-      addNotification('info', 'Deleted', entry.name)
       if (selectedFile?.path === entry.path) setSelectedFile(null)
       loadFiles(browsePath)
     } else {
-      addNotification('error', 'Delete failed', result.error)
+      addNotification('error', 'Delete failed', result.error, 4000, 'toast')
     }
   }, [browsePath, loadFiles, addNotification, selectedFile])
 
@@ -217,10 +215,9 @@ export function FileExplorer() {
     const newPath = browsePath + separator + newFileName
     const result = await window.ghostshell.fsRename(entry.path, newPath)
     if (result.success) {
-      addNotification('success', 'Renamed', `${entry.name} \u2192 ${newFileName}`)
       loadFiles(browsePath)
     } else {
-      addNotification('error', 'Rename failed', result.error)
+      addNotification('error', 'Rename failed', result.error, 4000, 'toast')
     }
   }, [browsePath, loadFiles, addNotification])
 
@@ -306,7 +303,7 @@ export function FileExplorer() {
   return (
     <div ref={containerRef} className="flex flex-col h-full overflow-hidden" tabIndex={-1}>
       {/* ── Header ── */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
+      <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <div className="flex items-center gap-1.5">
           <FolderOpen className="w-3.5 h-3.5 text-ghost-accent" />
           <span className="text-xs font-semibold text-ghost-text-dim uppercase tracking-wider">
@@ -316,21 +313,21 @@ export function FileExplorer() {
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => { setShowSearch(!showSearch); if (!showSearch) setTimeout(() => searchRef.current?.focus(), 50) }}
-            className={`w-5 h-5 flex items-center justify-center rounded transition-colors ${showSearch ? 'text-ghost-accent bg-ghost-accent/10' : 'text-ghost-text-dim hover:bg-white/5'}`}
+            className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors ${showSearch ? 'text-ghost-accent bg-indigo-950/50' : 'text-ghost-text-dim hover:bg-slate-800/50'}`}
             title="Search (Ctrl+F)"
           >
             <Search className="w-3 h-3" />
           </button>
           <button
             onClick={() => { setCreating('file'); setNewName('') }}
-            className="w-5 h-5 flex items-center justify-center rounded text-ghost-text-dim hover:bg-white/5 hover:text-ghost-accent"
+            className="w-6 h-6 flex items-center justify-center rounded-lg text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-accent"
             title="New File"
           >
             <FilePlus className="w-3 h-3" />
           </button>
           <button
             onClick={() => { setCreating('folder'); setNewName('') }}
-            className="w-5 h-5 flex items-center justify-center rounded text-ghost-text-dim hover:bg-white/5 hover:text-ghost-accent"
+            className="w-6 h-6 flex items-center justify-center rounded-lg text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-accent"
             title="New Folder"
           >
             <FolderPlus className="w-3 h-3" />
@@ -338,21 +335,21 @@ export function FileExplorer() {
           <div className="w-px h-3 bg-ghost-border mx-0.5" />
           <button
             onClick={handleGoUp}
-            className="w-5 h-5 flex items-center justify-center rounded text-ghost-text-dim hover:bg-white/5"
+            className="w-6 h-6 flex items-center justify-center rounded-lg text-ghost-text-dim hover:bg-slate-800/50"
             title="Go Up (Backspace)"
           >
             <ArrowUp className="w-3 h-3" />
           </button>
           <button
             onClick={handleOpenFolder}
-            className="w-5 h-5 flex items-center justify-center rounded text-ghost-text-dim hover:bg-white/5"
+            className="w-6 h-6 flex items-center justify-center rounded-lg text-ghost-text-dim hover:bg-slate-800/50"
             title="Open Folder"
           >
             <FolderOpen className="w-3 h-3" />
           </button>
           <button
             onClick={() => loadFiles(browsePath)}
-            className="w-5 h-5 flex items-center justify-center rounded text-ghost-text-dim hover:bg-white/5"
+            className="w-6 h-6 flex items-center justify-center rounded-lg text-ghost-text-dim hover:bg-slate-800/50"
             title="Refresh"
           >
             <RefreshCw className="w-3 h-3" />
@@ -363,7 +360,7 @@ export function FileExplorer() {
       {/* ── Search bar ── */}
       {showSearch && (
         <div className="flex items-center gap-1 mx-3 mb-1.5 animate-fade-in">
-          <div className="flex-1 flex items-center bg-ghost-surface border border-ghost-border rounded-md px-2 focus-within:border-ghost-accent/60 transition-colors">
+          <div className="flex-1 flex items-center bg-ghost-surface border border-ghost-border rounded-xl px-3 focus-within:border-ghost-accent/60 transition-colors">
             <Search className="w-3 h-3 text-ghost-text-dim/50 shrink-0" />
             <input
               ref={searchRef}
@@ -415,7 +412,7 @@ export function FileExplorer() {
         <div className="flex items-center gap-1 ml-auto">
           <button
             onClick={() => setShowHidden(!showHidden)}
-            className={`w-5 h-5 flex items-center justify-center rounded transition-colors ${showHidden ? 'text-ghost-accent' : 'text-ghost-text-dim/40 hover:text-ghost-text-dim'}`}
+            className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors ${showHidden ? 'text-ghost-accent' : 'text-ghost-text-dim/40 hover:text-ghost-text-dim'}`}
             title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'}
           >
             {showHidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -431,7 +428,7 @@ export function FileExplorer() {
           <div className="w-px h-3 bg-ghost-border/40" />
           <button
             onClick={() => setViewMode('list')}
-            className={`w-5 h-5 flex items-center justify-center rounded transition-colors ${
+            className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors ${
               viewMode === 'list' ? 'text-ghost-accent' : 'text-ghost-text-dim/40 hover:text-ghost-text-dim'
             }`}
             title="List View"
@@ -440,7 +437,7 @@ export function FileExplorer() {
           </button>
           <button
             onClick={() => setViewMode('grid')}
-            className={`w-5 h-5 flex items-center justify-center rounded transition-colors ${
+            className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors ${
               viewMode === 'grid' ? 'text-ghost-accent' : 'text-ghost-text-dim/40 hover:text-ghost-text-dim'
             }`}
             title="Grid View"
@@ -463,14 +460,14 @@ export function FileExplorer() {
         <div className="flex items-center gap-1 ml-auto">
           <button
             onClick={() => handleOpenTerminal()}
-            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded hover:bg-white/5 text-ghost-text-dim/60 hover:text-ghost-text transition-colors"
+            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded hover:bg-slate-800/50 text-ghost-text-dim/60 hover:text-ghost-text transition-colors"
             title="Open terminal here"
           >
             <Terminal className="w-2.5 h-2.5" />
           </button>
           <button
             onClick={() => handleLaunchAgent()}
-            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded hover:bg-white/5 text-ghost-text-dim/60 hover:text-ghost-text transition-colors"
+            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded hover:bg-slate-800/50 text-ghost-text-dim/60 hover:text-ghost-text transition-colors"
             title={`Launch ${getProviderLabel(defaultProvider)} here`}
           >
             <Bot className="w-2.5 h-2.5" />
@@ -478,7 +475,7 @@ export function FileExplorer() {
           {browsePath !== currentPath && (
             <button
               onClick={() => handleSetAsProject()}
-              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-ghost-accent/10 text-ghost-accent hover:bg-ghost-accent/20 transition-colors"
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-indigo-950/50 text-ghost-accent hover:bg-ghost-accent/20 transition-colors"
               title="Set as project root"
             >
               <FolderOpen className="w-2.5 h-2.5" />
@@ -491,7 +488,7 @@ export function FileExplorer() {
       {/* ── Create inline ── */}
       {creating && (
         <div className="flex items-center gap-1 px-3 pb-1.5 animate-fade-in">
-          <div className="flex-1 flex items-center bg-ghost-surface border border-ghost-accent/50 rounded-md px-2 py-0.5">
+          <div className="flex-1 flex items-center bg-ghost-surface border border-ghost-accent/50 rounded-xl px-3 py-0.5">
             {creating === 'folder' ? (
               <FolderPlus className="w-3 h-3 text-ghost-accent shrink-0 mr-1" />
             ) : (

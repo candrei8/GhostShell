@@ -29,7 +29,7 @@ export function ContextGauge({ metrics, compact = false }: ContextGaugeProps) {
   if (compact) {
     return (
       <div className="flex items-center gap-2" title={`Context: ${formatTokens(metrics.tokenEstimate)} / ${formatTokens(metrics.maxTokens)} tokens`}>
-        <div className="w-12 h-1 rounded-full bg-white/10 overflow-hidden">
+        <div className="w-12 h-1 rounded-full bg-slate-800 overflow-hidden">
           <div
             className={`h-full rounded-full ${barColor} transition-all duration-500`}
             style={{ width: `${pct}%` }}
@@ -48,7 +48,7 @@ export function ContextGauge({ metrics, compact = false }: ContextGaugeProps) {
           {formatTokens(metrics.tokenEstimate)} / {formatTokens(metrics.maxTokens)}
         </span>
       </div>
-      <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+      <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
         <div
           className={`h-full rounded-full ${barColor} transition-all duration-500`}
           style={{ width: `${pct}%` }}

@@ -26,6 +26,13 @@ export function useKeyboardShortcuts({ onToggleCommandPalette, onNavigate, onTog
         return
       }
 
+      // Rename active tab: F2
+      if (e.key === 'F2' && !ctrl && !shift && !alt) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('ghostshell:rename-tab'))
+        return
+      }
+
       // New terminal: Ctrl+T or Ctrl+Shift+T
       if (ctrl && !alt && e.key.toLowerCase() === 't') {
         e.preventDefault()

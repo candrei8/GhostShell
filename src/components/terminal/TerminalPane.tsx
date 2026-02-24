@@ -117,9 +117,9 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
           {agent && activityName && activityName !== 'idle' ? (
             <ActivityIcon activity={activityName} detail={activityDetail || undefined} size="sm" />
           ) : agent?.status === 'working' ? (
-            <span className="text-[10px] px-1 rounded bg-ghost-success/15 text-ghost-success shrink-0">Working</span>
+            <span className="text-[10px] px-1 rounded-lg bg-ghost-success/15 text-ghost-success shrink-0">Working</span>
           ) : agent?.status === 'error' ? (
-            <span className="text-[10px] px-1 rounded bg-ghost-error/15 text-ghost-error shrink-0">Error</span>
+            <span className="text-[10px] px-1 rounded-lg bg-ghost-error/15 text-ghost-error shrink-0">Error</span>
           ) : null}
 
           {/* Provider badge for Gemini */}
@@ -134,7 +134,7 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
                 e.stopPropagation()
                 onClose()
               }}
-              className={`w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 transition-all shrink-0 ${
+              className={`w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 transition-all shrink-0 ${
                 labelHovered ? 'opacity-100 text-ghost-text-dim' : 'opacity-0'
               }`}
             >

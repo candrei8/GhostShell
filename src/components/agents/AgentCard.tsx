@@ -132,16 +132,16 @@ export function AgentCard({ agent }: AgentCardProps) {
     <div className="relative">
       <div
         onClick={handleClick}
-        className={`group flex flex-col rounded-lg transition-all cursor-pointer border ${
+        className={`group flex flex-col rounded-2xl transition-all cursor-pointer border ${
           isWorking
-            ? `${status.borderClass} bg-ghost-success/[0.03]`
+            ? `${status.borderClass} bg-ghost-success/[0.04] shadow-sm shadow-emerald-500/5`
             : !isAlive
             ? `border-transparent opacity-50 hover:opacity-80 hover:bg-ghost-accent/5`
-            : `border-transparent hover:bg-white/[0.03] hover:border-white/5`
+            : `border-ghost-border/50 hover:bg-slate-800/50`
         }`}
       >
         {/* Main row */}
-        <div className="flex items-start gap-3 px-3 py-2">
+        <div className="flex items-start gap-3 px-4 py-3">
           {/* Avatar with status ring */}
           <div className="relative mt-0.5">
             <div className={`rounded-full ${isWorking ? 'ring-1 ring-ghost-success/40 ring-offset-1 ring-offset-ghost-sidebar' : ''}`}>
@@ -176,7 +176,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {modelShort && (
                 <span
-                  className="text-[11px] px-2 py-px rounded font-semibold"
+                  className="text-[11px] px-2 py-px rounded-full font-semibold"
                   style={{
                     backgroundColor: `${getProviderColor(agentProvider)}15`,
                     color: getProviderColor(agentProvider),
@@ -238,7 +238,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                   e.stopPropagation()
                   setExpanded(!expanded)
                 }}
-                className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
                 title="Toggle details"
               >
                 {expanded ? <ChevronUp className="w-3.5 h-3.5 text-ghost-text-dim" /> : <ChevronDown className="w-3.5 h-3.5 text-ghost-text-dim" />}
@@ -247,7 +247,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             {canRestart ? (
               <button
                 onClick={handleRestart}
-                className="w-6 h-6 flex items-center justify-center rounded hover:bg-ghost-accent/20 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-ghost-accent/20 transition-colors"
                 title="Restart Agent"
               >
                 <RotateCw className="w-3.5 h-3.5 text-ghost-accent" />
@@ -258,7 +258,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                   e.stopPropagation()
                   setShowPrompt(!showPrompt)
                 }}
-                className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
                 title="Send command"
               >
                 <Send className="w-3.5 h-3.5 text-ghost-text-dim" />
@@ -269,7 +269,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                 e.stopPropagation()
                 setShowMenu(!showMenu)
               }}
-              className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-800 transition-colors"
             >
               <MoreHorizontal className="w-3.5 h-3.5 text-ghost-text-dim" />
             </button>
@@ -278,7 +278,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                 e.stopPropagation()
                 deleteAgent(agent.id)
               }}
-              className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-500/20 transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-500/20 transition-colors"
               title="Delete Agent"
             >
               <X className="w-3.5 h-3.5 text-ghost-text-dim" />
@@ -288,7 +288,7 @@ export function AgentCard({ agent }: AgentCardProps) {
 
         {/* Expanded details panel */}
         {expanded && activity && (
-          <div className="px-3 pb-3 pt-0 flex flex-col gap-2 border-t border-white/5 mt-0.5">
+          <div className="px-4 pb-4 pt-2 flex flex-col gap-2 border-t border-ghost-border/30 mt-0.5">
             {/* Context gauge */}
             {activity.contextMetrics.turnCount > 0 && (
               <ContextGauge metrics={activity.contextMetrics} />
@@ -326,13 +326,13 @@ export function AgentCard({ agent }: AgentCardProps) {
             value={promptInput}
             onChange={(e) => setPromptInput(e.target.value)}
             placeholder="Send to terminal..."
-            className="flex-1 h-6 px-2 bg-ghost-bg border border-ghost-border rounded text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+            className="flex-1 h-8 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
             autoFocus
             onKeyDown={(e) => { if (e.key === 'Escape') setShowPrompt(false) }}
           />
           <button
             type="submit"
-            className="h-6 px-2 text-xs bg-ghost-accent/10 text-ghost-accent rounded hover:bg-ghost-accent/20 transition-colors"
+            className="h-8 px-3 text-xs bg-indigo-950/50 text-ghost-accent rounded-xl hover:bg-ghost-accent/20 transition-colors"
           >
             Send
           </button>

@@ -18,7 +18,7 @@ export function ThreadList() {
         </div>
         <button
           onClick={() => setShowCreator(true)}
-          className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 text-ghost-text-dim hover:text-ghost-accent transition-colors"
+          className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 text-ghost-text-dim hover:text-ghost-accent transition-colors"
           title="New Thread"
         >
           <Plus className="w-3.5 h-3.5" />

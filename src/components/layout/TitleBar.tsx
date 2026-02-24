@@ -59,10 +59,10 @@ export function TitleBar() {
   const hasChanges = gitDirtyCount > 0
 
   return (
-    <div className="titlebar-drag h-8 flex items-center bg-ghost-sidebar border-b border-ghost-border px-2 select-none gap-1">
+    <div className="titlebar-drag h-10 flex items-center bg-ghost-sidebar border-b border-ghost-border px-3 select-none gap-2">
       {/* Logo + Project name */}
       <div className="flex items-center gap-1.5 shrink-0">
-        <Terminal className="w-3.5 h-3.5 text-ghost-accent" />
+        <Terminal className="w-4 h-4 text-ghost-accent" />
         <span className="text-xs font-semibold text-ghost-text">{projectName}</span>
       </div>
 
@@ -70,7 +70,7 @@ export function TitleBar() {
       {gitStatus?.isRepo && (
         <div className="titlebar-no-drag flex items-center gap-1 ml-2 shrink-0">
           <div
-            className={`flex items-center gap-1 h-5 px-1.5 rounded text-[11px] transition-colors ${
+            className={`flex items-center gap-1 h-6 px-2 rounded-lg text-xs transition-colors ${
               hasChanges
                 ? 'bg-ghost-warning/10 text-ghost-warning'
                 : 'bg-ghost-success/10 text-ghost-success'
@@ -100,8 +100,8 @@ export function TitleBar() {
         {/* Notification mute toggle */}
         <button
           onClick={() => setMuteNotifications(!muteNotifications)}
-          className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
-            muteNotifications ? 'text-ghost-text-dim/50 hover:bg-white/10' : 'text-ghost-text-dim hover:bg-white/10'
+          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+            muteNotifications ? 'text-ghost-text-dim/50 hover:bg-slate-800' : 'text-ghost-text-dim hover:bg-slate-800'
           }`}
           title={muteNotifications ? 'Unmute Notifications' : 'Mute Notifications'}
         >
@@ -112,19 +112,19 @@ export function TitleBar() {
           )}
         </button>
 
-        <div className="w-px h-4 bg-ghost-border mx-0.5" />
+        <div className="w-px h-5 bg-ghost-border mx-1" />
 
         {/* Window controls */}
         <button
           onClick={() => window.ghostshell.windowMinimize()}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
           title="Minimize"
         >
           <Minus className="w-3 h-3 text-ghost-text-dim" />
         </button>
         <button
           onClick={handleMaximize}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
           title={isMaximized ? 'Restore' : 'Maximize'}
         >
           {isMaximized ? (
@@ -135,7 +135,7 @@ export function TitleBar() {
         </button>
         <button
           onClick={() => window.ghostshell.windowClose()}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/80 transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-500/80 transition-colors"
           title="Close"
         >
           <X className="w-3 h-3 text-ghost-text-dim" />

@@ -323,11 +323,11 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15%]" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
       <div
-        className="relative w-full max-w-lg bg-ghost-surface border border-ghost-border rounded-xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-lg bg-ghost-surface border border-ghost-border rounded-2xl shadow-qubria-lg overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-ghost-border">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-ghost-border">
           <Search className="w-4 h-4 text-ghost-text-dim shrink-0" />
           <input
             ref={inputRef}
@@ -350,8 +350,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
               <button
                 key={cmd.id}
                 onClick={cmd.action}
-                className={`w-full px-4 py-2 flex items-center gap-3 text-left transition-colors ${
-                  index === selectedIndex ? 'bg-ghost-accent/10 text-ghost-text' : 'text-ghost-text-dim hover:bg-white/5'
+                className={`w-full px-5 py-2.5 flex items-center gap-3 text-left transition-colors ${
+                  index === selectedIndex ? 'bg-indigo-950/50 text-ghost-text' : 'text-ghost-text-dim hover:bg-slate-800/50'
                 }`}
               >
                 <span className={index === selectedIndex ? 'text-ghost-accent' : 'text-ghost-text-dim'}>{cmd.icon}</span>

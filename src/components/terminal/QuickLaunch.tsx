@@ -99,8 +99,10 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const defaultModel = useSettingsStore((s) => s.defaultModel)
   const defaultSkip = useSettingsStore((s) => s.defaultSkipPermissions)
   const defaultProvider = useSettingsStore((s) => s.defaultProvider)
+  const lastAgentFolder = useSettingsStore((s) => s.lastAgentFolder)
+  const setLastAgentFolder = useSettingsStore((s) => s.setLastAgentFolder)
   const [provider, setProvider] = useState<Provider>(defaultProvider)
-  const [projectPath, setProjectPath] = useState<string>('')
+  const [projectPath, setProjectPath] = useState<string>(lastAgentFolder)
   const [gridLayout, setGridLayout] = useState<GridLayout>('1x1')
   const [skipPermissions, setSkipPermissions] = useState(defaultSkip)
   const models = useMemo(() => getModelsForProvider(provider), [provider])
@@ -122,12 +124,14 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
     if (path) {
       setProjectPath(path)
       setCurrentPath(path)
+      setLastAgentFolder(path)
     }
   }
 
   const selectRecentProject = (path: string) => {
     setProjectPath(path)
     setCurrentPath(path)
+    setLastAgentFolder(path)
   }
 
   const getGridCount = () => gridOptions.find((g) => g.layout === gridLayout)?.count || 1
@@ -160,6 +164,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
 
   const handleQuickLaunch = () => {
     setLaunching(true)
+    if (projectPath) setLastAgentFolder(projectPath)
     const count = getGridCount()
     const cwd = projectPath || undefined
     const providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude'
@@ -206,6 +211,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
 
   const handleTemplateLaunch = (template: AgentTemplate) => {
     setLaunching(true)
+    if (projectPath) setLastAgentFolder(projectPath)
     const cwd = projectPath || undefined
     const templateProvider = template.provider || provider
     if (templateProvider === 'gemini') {
@@ -268,7 +274,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
       >
         {/* -- Header -- */}
         <motion.div variants={item} className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-ghost-accent/10 border border-ghost-accent/20 mb-3">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-950/50 border border-ghost-accent/20 mb-3">
             <Terminal className="w-6 h-6 text-ghost-accent" />
           </div>
           <h1 className="text-lg font-bold text-ghost-text tracking-tight">GhostShell</h1>
@@ -288,7 +294,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               })
               onLaunched()
             }}
-            className="h-11 bg-ghost-surface border border-ghost-border rounded-xl font-medium text-sm flex items-center justify-center gap-2 text-ghost-text hover:bg-white/5 hover:border-ghost-accent/30 transition-all group"
+            className="h-11 bg-ghost-surface border border-ghost-border rounded-xl font-medium text-sm flex items-center justify-center gap-2 text-ghost-text hover:bg-slate-800/50 hover:border-ghost-accent/30 transition-all group"
           >
             <Terminal className="w-4 h-4 text-ghost-text-dim group-hover:text-ghost-accent transition-colors" />
             Terminal
@@ -353,7 +359,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
             onClick={selectProject}
             className="w-full h-11 px-4 bg-ghost-surface border border-ghost-border rounded-xl flex items-center gap-3 hover:border-ghost-accent/40 transition-all group"
           >
-            <div className="w-7 h-7 rounded-lg bg-ghost-accent/10 flex items-center justify-center shrink-0 group-hover:bg-ghost-accent/15 transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-indigo-950/50 flex items-center justify-center shrink-0 group-hover:bg-indigo-950/50 transition-colors">
               <FolderOpen className="w-3.5 h-3.5 text-ghost-accent" />
             </div>
             {projectPath ? (
@@ -393,11 +399,11 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           <label className="text-[11px] font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
             Provider
           </label>
-          <div className="flex gap-1 p-0.5 bg-ghost-surface rounded-lg border border-ghost-border w-fit">
+          <div className="flex gap-1 p-1 bg-ghost-surface rounded-xl border border-ghost-border w-fit">
             <button
               onClick={() => handleProviderSwitch('claude')}
               className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
-                provider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+                provider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
               }`}
               style={provider === 'claude' ? { backgroundColor: getProviderColor('claude') } : undefined}
             >
@@ -406,7 +412,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
             <button
               onClick={() => handleProviderSwitch('gemini')}
               className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
-                provider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+                provider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
               }`}
               style={provider === 'gemini' ? { backgroundColor: getProviderColor('gemini') } : undefined}
             >
@@ -429,7 +435,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                   onClick={() => setGridLayout(opt.layout)}
                   className={`h-10 rounded-lg border flex flex-col items-center justify-center gap-1 transition-all ${
                     gridLayout === opt.layout
-                      ? 'border-ghost-accent bg-ghost-accent/10'
+                      ? 'border-ghost-accent bg-indigo-950/50'
                       : 'border-ghost-border bg-ghost-surface hover:border-ghost-accent/25 hover:bg-white/[0.02]'
                   }`}
                   title={`${opt.label} (${opt.count} pane${opt.count > 1 ? 's' : ''})`}
@@ -559,7 +565,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 onClick={() => setExpandedCategory('all')}
                 className={`h-5 px-2 rounded text-[11px] font-medium transition-all ${
                   expandedCategory === 'all'
-                    ? 'bg-ghost-accent/15 text-ghost-accent'
+                    ? 'bg-indigo-950/50 text-ghost-accent'
                     : 'text-ghost-text-dim/50 hover:text-ghost-text-dim'
                 }`}
               >
@@ -571,7 +577,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                   onClick={() => setExpandedCategory(cat)}
                   className={`h-5 px-2 rounded text-[11px] font-medium transition-all ${
                     expandedCategory === cat
-                      ? 'bg-ghost-accent/15 text-ghost-accent'
+                      ? 'bg-indigo-950/50 text-ghost-accent'
                       : 'text-ghost-text-dim/50 hover:text-ghost-text-dim'
                   }`}
                 >
@@ -589,7 +595,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               value={specialistSearch}
               onChange={(e) => setSpecialistSearch(e.target.value)}
               placeholder="Search specialists..."
-              className="w-full h-8 pl-8 pr-3 bg-ghost-surface border border-ghost-border rounded-lg text-xs text-ghost-text placeholder:text-ghost-text-dim/30 focus:outline-none focus:border-ghost-accent/40 transition-colors"
+              className="w-full h-8 pl-8 pr-3 bg-ghost-surface border border-ghost-border rounded-xl text-xs text-ghost-text placeholder:text-ghost-text-dim/30 focus:outline-none focus:border-ghost-accent/40 transition-colors"
             />
           </div>
 
@@ -624,7 +630,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                         key={template.id}
                         onClick={() => handleTemplateLaunch(template)}
                         disabled={launching}
-                        className="p-3 bg-ghost-surface/80 border border-ghost-border/60 rounded-xl text-left hover:border-ghost-accent/30 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="p-4 bg-ghost-surface/80 border border-ghost-border/60 rounded-2xl text-left hover:border-ghost-accent/30 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <div

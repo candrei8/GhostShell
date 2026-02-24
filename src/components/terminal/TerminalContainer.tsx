@@ -303,44 +303,110 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     }
   }, [tabContextMenu, renamingTabId, showQuickLaunch, sessions.length, onShowQuickLaunch])
 
+  // Listen for rename-tab event (F2)
+  useEffect(() => {
+    const handleRenameRequest = () => {
+      const sid = useTerminalStore.getState().activeSessionId
+      if (!sid) return
+      const session = useTerminalStore.getState().sessions.find((s) => s.id === sid)
+      if (session) {
+        renameFinishedRef.current = false
+        setRenamingTabId(sid)
+        setRenameValue(session.title)
+      }
+    }
+    window.addEventListener('ghostshell:rename-tab', handleRenameRequest)
+    return () => window.removeEventListener('ghostshell:rename-tab', handleRenameRequest)
+  }, [])
+
   // Listen for split-request event (Ctrl+Shift+D)
   useEffect(() => {
     const handleSplitRequest = () => {
-      const sid = activeSessionId
+      const state = useTerminalStore.getState()
+      const sid = state.activeSessionId
       if (!sid) return
-      const session = sessions.find((s) => s.id === sid)
+      const session = state.sessions.find((s) => s.id === sid)
       if (!session) return
 
       if (session.agentId) {
         // Session has an agent - show choice dialog
         setSplitDialogSessionId(sid)
       } else {
-        // Plain terminal - just duplicate and switch to grid
-        duplicateSession(sid)
+        // Plain terminal - duplicate into same view (group)
+        const newId = state.duplicateSession(sid)
+        if (newId) {
+          const existingGroup = state.groups.find((g) => g.sessionIds.includes(sid))
+          if (existingGroup) {
+            state.addSessionToGroup(existingGroup.id, newId)
+            state.setActiveGroup(existingGroup.id)
+          } else {
+            const groupId = `group-${Date.now()}`
+            state.addGroup({
+              id: groupId,
+              name: session.title || 'Split',
+              sessionIds: [sid, newId],
+              createdAt: Date.now(),
+            })
+          }
+          state.setActiveSession(newId)
+        }
       }
     }
     window.addEventListener('ghostshell:split-request', handleSplitRequest)
     return () => window.removeEventListener('ghostshell:split-request', handleSplitRequest)
-  }, [activeSessionId, sessions, duplicateSession])
+  }, [])
+
+  // Find which group a session belongs to (if any)
+  const findGroupForSession = useCallback((sessionId: string) => {
+    return groups.find((g) => g.sessionIds.includes(sessionId))
+  }, [groups])
+
+  // Add a new session to the same view as the source session (uses groups to keep them in the same "tab")
+  const addToSameView = useCallback((sourceSessionId: string, newSessionId: string) => {
+    const existingGroup = findGroupForSession(sourceSessionId)
+    if (existingGroup) {
+      // Source is already in a group — add new session to it
+      useTerminalStore.getState().addSessionToGroup(existingGroup.id, newSessionId)
+      setActiveGroup(existingGroup.id)
+    } else {
+      // Source is standalone — create a new group containing both
+      const groupId = `group-${Date.now()}`
+      const sourceSession = sessions.find((s) => s.id === sourceSessionId)
+      useTerminalStore.getState().addGroup({
+        id: groupId,
+        name: sourceSession?.title || 'Split',
+        sessionIds: [sourceSessionId, newSessionId],
+        createdAt: Date.now(),
+      })
+    }
+    setActiveSession(newSessionId)
+  }, [findGroupForSession, groups, sessions, setActiveGroup, setActiveSession])
 
   const handleSplitWithAgent = () => {
     if (!splitDialogSessionId) return
     const session = sessions.find((s) => s.id === splitDialogSessionId)
     if (session?.agentId) {
-      cloneAgent(session.agentId)
-      setViewMode('grid')
+      const result = cloneAgent(session.agentId)
+      if (result) {
+        addToSameView(splitDialogSessionId, result.sessionId)
+      }
     }
     setSplitDialogSessionId(null)
   }
 
   const handleSplitTerminalOnly = () => {
     if (!splitDialogSessionId) return
-    duplicateSession(splitDialogSessionId)
+    const newId = duplicateSession(splitDialogSessionId)
+    if (newId) {
+      addToSameView(splitDialogSessionId, newId)
+    }
     setSplitDialogSessionId(null)
   }
 
   const handleNewTerminal = () => {
     const id = `term-standalone-${Date.now()}`
+    // Exit group view so the new standalone tab is visible
+    if (activeGroupId) setActiveGroup(null)
     addSession({ id, title: 'Terminal', cwd: currentPath })
     onShowQuickLaunch(false)
   }
@@ -402,11 +468,11 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     const outputBuffer = (window as unknown as Record<string, unknown>)[`__ghostshell_output_${activeSessionId}`] as string | undefined
     if (outputBuffer) {
       navigator.clipboard.writeText(outputBuffer).then(
-        () => addNotification('success', 'Output copied', 'Terminal output copied to clipboard'),
-        () => addNotification('error', 'Copy failed', 'Could not copy to clipboard')
+        () => addNotification('success', 'Output copied', undefined, 3000, 'toast'),
+        () => addNotification('error', 'Clipboard write failed', undefined, 4000, 'toast')
       )
     } else {
-      addNotification('warning', 'No output captured yet')
+      addNotification('warning', 'No output to copy', undefined, 3000, 'toast')
     }
     setHeaderMenuOpen(false)
   }
@@ -422,6 +488,17 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [headerMenuOpen])
+
+  // Scroll active tab into view when it changes
+  useEffect(() => {
+    if (!activeSessionId) return
+    // Small delay to let the tab render first
+    const t = setTimeout(() => {
+      const tabEl = document.querySelector(`[data-tab-id="${activeSessionId}"]`)
+      if (tabEl) tabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    }, 50)
+    return () => clearTimeout(t)
+  }, [activeSessionId])
 
   // Listen for Ctrl+Shift+F globally to toggle search
   useEffect(() => {
@@ -507,18 +584,17 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
 
   // Compute absolute positions for unified pane rendering (prevents terminal remounting on view switch)
   const panePositions = useMemo(() => {
-    type Pos = { position: 'absolute'; top: number | string; left: number | string; width: string; height: string; visibility: 'visible' | 'hidden'; zIndex: number }
+    type Pos = { position: 'absolute'; top: number | string; left: number | string; width: string; height: string; visibility: 'visible' | 'hidden'; opacity: number; pointerEvents: 'auto' | 'none'; zIndex: number; contain?: string }
+    const hidden: Pos = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', visibility: 'hidden', opacity: 0, pointerEvents: 'none', zIndex: 0, contain: 'strict' }
     const positions: Record<string, Pos> = {}
     const inGrid = effectiveViewMode === 'grid'
 
     if (!inGrid) {
       for (const s of sessions) {
         const active = s.id === activeSessionId
-        positions[s.id] = {
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-          visibility: active ? 'visible' : 'hidden',
-          zIndex: active ? 1 : 0,
-        }
+        positions[s.id] = active
+          ? { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', visibility: 'visible', opacity: 1, pointerEvents: 'auto', zIndex: 1 }
+          : { ...hidden }
       }
       return positions
     }
@@ -526,11 +602,9 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     if (isMaximized && maximizedSessionId) {
       for (const s of sessions) {
         const isMax = s.id === maximizedSessionId
-        positions[s.id] = {
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-          visibility: isMax ? 'visible' : 'hidden',
-          zIndex: isMax ? 1 : 0,
-        }
+        positions[s.id] = isMax
+          ? { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', visibility: 'visible', opacity: 1, pointerEvents: 'auto', zIndex: 1 }
+          : { ...hidden }
       }
       return positions
     }
@@ -539,10 +613,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     const gridIds = new Set(gridList.map((s) => s.id))
     for (const s of sessions) {
       if (!gridIds.has(s.id)) {
-        positions[s.id] = {
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-          visibility: 'hidden', zIndex: 0,
-        }
+        positions[s.id] = { ...hidden }
       }
     }
 
@@ -564,6 +635,8 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
           width: `${rowCols[colIndex]}%`,
           height: `${rowPct}%`,
           visibility: 'visible',
+          opacity: 1,
+          pointerEvents: 'auto',
           zIndex: s.id === activeSessionId ? 1 : 0,
         }
         idx++
@@ -605,12 +678,13 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     return (
       <div
         key={session.id}
-        className={`group/tab flex items-center gap-1 h-full px-2 rounded text-xs whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+        data-tab-id={session.id}
+        className={`group/tab flex items-center gap-1 h-full px-2.5 rounded-lg text-xs whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
           isNested ? 'ml-4 ' : ''
         }${
           isActive
             ? 'bg-ghost-surface text-ghost-text'
-            : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+            : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
         }`}
         onClick={() => {
           if (activeGroupId) {
@@ -648,14 +722,15 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               if (e.key === 'Escape') cancelRename()
             }}
             onFocus={(e) => e.target.select()}
-            className="min-w-[60px] max-w-[160px] bg-ghost-bg/80 border border-ghost-accent/50 rounded px-1 text-xs text-ghost-text outline-none"
+            className="min-w-[60px] max-w-[180px] bg-ghost-bg border border-ghost-accent rounded px-1.5 py-0.5 text-xs text-ghost-text outline-none focus:ring-1 focus:ring-ghost-accent/50"
             autoFocus
             size={Math.max(8, renameValue.length + 1)}
+            maxLength={60}
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="truncate max-w-[160px]">{session.title}</span>
+          <span className="truncate max-w-[160px]" title={session.title}>{session.title}</span>
         )}
 
         <button
@@ -663,7 +738,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             e.stopPropagation()
             handleCloseSession(session.id)
           }}
-          className="w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-white/10 transition-all shrink-0 ml-0.5"
+          className="w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-slate-800 transition-all shrink-0 ml-0.5"
         >
           <X className="w-3 h-3" />
         </button>
@@ -674,7 +749,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Tab bar - hidden when no sessions */}
-      {!hasNoSessions && <div className="h-8 flex items-center bg-ghost-sidebar/50 border-b border-ghost-border px-1 shrink-0">
+      {!hasNoSessions && <div className="h-10 flex items-center bg-ghost-sidebar/50 border-b border-ghost-border px-2 shrink-0">
         <div className="flex items-center gap-0.5 flex-1 overflow-x-auto min-w-0">
           {/* Group tabs */}
           {groups.map((group) => {
@@ -695,8 +770,8 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 <div
                   className={`group/tab flex items-center gap-1 h-full px-2 rounded text-xs whitespace-nowrap transition-colors cursor-pointer ${
                     isActive
-                      ? 'bg-ghost-accent/15 text-ghost-accent'
-                      : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                      ? 'bg-indigo-950/50 text-ghost-accent'
+                      : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
                   }`}
                   onClick={() => {
                     if (isActive) {
@@ -743,7 +818,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                       e.stopPropagation()
                       handleCloseGroup(group.id)
                     }}
-                    className="w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-white/10 transition-all shrink-0 ml-0.5"
+                    className="w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-slate-800 transition-all shrink-0 ml-0.5"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -769,7 +844,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               e.preventDefault()
               onShowQuickLaunch(true)
             }}
-            className="flex items-center justify-center w-6 h-6 rounded text-ghost-text-dim hover:bg-white/10 hover:text-ghost-text transition-colors shrink-0 ml-0.5"
+            className="flex items-center justify-center w-6 h-6 rounded text-ghost-text-dim hover:bg-slate-800 hover:text-ghost-text transition-colors shrink-0 ml-0.5"
             title="New Terminal (right-click: Quick Launch)"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -802,7 +877,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             <button
               onClick={() => setSearchOpen((prev) => !prev)}
               className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                searchOpen ? 'bg-white/10 text-ghost-text' : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                searchOpen ? 'bg-white/10 text-ghost-text' : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
               }`}
               title="Search (Ctrl+Shift+F)"
             >
@@ -817,43 +892,43 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 ref={headerMenuBtnRef}
                 onClick={() => setHeaderMenuOpen((prev) => !prev)}
                 className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                  headerMenuOpen ? 'bg-white/10 text-ghost-text' : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                  headerMenuOpen ? 'bg-white/10 text-ghost-text' : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
                 }`}
                 title="Terminal actions"
               >
                 <MoreHorizontal className="w-3.5 h-3.5" />
               </button>
               {headerMenuOpen && (
-                <div ref={headerMenuRef} className="absolute top-full right-0 mt-1 w-52 py-1 bg-ghost-surface border border-ghost-border rounded-lg shadow-lg z-50">
-                  <button onClick={handleSendCtrlC} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                <div ref={headerMenuRef} className="absolute top-full right-0 mt-1 w-52 py-1 bg-ghost-surface border border-ghost-border rounded-xl shadow-qubria-lg z-50">
+                  <button onClick={handleSendCtrlC} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <SquareSlash className="w-3.5 h-3.5" />
                     Send Ctrl+C
                   </button>
-                  <button onClick={handleClearTerminal} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                  <button onClick={handleClearTerminal} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <TerminalIcon className="w-3.5 h-3.5" />
                     Clear Terminal
                     <span className="ml-auto text-xs text-ghost-text-dim/50">Ctrl+K</span>
                   </button>
-                  <button onClick={() => { setSearchOpen(true); setHeaderMenuOpen(false) }} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                  <button onClick={() => { setSearchOpen(true); setHeaderMenuOpen(false) }} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <Search className="w-3.5 h-3.5" />
                     Search
                     <span className="ml-auto text-xs text-ghost-text-dim/50">Ctrl+Shift+F</span>
                   </button>
-                  <button onClick={handleExportOutput} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                  <button onClick={handleExportOutput} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <Download className="w-3.5 h-3.5" />
                     Copy Output
                   </button>
-                  <button onClick={() => { if (activeSessionId) { duplicateSession(activeSessionId); setHeaderMenuOpen(false) } }} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                  <button onClick={() => { if (activeSessionId) { duplicateSession(activeSessionId); setHeaderMenuOpen(false) } }} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <Copy className="w-3.5 h-3.5" />
                     Duplicate Pane
                     <span className="ml-auto text-xs text-ghost-text-dim/50">Ctrl+Shift+D</span>
                   </button>
-                  <button onClick={() => { if (activeSessionId) { toggleMaximize(activeSessionId); setHeaderMenuOpen(false) } }} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                  <button onClick={() => { if (activeSessionId) { toggleMaximize(activeSessionId); setHeaderMenuOpen(false) } }} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <Maximize2 className="w-3.5 h-3.5" />
                     Maximize Pane
                     <span className="ml-auto text-xs text-ghost-text-dim/50">Ctrl+Shift+Enter</span>
                   </button>
-                  <button onClick={handleCopySessionId} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors">
+                  <button onClick={handleCopySessionId} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <Copy className="w-3.5 h-3.5" />
                     Copy Session ID
                   </button>
@@ -881,7 +956,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
                 viewMode === 'grid'
                   ? 'bg-ghost-accent/20 text-ghost-accent'
-                  : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                  : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
               }`}
               title={viewMode === 'tabs' ? 'Switch to grid view' : 'Switch to tab view'}
             >
@@ -895,7 +970,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
               syncInputsMode !== 'off'
                 ? 'bg-ghost-accent/20 text-ghost-accent'
-                : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
             }`}
             title={syncInputsMode !== 'off' ? 'Sync inputs ON' : 'Synchronize inputs'}
           >
@@ -906,7 +981,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
           {effectiveViewMode === 'grid' && gridSessions.length > 1 && activeSessionId && (
             <button
               onClick={() => toggleMaximize(activeSessionId)}
-              className="w-7 h-7 flex items-center justify-center rounded text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors"
               title={isMaximized ? 'Restore all panes' : 'Maximize active pane'}
             >
               {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -1011,7 +1086,9 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
         {hasNoSessions && !showQuickLaunch && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-ghost-bg">
             <div className="text-center space-y-4">
-              <TerminalIcon className="w-10 h-10 text-ghost-text-dim/30 mx-auto" />
+              <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto">
+                <TerminalIcon className="w-7 h-7 text-ghost-text-dim/30" />
+              </div>
               <div>
                 <h3 className="text-sm text-ghost-text-dim mb-1">No terminals open</h3>
                 <p className="text-xs text-ghost-text-dim/60">Launch an agent or open a terminal to get started</p>
@@ -1019,14 +1096,14 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               <div className="flex gap-2 justify-center">
                 <button
                   onClick={() => onShowQuickLaunch(true)}
-                  className="flex items-center gap-1.5 h-7 px-3 rounded bg-ghost-accent text-white text-xs font-medium hover:bg-ghost-accent/80 transition-colors"
+                  className="flex items-center gap-1.5 h-9 rounded-xl px-3 bg-ghost-accent text-white text-xs font-medium hover:bg-ghost-accent/80 transition-colors"
                 >
                   <Zap className="w-3.5 h-3.5" />
                   Quick Launch
                 </button>
                 <button
                   onClick={handleNewTerminal}
-                  className="flex items-center gap-1.5 h-7 px-3 rounded bg-ghost-surface text-ghost-text text-xs hover:bg-white/10 transition-colors border border-ghost-border"
+                  className="flex items-center gap-1.5 h-9 rounded-xl px-3 bg-ghost-surface text-ghost-text text-xs hover:bg-slate-800 transition-colors border border-ghost-border"
                 >
                   <TerminalIcon className="w-3.5 h-3.5" />
                   New Terminal
@@ -1041,18 +1118,19 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
       {tabContextMenu && (
         <div
           ref={tabContextRef}
-          className="fixed z-50 w-44 py-1 bg-ghost-surface border border-ghost-border rounded-lg shadow-xl"
+          className="fixed z-50 w-44 py-1 bg-ghost-surface border border-ghost-border rounded-xl shadow-qubria-lg"
           style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
         >
           <button
             onClick={() => handleRenameTab(tabContextMenu.sessionId)}
-            className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text hover:bg-white/5 transition-colors"
+            className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text hover:bg-slate-800/50 transition-colors"
           >
             Rename Tab
+            <span className="ml-auto text-xs text-ghost-text-dim/50">F2</span>
           </button>
           <button
             onClick={() => handleDuplicateTab(tabContextMenu.sessionId)}
-            className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text hover:bg-white/5 transition-colors"
+            className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text hover:bg-slate-800/50 transition-colors"
           >
             <Copy className="w-3 h-3" />
             Duplicate Tab
@@ -1062,7 +1140,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               toggleMaximize(tabContextMenu.sessionId)
               setTabContextMenu(null)
             }}
-            className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text hover:bg-white/5 transition-colors"
+            className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text hover:bg-slate-800/50 transition-colors"
           >
             {maximizedSessionId === tabContextMenu.sessionId ? (
               <><Minimize2 className="w-3 h-3" /> Restore</>
@@ -1086,7 +1164,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
 
       {/* Sync inputs indicator */}
       {syncInputsMode !== 'off' && (
-        <div className="h-6 flex items-center justify-center gap-2 bg-ghost-accent/10 border-t border-ghost-accent/20 shrink-0">
+        <div className="h-6 flex items-center justify-center gap-2 bg-indigo-950/50 border-t border-ghost-accent/20 shrink-0">
           <Radio className="w-3 h-3 text-ghost-accent" />
           <span className="text-xs text-ghost-accent">Synchronized inputs active - commands sent to all panes</span>
           <button
@@ -1111,7 +1189,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             onClick={() => setSplitDialogSessionId(null)}
           >
             <div
-              className="bg-ghost-surface border border-ghost-border rounded-xl shadow-lg p-5 w-72 animate-fade-in"
+              className="bg-ghost-surface border border-ghost-border rounded-2xl shadow-lg p-6 w-72 animate-fade-in"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2 mb-4">
@@ -1121,7 +1199,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               <div className="flex flex-col gap-2">
                 <button
                   onClick={handleSplitWithAgent}
-                  className="w-full h-10 px-3 rounded-lg text-white text-xs font-medium flex items-center gap-2 hover:opacity-80 transition-colors"
+                  className="w-full h-11 px-3 rounded-xl text-white text-xs font-medium flex items-center gap-2 hover:opacity-80 transition-colors"
                   style={{ backgroundColor: splitProviderColor }}
                 >
                   <Bot className="w-4 h-4" />
@@ -1130,7 +1208,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 </button>
                 <button
                   onClick={handleSplitTerminalOnly}
-                  className="w-full h-10 px-3 rounded-lg bg-ghost-bg border border-ghost-border text-ghost-text text-xs font-medium flex items-center gap-2 hover:bg-white/5 transition-colors"
+                  className="w-full h-11 px-3 rounded-xl bg-ghost-bg border border-ghost-border text-ghost-text text-xs font-medium flex items-center gap-2 hover:bg-slate-800/50 transition-colors"
                 >
                   <TerminalIcon className="w-4 h-4" />
                   Terminal Only

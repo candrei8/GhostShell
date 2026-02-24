@@ -28,13 +28,13 @@ export function AgentList() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="px-3 pt-4 pb-3 mb-3 shrink-0">
+      <div className="px-4 pt-5 pb-4 mb-3 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-ghost-accent" />
             <span className="text-xs font-bold text-ghost-text uppercase tracking-widest">Agents</span>
             {workingAgents.length > 0 && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-ghost-success/15 text-ghost-success font-semibold flex items-center gap-1">
+              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-950/50 text-ghost-success font-semibold flex items-center gap-1">
                 <Zap className="w-3 h-3" />
                 {workingAgents.length} active
               </span>
@@ -42,7 +42,7 @@ export function AgentList() {
           </div>
           <motion.button
             onClick={() => setShowCreator(true)}
-            className="w-7 h-7 flex items-center justify-center rounded-md bg-ghost-accent/10 hover:bg-ghost-accent/20 text-ghost-accent transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-xl bg-indigo-950/50 hover:bg-ghost-accent/20 text-ghost-accent transition-colors"
             title="New Agent"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
@@ -62,13 +62,13 @@ export function AgentList() {
             <motion.button
               key="empty-state"
               onClick={() => setShowCreator(true)}
-              className="mx-2 flex flex-col items-center gap-2 py-8 rounded-lg border border-dashed border-ghost-border/50 hover:border-ghost-accent/30 hover:bg-ghost-accent/[0.02] transition-all cursor-pointer"
+              className="mx-2 flex flex-col items-center gap-2 py-10 rounded-2xl border border-dashed border-ghost-border/50 hover:border-ghost-accent/30 hover:bg-ghost-accent/[0.02] transition-all cursor-pointer"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="w-10 h-10 rounded-lg bg-ghost-accent/10 flex items-center justify-center">
+              <div className="w-12 h-12 rounded-xl bg-indigo-950/50 flex items-center justify-center">
                 <Layers className="w-5 h-5 text-ghost-accent/60" />
               </div>
               <span className="text-[11px] text-ghost-text-dim">
@@ -79,7 +79,7 @@ export function AgentList() {
               </span>
             </motion.button>
           ) : (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-2">
               {/* Working agents — full cards */}
               {workingAgents.map((agent, index) => (
                 <motion.div
@@ -107,7 +107,7 @@ export function AgentList() {
                 >
                   {!idleExpanded ? (
                     /* Compact: avatar dots + "N idle" label */
-                    <div className="flex items-center gap-1.5 px-2 py-2 rounded-lg hover:bg-white/[0.03] transition-colors">
+                    <div className="flex items-center gap-1.5 px-2 py-2 rounded-lg hover:bg-slate-800/30 transition-colors">
                       <div className="flex items-center -space-x-1.5">
                         {idleAgents.slice(0, 6).map((agent) => (
                           <button
@@ -134,7 +134,7 @@ export function AgentList() {
                     </div>
                   ) : (
                     /* Expanded: full cards */
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-2">
                       <button
                         onClick={() => setIdleExpanded(false)}
                         className="text-[11px] text-ghost-text-dim hover:text-ghost-text transition-colors px-2 py-1 text-left"

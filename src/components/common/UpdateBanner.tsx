@@ -47,7 +47,7 @@ export function UpdateBanner() {
             <span className="truncate">v{update.version} available</span>
             <button
               onClick={handleDownload}
-              className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 transition-colors"
             >
               <Download size={12} />
               Download
@@ -72,7 +72,7 @@ export function UpdateBanner() {
             <span className="truncate">Update ready</span>
             <button
               onClick={handleInstall}
-              className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 transition-colors"
             >
               <RotateCcw size={12} />
               Restart
@@ -85,7 +85,7 @@ export function UpdateBanner() {
             <span className="truncate">Update failed</span>
             <button
               onClick={handleRetry}
-              className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 transition-colors"
             >
               <RefreshCw size={12} />
               Retry
@@ -96,7 +96,7 @@ export function UpdateBanner() {
 
       <button
         onClick={() => setDismissed(true)}
-        className="flex-shrink-0 p-0.5 rounded hover:bg-white/20 transition-colors ml-2"
+        className="flex-shrink-0 p-1 rounded-lg hover:bg-white/20 transition-colors ml-2"
       >
         <X size={14} />
       </button>

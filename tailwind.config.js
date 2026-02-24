@@ -27,6 +27,10 @@ module.exports = {
         '2xs': '0.6875rem',
       },
       spacing: {},
+      boxShadow: {
+        'qubria': '0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2)',
+        'qubria-lg': '0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3)',
+      },
       animation: {
         'fade-in': 'fade-in 200ms ease-out',
         'breathe': 'ghost-breathe 2.4s ease-in-out infinite',
@@ -38,8 +42,8 @@ module.exports = {
           to: { opacity: '1', transform: 'translateY(0)' },
         },
         'ghost-breathe': {
-          '0%, 100%': { boxShadow: '0 0 6px rgba(168, 85, 247, 0.2)' },
-          '50%': { boxShadow: '0 0 14px rgba(168, 85, 247, 0.45)' },
+          '0%, 100%': { boxShadow: '0 0 4px rgba(99, 102, 241, 0.15)' },
+          '50%': { boxShadow: '0 0 10px rgba(99, 102, 241, 0.35)' },
         },
         'ghost-slide-in': {
           from: { opacity: '0', transform: 'translateX(-6px)' },

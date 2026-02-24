@@ -23,7 +23,7 @@
 
 .xterm-viewport::-webkit-scrollbar-thumb {
   background: var(--ghost-border);
-  border-radius: 6px;
+  border-radius: 12px;
   border: 2px solid var(--ghost-bg);
 }
 
@@ -47,7 +47,7 @@
   width: 100%;
   height: 100%;
   background: var(--ghost-bg);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
 }
 
@@ -91,5 +91,40 @@
   50% {
     opacity: 0.5;
     transform: scale(1.2);
+  }
+}
+
+/* Drop zone indicator when dragging files over a terminal pane */
+[data-terminal-pane].drop-target {
+  position: relative;
+}
+
+[data-terminal-pane].drop-target::after {
+  content: 'Drop files here';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ghost-accent) 12%, transparent);
+  border: 2px dashed var(--ghost-accent);
+  border-radius: 12px;
+  color: var(--ghost-accent);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  z-index: 20;
+  animation: drop-zone-in 0.15s ease-out;
+}
+
+@keyframes drop-zone-in {
+  from {
+    opacity: 0;
+    border-spacing: 8px;
+  }
+  to {
+    opacity: 1;
+    border-spacing: 0;
   }
 }

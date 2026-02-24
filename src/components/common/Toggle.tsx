@@ -12,15 +12,15 @@ export function Toggle({ checked, onChange, label, description, color = 'accent'
     : 'bg-ghost-border'
 
   return (
-    <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5 transition-colors">
+    <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl hover:bg-slate-800/50 transition-colors">
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 shrink-0 ${trackColor}`}
+        className={`w-10 h-[22px] rounded-full transition-colors flex items-center px-0.5 shrink-0 ${trackColor}`}
       >
-        <div className={`w-4 h-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
+        <div className={`w-[18px] h-[18px] rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-[18px]' : 'translate-x-0'}`} />
       </button>
       <div className="flex flex-col min-w-0">
         <span className="text-sm text-ghost-text">{label}</span>

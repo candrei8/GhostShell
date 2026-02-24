@@ -291,7 +291,7 @@ function FileTouchItem({ touch }: { touch: FileTouch }) {
   return (
     <button
       onClick={handleCopy}
-      className="w-full flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/5 text-left group transition-colors"
+      className="w-full flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-slate-800/50 text-left group transition-colors"
       title={touch.path}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${op.color} shrink-0`} />
@@ -458,7 +458,7 @@ export function SubAgentMonitor({ height, onClose }: SubAgentMonitorProps) {
 
   return (
     <div
-      className="flex flex-col bg-ghost-surface border-t border-ghost-border overflow-hidden shrink-0"
+      className="flex flex-col bg-ghost-surface border-t border-ghost-border overflow-hidden shrink-0 rounded-t-2xl"
       style={{ height }}
     >
       {/* Header */}
@@ -478,8 +478,8 @@ export function SubAgentMonitor({ height, onClose }: SubAgentMonitorProps) {
                 onClick={() => setSelectedAgentId(agent.id)}
                 className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] transition-colors shrink-0 ${
                   selectedAgentId === agent.id
-                    ? 'bg-ghost-accent/15 text-ghost-accent'
-                    : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                    ? 'bg-indigo-950/50 text-ghost-accent'
+                    : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
                 }`}
               >
                 <span className="truncate max-w-[100px]">{agent.name}</span>
@@ -519,7 +519,7 @@ export function SubAgentMonitor({ height, onClose }: SubAgentMonitorProps) {
 
         <button
           onClick={onClose}
-          className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 text-ghost-text-dim hover:text-ghost-text transition-colors shrink-0"
+          className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 text-ghost-text-dim hover:text-ghost-text transition-colors shrink-0"
         >
           <X className="w-3.5 h-3.5" />
         </button>

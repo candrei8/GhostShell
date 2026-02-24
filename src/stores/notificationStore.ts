@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { useSettingsStore } from './settingsStore'
+import { playNotificationSound } from '../lib/sounds'
 
 export type NotificationType = 'success' | 'error' | 'info' | 'warning'
+export type NotificationTier = 'full' | 'toast'
 
 export interface Notification {
   id: string
@@ -14,7 +16,7 @@ export interface Notification {
 
 interface NotificationState {
   notifications: Notification[]
-  addNotification: (type: NotificationType, title: string, message?: string, duration?: number) => void
+  addNotification: (type: NotificationType, title: string, message?: string, duration?: number, tier?: NotificationTier) => void
   removeNotification: (id: string) => void
   clearAll: () => void
 }
@@ -22,7 +24,7 @@ interface NotificationState {
 export const useNotificationStore = create<NotificationState>()((set, get) => ({
   notifications: [],
 
-  addNotification: (type, title, message, duration = 4000) => {
+  addNotification: (type, title, message, duration = 4000, tier = 'toast') => {
     if (useSettingsStore.getState().muteNotifications) return
 
     // Title-based dedup: skip if same title exists within last 10 seconds
@@ -37,8 +39,12 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
       notifications: [...state.notifications.slice(-2), notification],
     }))
 
-    // Native OS notification
-    window.ghostshell?.showNotification(title, message)
+    // Tier 'full': OS notification + custom sound
+    if (tier === 'full') {
+      window.ghostshell?.showNotification(title, message)
+      const soundType = type === 'success' ? 'success' : type === 'error' ? 'error' : 'warning'
+      playNotificationSound(soundType)
+    }
 
     if (duration > 0) {
       setTimeout(() => {

@@ -247,14 +247,14 @@ export function FileList({
               }
             }}
             onContextMenu={(e) => handleContextMenu(e, file)}
-            className={`group flex items-center gap-1.5 px-1.5 py-[5px] rounded-md transition-all duration-100 ${
+            className={`group flex items-center gap-1.5 px-1.5 py-[5px] rounded-lg transition-all duration-100 ${
               file.isDirectory ? 'cursor-pointer' : 'cursor-default'
             } ${isSelected
-              ? 'bg-ghost-accent/10 border border-ghost-accent/20'
+              ? 'bg-indigo-950/40 border border-ghost-accent/20'
               : isFocused
                 ? 'bg-white/[0.04] border border-ghost-border/30'
-                : 'border border-transparent hover:bg-white/[0.03]'
-            } ${isCopied ? 'bg-ghost-accent/10' : ''}`}
+                : 'border border-transparent hover:bg-slate-800/30'
+            } ${isCopied ? 'bg-indigo-950/50' : ''}`}
           >
             {/* Git status indicator */}
             <div className="w-2 shrink-0 flex justify-center">
@@ -324,14 +324,14 @@ export function FileList({
                   <div className="hidden group-hover:flex items-center gap-0.5">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCopyPath(file) }}
-                      className="w-4 h-4 flex items-center justify-center rounded text-ghost-text-dim/40 hover:text-ghost-accent hover:bg-ghost-accent/10 transition-colors"
+                      className="w-4 h-4 flex items-center justify-center rounded text-ghost-text-dim/40 hover:text-ghost-accent hover:bg-indigo-950/50 transition-colors"
                       title="Copy path"
                     >
                       <Copy className="w-2.5 h-2.5" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleStartRename(file) }}
-                      className="w-4 h-4 flex items-center justify-center rounded text-ghost-text-dim/40 hover:text-ghost-accent hover:bg-ghost-accent/10 transition-colors"
+                      className="w-4 h-4 flex items-center justify-center rounded text-ghost-text-dim/40 hover:text-ghost-accent hover:bg-indigo-950/50 transition-colors"
                       title="Rename (F2)"
                     >
                       <Pencil className="w-2.5 h-2.5" />
@@ -444,7 +444,7 @@ function ContextMenuItem({
       className={`flex items-center gap-2.5 w-full px-3 py-1.5 text-xs transition-colors text-left ${
         variant === 'danger'
           ? 'text-red-400 hover:bg-red-500/10'
-          : 'text-ghost-text-dim hover:text-ghost-text hover:bg-white/5'
+          : 'text-ghost-text-dim hover:text-ghost-text hover:bg-slate-800/50'
       }`}
     >
       <span className="shrink-0 opacity-60">{icon}</span>

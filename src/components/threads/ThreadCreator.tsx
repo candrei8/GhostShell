@@ -38,7 +38,7 @@ export function ThreadCreator({ onClose }: ThreadCreatorProps) {
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-ghost-text">New Thread</h2>
-          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10">
+          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-800">
             <X className="w-4 h-4 text-ghost-text-dim" />
           </button>
         </div>
@@ -64,7 +64,7 @@ export function ThreadCreator({ onClose }: ThreadCreatorProps) {
                 key={ic}
                 onClick={() => setIcon(ic)}
                 className={`w-8 h-8 rounded-md flex items-center justify-center text-sm transition-all ${
-                  icon === ic ? 'bg-ghost-accent/20 ring-1 ring-ghost-accent' : 'hover:bg-white/10'
+                  icon === ic ? 'bg-ghost-accent/20 ring-1 ring-ghost-accent' : 'hover:bg-slate-800'
                 }`}
               >
                 {ic}
@@ -87,7 +87,7 @@ export function ThreadCreator({ onClose }: ThreadCreatorProps) {
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs text-ghost-text-dim hover:text-ghost-text transition-colors rounded-lg hover:bg-white/5"
+            className="px-3 py-1.5 text-xs text-ghost-text-dim hover:text-ghost-text transition-colors rounded-lg hover:bg-slate-800/50"
           >
             Cancel
           </button>

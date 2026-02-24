@@ -12,7 +12,7 @@ export function RangeSlider({ min, max, value, onChange, label, unit = 'px' }: R
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-sm text-ghost-text">{label}</span>
-        <span className="text-xs font-mono font-medium text-ghost-accent bg-ghost-accent/10 px-2 py-0.5 rounded">
+        <span className="text-xs font-mono font-medium text-ghost-accent bg-indigo-950/50 px-2 py-0.5 rounded-full">
           {value}{unit}
         </span>
       </div>

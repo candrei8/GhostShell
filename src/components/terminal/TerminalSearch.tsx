@@ -47,7 +47,7 @@ export function TerminalSearch({ isOpen, onClose, onSearchNext, onSearchPrev, on
   if (!isOpen) return null
 
   return (
-    <div className="absolute top-1 right-2 z-30 flex items-center gap-1 bg-ghost-surface border border-ghost-border rounded-lg shadow-lg px-2 py-1">
+    <div className="absolute top-1 right-2 z-30 flex items-center gap-1 bg-ghost-surface border border-ghost-border rounded-xl shadow-qubria-lg px-2 py-1">
       <Search className="w-3 h-3 text-ghost-text-dim shrink-0" />
       <input
         ref={inputRef}
@@ -60,21 +60,21 @@ export function TerminalSearch({ isOpen, onClose, onSearchNext, onSearchPrev, on
       />
       <button
         onClick={() => handleSearch('prev')}
-        className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-ghost-text-dim"
+        className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-800 text-ghost-text-dim"
         title="Previous (Shift+Enter)"
       >
         <ChevronUp className="w-3.5 h-3.5" />
       </button>
       <button
         onClick={() => handleSearch('next')}
-        className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-ghost-text-dim"
+        className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-800 text-ghost-text-dim"
         title="Next (Enter)"
       >
         <ChevronDown className="w-3.5 h-3.5" />
       </button>
       <button
         onClick={onClose}
-        className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-ghost-text-dim"
+        className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-800 text-ghost-text-dim"
         title="Close (Esc)"
       >
         <X className="w-3.5 h-3.5" />

@@ -81,10 +81,10 @@ export function FileGrid({ files, onNavigate, onSelect, selectedPath, gitStatuse
           <button
             key={file.path}
             onClick={() => handleClick(file)}
-            className={`relative flex flex-col items-center gap-1 p-2 rounded-lg transition-all duration-100 group ${
+            className={`relative flex flex-col items-center gap-1 p-3 rounded-2xl transition-all duration-100 group ${
               isSelected
-                ? 'bg-ghost-accent/10 border border-ghost-accent/25'
-                : 'border border-transparent hover:bg-white/[0.04] hover:border-ghost-border/20'
+                ? 'bg-indigo-950/40 border border-ghost-accent/25'
+                : 'border border-transparent hover:bg-slate-800/40 hover:border-ghost-border/20'
             } ${file.isDirectory ? 'cursor-pointer' : ''}`}
           >
             {/* Git status dot */}

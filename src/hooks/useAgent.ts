@@ -235,6 +235,8 @@ export function useAgent() {
           config.templateId,
           undefined,
           true,
+          config.provider,
+          config.geminiConfig,
         )
         sessionIds.push(result.sessionId)
         createdAgents.push(result)

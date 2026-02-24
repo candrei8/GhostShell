@@ -88,7 +88,7 @@ function SubAgentNode({ agent, isLast }: { agent: SubAgent; isLast: boolean }) {
 
       {/* Agent card */}
       <div
-        className={`flex-1 flex items-center gap-2 px-2 py-1 rounded-md transition-all ${
+        className={`flex-1 flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all ${
           isActive
             ? `${config.bgColor} border border-white/5`
             : 'hover:bg-white/3'
@@ -101,7 +101,7 @@ function SubAgentNode({ agent, isLast }: { agent: SubAgent; isLast: boolean }) {
               {config.label}
             </span>
             {agent.model && (
-              <span className="text-[10px] px-1 py-px rounded bg-white/5 text-ghost-text-dim/60">
+              <span className="text-[10px] px-1 py-px rounded-full bg-white/5 text-ghost-text-dim/60">
                 {agent.model}
               </span>
             )}
@@ -149,7 +149,7 @@ export function SubAgentTree({ subAgents, compact = false }: SubAgentTreeProps) 
           Sub-agents
         </span>
         {activeCount > 0 && (
-          <span className="text-[10px] px-2 py-px rounded bg-indigo-400/15 text-indigo-400 font-medium">
+          <span className="text-[10px] px-2 py-px rounded-full bg-indigo-400/15 text-indigo-400 font-medium">
             {activeCount} active
           </span>
         )}

@@ -13,10 +13,10 @@ export function ThemeCustomizer() {
           <button
             key={theme.id}
             onClick={() => setTheme(theme.id)}
-            className={`flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all border ${
+            className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all border ${
               themeId === theme.id
-                ? 'border-ghost-accent bg-ghost-accent/10'
-                : 'border-ghost-border hover:border-ghost-accent/50 hover:bg-white/5'
+                ? 'border-ghost-accent bg-indigo-950/40'
+                : 'border-ghost-border hover:border-ghost-accent/50 hover:bg-slate-800/50'
             }`}
           >
             {/* Color preview dots */}

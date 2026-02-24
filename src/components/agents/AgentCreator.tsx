@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X, FolderOpen, Zap } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { X, FolderOpen, Zap, Users, Minus, Plus } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { animals } from '../../lib/animals'
 import { agentTemplates, AgentTemplate } from '../../lib/agent-templates'
@@ -14,23 +14,26 @@ interface AgentCreatorProps {
   onClose: () => void
 }
 
-type Tab = 'templates' | 'custom'
+type Tab = 'templates' | 'custom' | 'squad'
 
 export function AgentCreator({ onClose }: AgentCreatorProps) {
   const defaultProvider = useSettingsStore((s) => s.defaultProvider)
+  const lastAgentFolder = useSettingsStore((s) => s.lastAgentFolder)
+  const setLastAgentFolder = useSettingsStore((s) => s.setLastAgentFolder)
   const [tab, setTab] = useState<Tab>('templates')
   const [provider, setProvider] = useState<Provider>(defaultProvider)
   const [name, setName] = useState('')
   const [selectedAvatar, setSelectedAvatar] = useState<AnimalAvatar>(animals[0])
   const [selectedThread, setSelectedThread] = useState('')
-  const [projectPath, setProjectPath] = useState(useWorkspaceStore.getState().currentPath)
+  const [projectPath, setProjectPath] = useState(lastAgentFolder || useWorkspaceStore.getState().currentPath)
   const models = getModelsForProvider(provider)
   const [model, setModel] = useState(getDefaultModel(provider))
   const [systemPrompt, setSystemPrompt] = useState('')
   const [skipPermissions, setSkipPermissions] = useState(false)
   const [yoloMode, setYoloMode] = useState(false)
   const [sandboxMode, setSandboxMode] = useState(false)
-  const { createAgent } = useAgent()
+  const [squadPicks, setSquadPicks] = useState<Record<string, number>>({})
+  const { createAgent, createAgentGroup } = useAgent()
   const threads = useThreadStore((s) => s.threads)
   const setCurrentPath = useWorkspaceStore((s) => s.setCurrentPath)
 
@@ -44,6 +47,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
     if (path) {
       setProjectPath(path)
       setCurrentPath(path)
+      setLastAgentFolder(path)
     }
   }
 
@@ -57,6 +61,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
   }
 
   const handleTemplateCreate = (template: AgentTemplate) => {
+    if (projectPath) setLastAgentFolder(projectPath)
     const templateProvider = template.provider || provider
     if (templateProvider === 'gemini') {
       const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
@@ -82,8 +87,77 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
     onClose()
   }
 
+  const filteredTemplates = useMemo(
+    () => agentTemplates.filter((t) => !t.provider || t.provider === provider),
+    [provider],
+  )
+
+  const squadTotal = useMemo(
+    () => Object.values(squadPicks).reduce((a, b) => a + b, 0),
+    [squadPicks],
+  )
+
+  const adjustSquadPick = (templateId: string, delta: number) => {
+    setSquadPicks((prev) => {
+      const cur = prev[templateId] || 0
+      const next = Math.max(0, Math.min(9, cur + delta))
+      if (next === 0) {
+        const { [templateId]: _, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [templateId]: next }
+    })
+  }
+
+  const handleSquadLaunch = () => {
+    if (squadTotal === 0) return
+    if (projectPath) setLastAgentFolder(projectPath)
+
+    const configs = Object.entries(squadPicks).flatMap(([templateId, qty]) => {
+      const template = agentTemplates.find((t) => t.id === templateId)
+      if (!template || qty <= 0) return []
+      const templateProvider = template.provider || provider
+      return Array.from({ length: qty }, (_, i) => {
+        const agentName = qty > 1 ? `${template.name} ${i + 1}` : template.name
+        if (templateProvider === 'gemini') {
+          return {
+            name: agentName,
+            avatar: template.avatar,
+            color: template.avatar.color,
+            claudeConfig: {} as ClaudeConfig,
+            cwd: projectPath || undefined,
+            templateId: template.id,
+            provider: 'gemini' as Provider,
+            geminiConfig: { model, yolo: yoloMode, sandbox: sandboxMode } as GeminiConfig,
+          }
+        }
+        return {
+          name: agentName,
+          avatar: template.avatar,
+          color: template.avatar.color,
+          claudeConfig: {
+            model,
+            dangerouslySkipPermissions: skipPermissions,
+            systemPrompt: template.systemPrompt,
+            allowedTools: extractAllowedTools(template.claudeFlags),
+            customFlags: template.claudeFlags,
+          } as ClaudeConfig,
+          cwd: projectPath || undefined,
+          templateId: template.id,
+          provider: 'claude' as Provider,
+        }
+      })
+    })
+
+    if (configs.length > 0) {
+      createAgentGroup(configs, `Squad (${configs.length})`)
+    }
+    onClose()
+  }
+
   const handleCustomCreate = () => {
     if (!name.trim()) return
+    if (projectPath) setLastAgentFolder(projectPath)
     if (provider === 'gemini') {
       const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
       createAgent(
@@ -119,23 +193,23 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-[560px] max-h-[85vh] bg-ghost-surface border border-ghost-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
+        className="w-[560px] max-h-[85vh] bg-ghost-surface border border-ghost-border rounded-2xl shadow-2xl flex flex-col overflow-hidden"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+        <div className="flex items-center justify-between px-6 pt-6 pb-3">
           <h2 className="text-sm font-semibold text-ghost-text">New Agent</h2>
-          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10">
+          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-800">
             <X className="w-4 h-4 text-ghost-text-dim" />
           </button>
         </div>
 
         {/* Provider Toggle */}
         <div className="flex px-5 gap-1 mb-3">
-          <div className="flex gap-1 p-0.5 bg-ghost-bg rounded-lg border border-ghost-border mr-3">
+          <div className="flex gap-1 p-1 bg-ghost-bg rounded-xl border border-ghost-border mr-3">
             <button
               onClick={() => handleProviderChange('claude')}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                provider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+                provider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
               }`}
               style={provider === 'claude' ? { backgroundColor: getProviderColor('claude') } : undefined}
             >
@@ -144,7 +218,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
             <button
               onClick={() => handleProviderChange('gemini')}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                provider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+                provider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
               }`}
               style={provider === 'gemini' ? { backgroundColor: getProviderColor('gemini') } : undefined}
             >
@@ -155,7 +229,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           <button
             onClick={() => setTab('templates')}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              tab === 'templates' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-white/5'
+              tab === 'templates' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-slate-800/50'
             }`}
           >
             Templates
@@ -163,10 +237,19 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           <button
             onClick={() => setTab('custom')}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              tab === 'custom' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-white/5'
+              tab === 'custom' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-slate-800/50'
             }`}
           >
             Custom
+          </button>
+          <button
+            onClick={() => setTab('squad')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              tab === 'squad' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-slate-800/50'
+            }`}
+          >
+            <Users className="w-3 h-3" />
+            Squad
           </button>
         </div>
 
@@ -224,13 +307,11 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
         <div className="flex-1 overflow-y-auto px-5 pb-5">
           {tab === 'templates' ? (
             <div className="grid grid-cols-2 gap-2">
-              {agentTemplates
-                .filter((t) => !t.provider || t.provider === provider)
-                .map((template) => (
+              {filteredTemplates.map((template) => (
                 <button
                   key={template.id}
                   onClick={() => handleTemplateCreate(template)}
-                  className="p-3 bg-ghost-bg border border-ghost-border rounded-lg text-left hover:border-ghost-accent/50 hover:bg-ghost-accent/5 transition-all group"
+                  className="p-4 bg-ghost-bg border border-ghost-border rounded-2xl text-left hover:border-ghost-accent/50 hover:bg-ghost-accent/5 transition-all group"
                 >
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-lg">{template.avatar.emoji}</span>
@@ -253,7 +334,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                 </button>
               ))}
             </div>
-          ) : (
+          ) : tab === 'custom' ? (
             <div className="flex flex-col gap-3">
               {/* Name */}
               <div>
@@ -263,7 +344,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={provider === 'gemini' ? 'e.g. Gemini Agent' : 'e.g. Frontend Agent'}
-                  className="w-full h-9 px-3 bg-ghost-bg border border-ghost-border rounded-lg text-sm text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors"
+                  className="w-full h-11 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-sm text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors"
                   autoFocus
                 />
               </div>
@@ -277,7 +358,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                       key={animal.id}
                       onClick={() => setSelectedAvatar(animal)}
                       className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-all ${
-                        selectedAvatar.id === animal.id ? 'bg-ghost-accent/20 ring-2 ring-ghost-accent' : 'hover:bg-white/10'
+                        selectedAvatar.id === animal.id ? 'bg-ghost-accent/20 ring-2 ring-ghost-accent' : 'hover:bg-slate-800'
                       }`}
                       title={animal.name}
                     >
@@ -326,11 +407,71 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
               <button
                 onClick={handleCustomCreate}
                 disabled={!name.trim()}
-                className="w-full h-10 text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-1"
+                className="w-full h-11 text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-1"
                 style={{ backgroundColor: getProviderColor(provider) }}
               >
                 <Zap className="w-4 h-4" />
                 Create {provider === 'gemini' ? 'Gemini' : 'Claude'} Agent
+              </button>
+            </div>
+          ) : (
+            /* Squad Tab */
+            <div className="flex flex-col gap-2">
+              <p className="text-2xs text-ghost-text-dim mb-1">Pick templates and quantities to launch a squad of agents at once.</p>
+              {filteredTemplates.map((template) => {
+                const qty = squadPicks[template.id] || 0
+                return (
+                  <div
+                    key={template.id}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                      qty > 0 ? 'bg-ghost-accent/5 border-ghost-accent/30' : 'bg-ghost-bg border-ghost-border hover:border-ghost-border/80'
+                    }`}
+                  >
+                    <span className="text-lg shrink-0">{template.avatar.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-medium text-ghost-text truncate">{template.name}</span>
+                        {template.provider && (
+                          <span
+                            className="text-[10px] px-1.5 py-px rounded-full font-medium text-white/90 shrink-0"
+                            style={{ backgroundColor: getProviderColor(template.provider) }}
+                          >
+                            {template.provider === 'gemini' ? 'G' : 'C'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-2xs text-ghost-text-dim truncate">{template.description}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => adjustSquadPick(template.id, -1)}
+                        disabled={qty === 0}
+                        className="w-6 h-6 rounded-md flex items-center justify-center bg-ghost-surface border border-ghost-border hover:border-ghost-accent/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Minus className="w-3 h-3 text-ghost-text-dim" />
+                      </button>
+                      <span className={`w-6 text-center text-xs font-semibold ${qty > 0 ? 'text-ghost-accent' : 'text-ghost-text-dim/40'}`}>
+                        {qty}
+                      </span>
+                      <button
+                        onClick={() => adjustSquadPick(template.id, 1)}
+                        disabled={qty >= 9}
+                        className="w-6 h-6 rounded-md flex items-center justify-center bg-ghost-surface border border-ghost-border hover:border-ghost-accent/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Plus className="w-3 h-3 text-ghost-text-dim" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+
+              <button
+                onClick={handleSquadLaunch}
+                disabled={squadTotal === 0}
+                className="w-full h-11 bg-ghost-accent text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+              >
+                <Users className="w-4 h-4" />
+                Launch Squad ({squadTotal} agent{squadTotal !== 1 ? 's' : ''})
               </button>
             </div>
           )}

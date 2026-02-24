@@ -68,7 +68,7 @@ const activityMap: Record<ClaudeActivity, {
     icon: Map,
     label: 'Planning',
     color: 'text-ghost-accent',
-    bgColor: 'bg-ghost-accent/10',
+    bgColor: 'bg-indigo-950/50',
   },
   permission: {
     icon: ShieldAlert,
@@ -80,7 +80,7 @@ const activityMap: Record<ClaudeActivity, {
     icon: Cpu,
     label: 'Sub-agent',
     color: 'text-indigo-400',
-    bgColor: 'bg-indigo-400/10',
+    bgColor: 'bg-indigo-950/50',
   },
   task_create: {
     icon: ListTodo,

@@ -69,7 +69,7 @@ export function ThreadItem({ thread }: ThreadItemProps) {
     <div className="group/thread">
       <div
         onClick={() => toggleExpanded(thread.id)}
-        className="flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-white/5 cursor-pointer transition-colors"
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-slate-800/50 cursor-pointer transition-colors"
       >
         {thread.isExpanded ? (
           <ChevronDown className="w-3 h-3 text-ghost-text-dim shrink-0" />
@@ -94,7 +94,7 @@ export function ThreadItem({ thread }: ThreadItemProps) {
               e.stopPropagation()
               setShowActions(!showActions)
             }}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 transition-colors"
           >
             <MoreHorizontal className="w-3 h-3 text-ghost-text-dim" />
           </button>
@@ -127,7 +127,7 @@ export function ThreadItem({ thread }: ThreadItemProps) {
           {offlineCount > 0 && (
             <button
               onClick={handleRestartAll}
-              className="flex items-center gap-1 px-2 py-0.5 text-2xs rounded bg-ghost-accent/10 text-ghost-accent hover:bg-ghost-accent/20 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 text-2xs rounded bg-indigo-950/50 text-ghost-accent hover:bg-ghost-accent/20 transition-colors"
               title="Restart offline agents"
             >
               <RotateCw className="w-2.5 h-2.5" />
@@ -161,7 +161,7 @@ export function ThreadItem({ thread }: ThreadItemProps) {
           />
           <button
             type="submit"
-            className="h-6 px-2 text-2xs bg-ghost-accent/10 text-ghost-accent rounded hover:bg-ghost-accent/20 transition-colors"
+            className="h-6 px-2 text-2xs bg-indigo-950/50 text-ghost-accent rounded hover:bg-ghost-accent/20 transition-colors"
           >
             Broadcast
           </button>

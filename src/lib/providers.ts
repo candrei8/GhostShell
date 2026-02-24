@@ -8,8 +8,8 @@ export interface ModelDef {
 }
 
 export const CLAUDE_MODELS: ModelDef[] = [
-  { id: 'claude-sonnet-4-5-20250929', name: 'Sonnet 4.5', badge: 'Recommended', color: '#a855f7' },
-  { id: 'claude-opus-4-6', name: 'Opus 4.6', badge: 'Most Capable', color: '#f59e0b' },
+  { id: 'claude-opus-4-6', name: 'Opus 4.6', badge: 'Recommended', color: '#f59e0b' },
+  { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', badge: 'Fast & Capable', color: '#a855f7' },
   { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', badge: 'Fastest', color: '#22d3ee' },
 ]
 
@@ -25,7 +25,7 @@ export function getModelsForProvider(provider: Provider): ModelDef[] {
 }
 
 export function getDefaultModel(provider: Provider): string {
-  return provider === 'gemini' ? 'flash' : 'claude-sonnet-4-5-20250929'
+  return provider === 'gemini' ? 'flash' : 'claude-opus-4-6'
 }
 
 /**

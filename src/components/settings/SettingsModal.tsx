@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Download, RefreshCw } from 'lucide-react'
+import { X, Download, RefreshCw, Volume2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTerminalStore } from '../../stores/terminalStore'
@@ -8,6 +8,7 @@ import { ThemeCustomizer } from './ThemeCustomizer'
 import { Toggle } from '../common/Toggle'
 import { RangeSlider } from '../common/RangeSlider'
 import { CLAUDE_MODELS, GEMINI_MODELS, getProviderColor, getInstallCommand, getUpdateCommand } from '../../lib/providers'
+import { playNotificationSound } from '../../lib/sounds'
 import { Provider } from '../../lib/types'
 
 type SettingsTab = 'appearance' | 'providers' | 'terminal'
@@ -33,6 +34,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     cursorBlink,
     cursorStyle,
     muteNotifications,
+    notificationVolume,
     claudeCliPath,
     defaultModel,
     defaultSkipPermissions,
@@ -44,6 +46,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setCursorBlink,
     setCursorStyle,
     setMuteNotifications,
+    setNotificationVolume,
     setClaudeCliPath,
     setDefaultModel,
     setDefaultSkipPermissions,
@@ -89,9 +92,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [isOpen, onClose])
 
-  const selectClass = 'w-full h-10 px-3 bg-ghost-bg border border-ghost-border rounded-lg text-sm text-ghost-text focus:outline-none focus:border-ghost-accent transition-colors appearance-none cursor-pointer ghost-select'
-  const inputClass = 'w-full h-10 px-3 bg-ghost-bg border border-ghost-border rounded-lg text-sm text-ghost-text font-mono focus:outline-none focus:border-ghost-accent transition-colors'
-  const actionBtnClass = 'h-8 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border'
+  const selectClass = 'w-full h-11 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-sm text-ghost-text focus:outline-none focus:border-ghost-accent transition-colors appearance-none cursor-pointer ghost-select'
+  const inputClass = 'w-full h-11 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-sm text-ghost-text font-mono focus:outline-none focus:border-ghost-accent transition-colors'
+  const actionBtnClass = 'h-9 px-3 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all border'
 
   return (
     <AnimatePresence>
@@ -116,30 +119,30 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <motion.div
             ref={panelRef}
             tabIndex={-1}
-            className="relative w-[560px] max-h-[80vh] bg-ghost-surface rounded-xl border border-ghost-border shadow-2xl flex flex-col overflow-hidden outline-none"
+            className="relative w-[580px] max-h-[80vh] bg-ghost-surface rounded-2xl border border-ghost-border shadow-2xl flex flex-col overflow-hidden outline-none"
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.15 }}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-ghost-border shrink-0">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-ghost-border shrink-0">
               <h2 className="text-sm font-bold text-ghost-text uppercase tracking-wider">Settings</h2>
               <button
                 onClick={onClose}
-                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/10 text-ghost-text-dim hover:text-ghost-text transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-800 text-ghost-text-dim hover:text-ghost-text transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-0 px-5 border-b border-ghost-border shrink-0">
+            <div className="flex gap-0 px-6 border-b border-ghost-border shrink-0">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2.5 text-xs font-medium transition-colors relative ${
+                  className={`px-4 py-3 text-sm font-medium transition-colors relative ${
                     activeTab === tab.id
                       ? 'text-ghost-accent'
                       : 'text-ghost-text-dim hover:text-ghost-text'
@@ -157,7 +160,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto px-5 py-5">
+            <div className="flex-1 overflow-y-auto px-6 py-6">
               <AnimatePresence mode="wait">
                 {activeTab === 'appearance' && (
                   <motion.div
@@ -191,11 +194,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     {/* Provider toggle */}
                     <div>
                       <label className="text-xs text-ghost-text-dim uppercase tracking-wider mb-2 block">Default Provider</label>
-                      <div className="flex gap-1 p-0.5 bg-ghost-bg rounded-lg border border-ghost-border w-fit">
+                      <div className="flex gap-1 p-1 bg-ghost-bg rounded-xl border border-ghost-border w-fit">
                         <button
                           onClick={() => setDefaultProvider('claude')}
-                          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                            defaultProvider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+                          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                            defaultProvider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
                           }`}
                           style={defaultProvider === 'claude' ? { backgroundColor: getProviderColor('claude') } : undefined}
                         >
@@ -203,8 +206,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </button>
                         <button
                           onClick={() => setDefaultProvider('gemini')}
-                          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                            defaultProvider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-white/5'
+                          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                            defaultProvider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
                           }`}
                           style={defaultProvider === 'gemini' ? { backgroundColor: getProviderColor('gemini') } : undefined}
                         >
@@ -367,7 +370,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
                     <div>
                       <label className="text-xs text-ghost-text-dim mb-2 block">Cursor Style</label>
-                      <div className="flex gap-1 p-0.5 bg-ghost-bg rounded-lg border border-ghost-border w-fit">
+                      <div className="flex gap-1 p-1 bg-ghost-bg rounded-xl border border-ghost-border w-fit">
                         {(['bar', 'block', 'underline'] as const).map((style) => (
                           <button
                             key={style}
@@ -375,7 +378,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize ${
                               cursorStyle === style
                                 ? 'bg-ghost-accent text-white'
-                                : 'text-ghost-text-dim hover:bg-white/5 hover:text-ghost-text'
+                                : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
                             }`}
                           >
                             {style}
@@ -396,6 +399,23 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       label="Mute Notifications"
                       description="Suppress all toast and OS notifications."
                     />
+
+                    <div className={`flex flex-col gap-3 ${muteNotifications ? 'opacity-40 pointer-events-none' : ''}`}>
+                      <RangeSlider
+                        label="Notification Volume"
+                        min={0}
+                        max={100}
+                        value={notificationVolume}
+                        onChange={setNotificationVolume}
+                      />
+                      <button
+                        onClick={() => playNotificationSound('success')}
+                        className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-ghost-bg border border-ghost-border text-xs text-ghost-text-dim hover:text-ghost-text hover:border-ghost-accent/40 transition-colors w-fit"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        Test Sound
+                      </button>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>

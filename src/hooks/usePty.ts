@@ -5,7 +5,6 @@ import { useTerminalStore } from '../stores/terminalStore'
 import { useHistoryStore } from '../stores/historyStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useActivityStore } from '../stores/activityStore'
-import { useSettingsStore } from '../stores/settingsStore'
 import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel } from '../lib/providers'
 import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
 import { Provider, SubAgentOutputLine } from '../lib/types'
@@ -132,8 +131,6 @@ function scheduleIdleCheck(agentId: string, delayMs: number, agentName: string) 
     // Guard: agent may have been deleted while timer was pending
     const agent = useAgentStore.getState().getAgent(agentId)
     if (!agent) return
-    // Re-check mute at fire time (user may have toggled since scheduling)
-    const muted = useSettingsStore.getState().muteNotifications
     if (agent.status === 'working') {
       useAgentStore.getState().setAgentStatus(agentId, 'idle')
       useActivityStore.getState().setActivity(agentId, 'idle')
@@ -142,12 +139,14 @@ function scheduleIdleCheck(agentId: string, delayMs: number, agentName: string) 
         // Dedup: skip if we notified this agent in the last 10 seconds
         const lastNotifTime = lastIdleNotificationTime.get(agentId) || 0
         const now = Date.now()
-        if (!muted && now - lastNotifTime > 10000) {
+        if (now - lastNotifTime > 10000) {
           lastIdleNotificationTime.set(agentId, now)
           useNotificationStore.getState().addNotification(
             'success',
-            `PUM! ${agentName} ha acabado`,
-            'Agent is ready for input'
+            `${agentName} finished`,
+            'Ready for input',
+            4000,
+            'full'
           )
         }
       } else {
@@ -379,8 +378,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               useActivityStore.getState().setActivity(agentId, 'idle')
               useNotificationStore.getState().addNotification(
                 'error',
-                `${label} CLI not installed`,
+                `${label} CLI not found`,
                 `Run: ${installCmd} — or go to Settings > AI Providers > Install`,
+                8000,
+                'full'
               )
               // Write a helpful message directly in the terminal
               terminal.writeln('')
@@ -463,6 +464,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             return false
           }
 
+          // F2: Rename active tab (intercept so xterm doesn't send escape sequence)
+          if (e.key === 'F2' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+            return false
+          }
+
           // Ctrl+Shift+V or Ctrl+V: Paste from clipboard (image-aware)
           if (e.ctrlKey && e.code === 'KeyV') {
             ;(async () => {
@@ -513,14 +519,31 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           cleanups.push(() => termEl.removeEventListener('contextmenu', handleContextMenu))
 
           // Drag-and-drop: drop files/images onto terminal writes their path to PTY
+          // Uses dragCounter to avoid flicker when moving between child elements
+          let dragCounter = 0
+          const paneEl = termEl.closest('[data-terminal-pane]') as HTMLElement | null
+          const handleDragEnter = (e: DragEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+            dragCounter++
+            if (dragCounter === 1 && paneEl) paneEl.classList.add('drop-target')
+          }
           const handleDragOver = (e: DragEvent) => {
             e.preventDefault()
             e.stopPropagation()
             if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
           }
+          const handleDragLeave = (e: DragEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+            dragCounter--
+            if (dragCounter === 0 && paneEl) paneEl.classList.remove('drop-target')
+          }
           const handleDrop = (e: DragEvent) => {
             e.preventDefault()
             e.stopPropagation()
+            dragCounter = 0
+            if (paneEl) paneEl.classList.remove('drop-target')
             if (!e.dataTransfer) return
             const files = e.dataTransfer.files
             if (files.length > 0) {
@@ -537,11 +560,16 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               }
             }
           }
+          termEl.addEventListener('dragenter', handleDragEnter)
           termEl.addEventListener('dragover', handleDragOver)
+          termEl.addEventListener('dragleave', handleDragLeave)
           termEl.addEventListener('drop', handleDrop)
           cleanups.push(() => {
+            termEl.removeEventListener('dragenter', handleDragEnter)
             termEl.removeEventListener('dragover', handleDragOver)
+            termEl.removeEventListener('dragleave', handleDragLeave)
             termEl.removeEventListener('drop', handleDrop)
+            if (paneEl) paneEl.classList.remove('drop-target')
           })
         }
 
@@ -598,8 +626,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             updateAgent(agentId, { terminalId: undefined })
             useNotificationStore.getState().addNotification(
               'warning',
-              `${agentName} went offline`,
-              'Process exited'
+              `${agentName} disconnected`,
+              'Process exited unexpectedly',
+              5000,
+              'full'
             )
           }
         })

@@ -88,7 +88,7 @@ export function AgentContextMenu({ agent, onClose }: AgentContextMenuProps) {
       ) : (
         <button
           onClick={() => setIsRenaming(true)}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ghost-text hover:bg-white/5 transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ghost-text hover:bg-slate-800/50 transition-colors"
         >
           <Pencil className="w-3 h-3 text-ghost-text-dim" />
           Rename
@@ -101,7 +101,7 @@ export function AgentContextMenu({ agent, onClose }: AgentContextMenuProps) {
           cloneAgent(agent.id)
           onClose()
         }}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ghost-text hover:bg-white/5 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ghost-text hover:bg-slate-800/50 transition-colors"
       >
         <Copy className="w-3 h-3 text-ghost-text-dim" />
         Clone Agent
@@ -117,7 +117,7 @@ export function AgentContextMenu({ agent, onClose }: AgentContextMenuProps) {
             moveAgentToThread(agent.id, agent.threadId, undefined)
             onClose()
           }}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ghost-text-dim hover:bg-white/5 transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ghost-text-dim hover:bg-slate-800/50 transition-colors"
         >
           <GitBranch className="w-3 h-3 text-ghost-text-dim" />
           Remove from thread
@@ -130,7 +130,7 @@ export function AgentContextMenu({ agent, onClose }: AgentContextMenuProps) {
             moveAgentToThread(agent.id, agent.threadId, thread.id)
             onClose()
           }}
-          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/5 transition-colors ${
+          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-800/50 transition-colors ${
             thread.id === agent.threadId ? 'text-ghost-accent' : 'text-ghost-text'
           }`}
         >

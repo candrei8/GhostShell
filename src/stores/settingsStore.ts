@@ -17,8 +17,11 @@ interface SettingsState {
   defaultProvider: Provider
   geminiCliPath: string
   defaultGeminiModel: string
+  lastAgentFolder: string
   muteNotifications: boolean
+  notificationVolume: number
 
+  setLastAgentFolder: (path: string) => void
   setTheme: (id: string) => void
   setFontSize: (size: number) => void
   setFontFamily: (family: string) => void
@@ -32,6 +35,7 @@ interface SettingsState {
   setGeminiCliPath: (path: string) => void
   setDefaultGeminiModel: (model: string) => void
   setMuteNotifications: (mute: boolean) => void
+  setNotificationVolume: (volume: number) => void
   getTheme: () => Theme
   getAvailableThemes: () => Theme[]
   initTheme: () => void
@@ -40,20 +44,23 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
-      themeId: 'ghostshell-dark',
+      themeId: 'qubria-dark',
       fontSize: 13,
       fontFamily: 'JetBrains Mono, Fira Code, Cascadia Code, Consolas, monospace',
       terminalFontSize: 14,
       cursorBlink: true,
       cursorStyle: 'bar',
       claudeCliPath: 'claude',
-      defaultModel: 'claude-sonnet-4-5-20250929',
+      defaultModel: 'claude-opus-4-6',
       defaultSkipPermissions: false,
       defaultProvider: 'claude',
       geminiCliPath: 'gemini',
       defaultGeminiModel: 'flash',
+      lastAgentFolder: '',
       muteNotifications: false,
+      notificationVolume: 50,
 
+      setLastAgentFolder: (path) => set({ lastAgentFolder: path }),
       setTheme: (id) => {
         set({ themeId: id })
         applyTheme(getTheme(id))
@@ -70,6 +77,7 @@ export const useSettingsStore = create<SettingsState>()(
       setGeminiCliPath: (path) => set({ geminiCliPath: path }),
       setDefaultGeminiModel: (model) => set({ defaultGeminiModel: model }),
       setMuteNotifications: (mute) => set({ muteNotifications: mute }),
+      setNotificationVolume: (volume) => set({ notificationVolume: volume }),
       getTheme: () => getTheme(get().themeId),
       getAvailableThemes: () => themes,
       initTheme: () => applyTheme(getTheme(get().themeId)),
@@ -91,7 +99,9 @@ export const useSettingsStore = create<SettingsState>()(
         defaultProvider: state.defaultProvider,
         geminiCliPath: state.geminiCliPath,
         defaultGeminiModel: state.defaultGeminiModel,
+        lastAgentFolder: state.lastAgentFolder,
         muteNotifications: state.muteNotifications,
+        notificationVolume: state.notificationVolume,
       }),
       onRehydrateStorage: () => {
         return (state) => {

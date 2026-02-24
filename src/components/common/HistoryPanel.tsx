@@ -57,7 +57,7 @@ export function HistoryPanel() {
 
       {/* Search */}
       <div className="px-3 pb-2 pt-2">
-        <div className="flex items-center gap-1.5 bg-ghost-surface border border-ghost-border rounded-lg px-2 py-1">
+        <div className="flex items-center gap-1.5 bg-ghost-surface border border-ghost-border rounded-xl px-3 py-1">
           <Search className="w-3 h-3 text-ghost-text-dim shrink-0" />
           <input
             ref={inputRef}
@@ -95,7 +95,7 @@ export function HistoryPanel() {
                   delay: Math.min(index * 0.02, 0.2),
                   layout: { type: 'spring', stiffness: 300, damping: 28 },
                 }}
-                className="group flex items-start gap-1.5 px-2 py-1.5 rounded hover:bg-white/5 transition-colors"
+                className="group flex items-start gap-1.5 px-2 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-ghost-text font-mono truncate" title={entry.command}>
