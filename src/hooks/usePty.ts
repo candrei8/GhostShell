@@ -507,6 +507,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
           // Ctrl+Shift+V or Ctrl+V: Paste from clipboard (image-aware)
           if (e.ctrlKey && e.code === 'KeyV') {
+            e.preventDefault()
             ;(async () => {
               try {
                 const items = await navigator.clipboard.read()
