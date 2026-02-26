@@ -11,13 +11,16 @@ import {
   Sparkles,
   AlertTriangle,
   ChevronRight,
+  Save,
+  Trash2,
+  Play,
 } from 'lucide-react'
 import { agentTemplates, AgentTemplate, templateCategories, TemplateCategory } from '../../lib/agent-templates'
 import { useAgent } from '../../hooks/useAgent'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTerminalStore } from '../../stores/terminalStore'
-import { GridLayout, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../../lib/types'
+import { GridLayout, ClaudeConfig, GeminiConfig, CodexConfig, Provider, SavedAgentConfig } from '../../lib/types'
 import { getModelsForProvider, getDefaultModel, getProviderColor, getProviderEmoji } from '../../lib/providers'
 
 interface QuickLaunchProps {
@@ -101,6 +104,9 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const defaultProvider = useSettingsStore((s) => s.defaultProvider)
   const lastAgentFolder = useSettingsStore((s) => s.lastAgentFolder)
   const setLastAgentFolder = useSettingsStore((s) => s.setLastAgentFolder)
+  const savedAgents = useSettingsStore((s) => s.savedAgents)
+  const addSavedAgent = useSettingsStore((s) => s.addSavedAgent)
+  const removeSavedAgent = useSettingsStore((s) => s.removeSavedAgent)
   const [provider, setProvider] = useState<Provider>(defaultProvider)
   const [projectPath, setProjectPath] = useState<string>(lastAgentFolder)
   const [gridLayout, setGridLayout] = useState<GridLayout>('1x1')
@@ -110,6 +116,8 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const [launching, setLaunching] = useState(false)
   const [specialistSearch, setSpecialistSearch] = useState('')
   const [expandedCategory, setExpandedCategory] = useState<TemplateCategory | 'all'>('all')
+  const [agentName, setAgentName] = useState('')
+  const [systemPrompt, setSystemPrompt] = useState('')
   const { createAgent } = useAgent()
   const setCurrentPath = useWorkspaceStore((s) => s.setCurrentPath)
   const recentProjects = useWorkspaceStore((s) => s.recentProjects)
@@ -152,7 +160,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const buildClaudeConfig = (template?: AgentTemplate): ClaudeConfig => ({
     model,
     dangerouslySkipPermissions: skipPermissions,
-    systemPrompt: template?.systemPrompt || '',
+    systemPrompt: template?.systemPrompt || systemPrompt.trim() || undefined,
     allowedTools: template?.claudeFlags ? extractAllowedTools(template.claudeFlags) : [],
     customFlags: template?.claudeFlags || [],
   })
@@ -173,15 +181,16 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
     const count = getGridCount()
     const cwd = projectPath || undefined
     const providerLabel = provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Claude'
+    const baseName = agentName.trim() || providerLabel
     const providerEmoji = getProviderEmoji(provider)
     const providerColor = getProviderColor(provider)
 
     const sessionIds: string[] = []
     for (let i = 0; i < count; i++) {
-      const agentName = count === 1 ? providerLabel : `${providerLabel} ${i + 1}`
+      const name = count === 1 ? baseName : `${baseName} ${i + 1}`
       if (provider === 'gemini') {
         const result = createAgent(
-          agentName,
+          name,
           { id: 'star', name: 'Star', emoji: providerEmoji, color: providerColor },
           providerColor,
           {},
@@ -191,7 +200,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         sessionIds.push(result.sessionId)
       } else if (provider === 'codex') {
         const result = createAgent(
-          agentName,
+          name,
           { id: 'robot', name: 'Robot', emoji: providerEmoji, color: providerColor },
           providerColor,
           {},
@@ -201,7 +210,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         sessionIds.push(result.sessionId)
       } else {
         const result = createAgent(
-          agentName,
+          name,
           { id: 'ghost', name: 'Ghost', emoji: providerEmoji, color: providerColor },
           providerColor,
           buildClaudeConfig(),
@@ -216,7 +225,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
       const groupId = `group-${Date.now()}`
       useTerminalStore.getState().addGroup({
         id: groupId,
-        name: 'Quick Launch',
+        name: `${baseName} (${count})`,
         sessionIds,
         createdAt: Date.now(),
       })
@@ -229,24 +238,106 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
     if (projectPath) setLastAgentFolder(projectPath)
     const cwd = projectPath || undefined
     const templateProvider = template.provider || provider
-    if (templateProvider === 'gemini') {
-      createAgent(
-        template.name, template.avatar, template.avatar.color,
-        {}, cwd, template.id, undefined, true,
-        'gemini', buildGeminiCfg(),
-      )
-    } else if (templateProvider === 'codex') {
-      createAgent(
-        template.name, template.avatar, template.avatar.color,
-        {}, cwd, template.id, undefined, true,
-        'codex', undefined, buildCodexCfg(),
-      )
-    } else {
-      createAgent(
-        template.name, template.avatar, template.avatar.color,
-        buildClaudeConfig(template), cwd, template.id, undefined, true,
-        'claude',
-      )
+    const count = getGridCount()
+    const sessionIds: string[] = []
+
+    for (let i = 0; i < count; i++) {
+      const agentName = count === 1 ? template.name : `${template.name} ${i + 1}`
+      if (templateProvider === 'gemini') {
+        const result = createAgent(
+          agentName, template.avatar, template.avatar.color,
+          {}, cwd, template.id, undefined, true,
+          'gemini', buildGeminiCfg(),
+        )
+        sessionIds.push(result.sessionId)
+      } else if (templateProvider === 'codex') {
+        const result = createAgent(
+          agentName, template.avatar, template.avatar.color,
+          {}, cwd, template.id, undefined, true,
+          'codex', undefined, buildCodexCfg(),
+        )
+        sessionIds.push(result.sessionId)
+      } else {
+        const result = createAgent(
+          agentName, template.avatar, template.avatar.color,
+          buildClaudeConfig(template), cwd, template.id, undefined, true,
+          'claude',
+        )
+        sessionIds.push(result.sessionId)
+      }
+    }
+
+    if (count > 1) {
+      useTerminalStore.getState().addGroup({
+        id: `group-${Date.now()}`,
+        name: `${template.name} (${count})`,
+        sessionIds,
+        createdAt: Date.now(),
+      })
+    }
+    onLaunched()
+  }
+
+  const handleSaveConfig = () => {
+    const providerEmoji = getProviderEmoji(provider)
+    const providerColor = getProviderColor(provider)
+    const displayName = agentName.trim() || `${provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Claude'} Agent`
+    const saved: SavedAgentConfig = {
+      id: `saved-${Date.now()}`,
+      name: displayName,
+      avatar: { id: provider, name: provider, emoji: providerEmoji, color: providerColor },
+      provider,
+      model,
+      systemPrompt: provider === 'claude' ? (systemPrompt.trim() || undefined) : undefined,
+      skipPermissions,
+      cwd: projectPath || undefined,
+      createdAt: Date.now(),
+    }
+    addSavedAgent(saved)
+    setAgentName('')
+  }
+
+  const handleLaunchSaved = (saved: SavedAgentConfig) => {
+    setLaunching(true)
+    const cwd = saved.cwd || projectPath || undefined
+    if (cwd) setLastAgentFolder(cwd)
+    const count = getGridCount()
+    const sessionIds: string[] = []
+
+    for (let i = 0; i < count; i++) {
+      const name = count === 1 ? saved.name : `${saved.name} ${i + 1}`
+      if (saved.provider === 'gemini') {
+        const result = createAgent(
+          name, saved.avatar, saved.avatar.color,
+          {}, cwd, undefined, undefined, true,
+          'gemini', { model: saved.model, yolo: saved.skipPermissions },
+        )
+        sessionIds.push(result.sessionId)
+      } else if (saved.provider === 'codex') {
+        const result = createAgent(
+          name, saved.avatar, saved.avatar.color,
+          {}, cwd, undefined, undefined, true,
+          'codex', undefined, { model: saved.model, fullAuto: saved.skipPermissions },
+        )
+        sessionIds.push(result.sessionId)
+      } else {
+        const result = createAgent(
+          name, saved.avatar, saved.avatar.color,
+          { model: saved.model, dangerouslySkipPermissions: saved.skipPermissions, systemPrompt: saved.systemPrompt },
+          cwd, undefined, undefined, true,
+          'claude',
+        )
+        sessionIds.push(result.sessionId)
+      }
+    }
+
+    if (count > 1) {
+      useTerminalStore.getState().addGroup({
+        id: `group-${Date.now()}`,
+        name: `${saved.name} (${count})`,
+        sessionIds,
+        createdAt: Date.now(),
+      })
     }
     onLaunched()
   }
@@ -549,6 +640,36 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           </div>
         </motion.div>
 
+        {/* -- Agent Name + System Prompt -- */}
+        <motion.div variants={item} className="mb-4 space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
+              Agent Name (optional)
+            </label>
+            <input
+              type="text"
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+              placeholder={provider === 'gemini' ? 'e.g. Gemini Agent' : provider === 'codex' ? 'e.g. Codex Agent' : 'e.g. Frontend Dev'}
+              className="w-full h-10 px-3 bg-ghost-surface border border-ghost-border rounded-xl text-sm text-ghost-text placeholder:text-ghost-text-dim/30 focus:outline-none focus:border-ghost-accent/40 transition-colors"
+            />
+          </div>
+          {provider === 'claude' && (
+            <div>
+              <label className="text-xs font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
+                System Prompt (optional)
+              </label>
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                placeholder="Custom instructions for Claude..."
+                rows={3}
+                className="w-full px-3 py-2 bg-ghost-surface border border-ghost-border rounded-xl text-xs text-ghost-text placeholder:text-ghost-text-dim/30 focus:outline-none focus:border-ghost-accent/40 transition-colors resize-none font-mono"
+              />
+            </div>
+          )}
+        </motion.div>
+
         {/* -- Skip Permissions -- */}
         <motion.div variants={item} className="mb-4">
           <button
@@ -583,12 +704,12 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           </button>
         </motion.div>
 
-        {/* -- Launch Button -- */}
-        <motion.div variants={item} className="mb-6">
+        {/* -- Launch + Save Buttons -- */}
+        <motion.div variants={item} className="mb-6 flex gap-2">
           <button
             onClick={handleQuickLaunch}
             disabled={launching}
-            className="w-full h-14 bg-ghost-accent text-white rounded-xl font-semibold text-base flex items-center justify-center gap-3 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 h-14 bg-ghost-accent text-white rounded-xl font-semibold text-base flex items-center justify-center gap-3 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {launching ? (
               <span className="text-sm">Launching...</span>
@@ -603,7 +724,71 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               </>
             )}
           </button>
+          <button
+            onClick={handleSaveConfig}
+            className="h-14 px-4 bg-ghost-surface border border-ghost-border rounded-xl text-ghost-text-dim hover:border-ghost-accent/40 hover:text-ghost-accent transition-all flex items-center gap-2 shrink-0"
+            title="Save this configuration for later"
+          >
+            <Save className="w-4 h-4" />
+            <span className="text-xs font-medium">Save</span>
+          </button>
         </motion.div>
+
+        {/* -- Saved Agents -- */}
+        {savedAgents.length > 0 && (
+          <motion.div variants={item} className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Save className="w-3.5 h-3.5 text-ghost-text-dim/60" />
+              <h2 className="text-sm font-semibold text-ghost-text uppercase tracking-wider">Saved Agents</h2>
+              <span className="text-xs text-ghost-text-dim/40">{savedAgents.length}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {savedAgents.map((saved) => (
+                <div
+                  key={saved.id}
+                  className="p-4 bg-ghost-surface/80 border border-ghost-border/60 rounded-2xl hover:border-ghost-accent/30 transition-all group"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0"
+                      style={{ backgroundColor: `${saved.avatar.color}15` }}
+                    >
+                      {saved.avatar.emoji}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-sm font-medium text-ghost-text block truncate">{saved.name}</span>
+                      <span className="text-xs text-ghost-text-dim/50">{saved.model}</span>
+                    </div>
+                  </div>
+                  {saved.systemPrompt && (
+                    <p className="text-xs text-ghost-text-dim/40 mb-2 line-clamp-2 font-mono">{saved.systemPrompt}</p>
+                  )}
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => handleLaunchSaved(saved)}
+                      disabled={launching}
+                      className="flex-1 h-8 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                      style={{
+                        backgroundColor: `${saved.avatar.color}15`,
+                        color: saved.avatar.color,
+                      }}
+                    >
+                      <Play className="w-3 h-3" />
+                      Launch{getGridCount() > 1 ? ` \u00D7${getGridCount()}` : ''}
+                    </button>
+                    <button
+                      onClick={() => removeSavedAgent(saved.id)}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-ghost-text-dim/30 hover:text-ghost-error hover:bg-ghost-error/10 transition-all"
+                      title="Delete saved agent"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* -- Specialists Section -- */}
         <motion.div variants={item}>
@@ -687,11 +872,18 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                         className="p-5 bg-ghost-surface/80 border border-ghost-border/60 rounded-2xl text-left hover:border-ghost-accent/30 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <div className="flex items-center gap-2 mb-1">
-                          <div
-                            className="w-9 h-9 rounded-lg flex items-center justify-center text-sm shrink-0"
-                            style={{ backgroundColor: `${template.avatar.color}15` }}
-                          >
-                            {template.avatar.emoji}
+                          <div className="relative shrink-0">
+                            <div
+                              className="w-9 h-9 rounded-lg flex items-center justify-center text-sm"
+                              style={{ backgroundColor: `${template.avatar.color}15` }}
+                            >
+                              {template.avatar.emoji}
+                            </div>
+                            {getGridCount() > 1 && (
+                              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold px-1 py-px rounded-full bg-ghost-accent text-white leading-none">
+                                {'\u00D7'}{getGridCount()}
+                              </span>
+                            )}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">

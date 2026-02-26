@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { Theme, Provider } from '../lib/types'
+import { Theme, Provider, SavedAgentConfig } from '../lib/types'
 import { themes, getTheme, applyTheme } from '../lib/themes'
 import { electronStorage } from '../lib/electronStorage'
 
@@ -22,7 +22,10 @@ interface SettingsState {
   lastAgentFolder: string
   muteNotifications: boolean
   notificationVolume: number
+  savedAgents: SavedAgentConfig[]
 
+  addSavedAgent: (config: SavedAgentConfig) => void
+  removeSavedAgent: (id: string) => void
   setLastAgentFolder: (path: string) => void
   setTheme: (id: string) => void
   setFontSize: (size: number) => void
@@ -65,7 +68,10 @@ export const useSettingsStore = create<SettingsState>()(
       lastAgentFolder: '',
       muteNotifications: false,
       notificationVolume: 50,
+      savedAgents: [],
 
+      addSavedAgent: (config) => set((state) => ({ savedAgents: [...state.savedAgents, config] })),
+      removeSavedAgent: (id) => set((state) => ({ savedAgents: state.savedAgents.filter((a) => a.id !== id) })),
       setLastAgentFolder: (path) => set({ lastAgentFolder: path }),
       setTheme: (id) => {
         set({ themeId: id })
@@ -112,6 +118,7 @@ export const useSettingsStore = create<SettingsState>()(
         lastAgentFolder: state.lastAgentFolder,
         muteNotifications: state.muteNotifications,
         notificationVolume: state.notificationVolume,
+        savedAgents: state.savedAgents,
       }),
       onRehydrateStorage: () => {
         return (state) => {

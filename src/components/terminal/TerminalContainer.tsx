@@ -837,18 +837,23 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
           {/* Ungrouped session tabs */}
           {ungroupedSessions.map((session) => renderSessionTab(session))}
 
-          {/* Inline + button */}
-          <button
-            onClick={handleNewTerminal}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              onShowQuickLaunch(true)
-            }}
-            className="flex items-center justify-center w-6 h-6 rounded text-ghost-text-dim hover:bg-slate-800 hover:text-ghost-text transition-colors shrink-0 ml-0.5"
-            title="New Terminal (right-click: Quick Launch)"
-          >
-            <Plus className="w-3.5 h-3.5" />
-          </button>
+          {/* New Agent + Terminal buttons */}
+          <div className="flex items-center gap-1 ml-1.5 shrink-0">
+            <button
+              onClick={() => onShowQuickLaunch(true)}
+              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-ghost-accent/10 text-ghost-accent text-xs font-medium border border-ghost-accent/20 hover:bg-ghost-accent/20 transition-all"
+            >
+              <Zap className="w-3 h-3" />
+              New Agent
+            </button>
+            <button
+              onClick={handleNewTerminal}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-ghost-text-dim hover:bg-slate-800 hover:text-ghost-text transition-colors"
+              title="New Terminal"
+            >
+              <TerminalIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Active pane info */}
@@ -1093,20 +1098,20 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 <h3 className="text-base text-ghost-text-dim mb-1">No terminals open</h3>
                 <p className="text-xs text-ghost-text-dim/60">Launch an agent or open a terminal to get started</p>
               </div>
-              <div className="flex gap-2 justify-center">
+              <div className="flex gap-3 justify-center">
                 <button
                   onClick={() => onShowQuickLaunch(true)}
-                  className="flex items-center gap-1.5 h-10 rounded-xl px-4 bg-ghost-accent text-white text-sm font-medium hover:bg-ghost-accent/80 transition-colors"
+                  className="flex items-center gap-2 h-11 rounded-xl px-5 bg-ghost-accent text-white text-sm font-semibold hover:brightness-110 transition-all shadow-lg shadow-ghost-accent/20"
                 >
-                  <Zap className="w-3.5 h-3.5" />
-                  Quick Launch
+                  <Zap className="w-4 h-4" />
+                  New Agent
                 </button>
                 <button
                   onClick={handleNewTerminal}
-                  className="flex items-center gap-1.5 h-10 rounded-xl px-4 bg-ghost-surface text-ghost-text text-sm hover:bg-slate-800 transition-colors border border-ghost-border"
+                  className="flex items-center gap-1.5 h-11 rounded-xl px-4 bg-ghost-surface text-ghost-text text-sm hover:bg-slate-800 transition-colors border border-ghost-border"
                 >
                   <TerminalIcon className="w-3.5 h-3.5" />
-                  New Terminal
+                  Terminal
                 </button>
               </div>
             </div>

@@ -145,6 +145,19 @@ export interface GitStatus {
   fileStatuses?: Record<string, string>
 }
 
+// Saved custom agent configuration (persisted across sessions)
+export interface SavedAgentConfig {
+  id: string
+  name: string
+  avatar: AnimalAvatar
+  provider: Provider
+  model: string
+  systemPrompt?: string
+  skipPermissions: boolean
+  cwd?: string
+  createdAt: number
+}
+
 export type SidebarView = 'files' | 'agents' | 'settings' | 'history'
 
 // Session grouping

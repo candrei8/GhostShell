@@ -671,7 +671,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         })
         cleanups.push(removeExitListener)
 
-        // Auto-launch CLI with agent config (auto-installs Gemini if needed)
+        // Auto-launch CLI with agent config (retries to handle slow PTY init)
         if (autoLaunch && agentId) {
           const launchAgent = getAgent(agentId)
           if (launchAgent) {
@@ -679,15 +679,24 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             const hasConfig = launchProvider === 'gemini' ? !!launchAgent.geminiConfig : launchProvider === 'codex' ? !!launchAgent.codexConfig : !!launchAgent.claudeConfig
             if (hasConfig || launchProvider === 'gemini' || launchProvider === 'codex') {
               const cmd = buildLaunchCommand(launchAgent)
-              setTimeout(() => {
+              const delays = [500, 1500, 3000]
+              let attempt = 0
+              const tryWrite = () => {
                 if (cancelled) return
                 try {
                   window.ghostshell.ptyWrite(sessionId, cmd + '\r')
                   setAgentStatus(agentId, 'working')
-                } catch {
-                  // PTY may not be ready yet
+                } catch (err) {
+                  attempt++
+                  if (attempt < delays.length) {
+                    setTimeout(tryWrite, delays[attempt] - delays[attempt - 1])
+                  } else {
+                    console.error('Auto-launch failed after retries:', err)
+                    terminal.writeln(`\r\n\x1b[33m[Auto-launch failed — type the command manually: ${cmd}]\x1b[0m`)
+                  }
                 }
-              }, 500)
+              }
+              setTimeout(tryWrite, delays[0])
             }
           }
         }

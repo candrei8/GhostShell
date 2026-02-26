@@ -82,7 +82,9 @@ export function UpdateBanner() {
 
         {update.status === 'error' && (
           <>
-            <span className="truncate">Update failed</span>
+            <span className="truncate" title={update.error}>
+              Update failed{update.error ? `: ${update.error}` : ''}
+            </span>
             <button
               onClick={handleRetry}
               className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 transition-colors"
