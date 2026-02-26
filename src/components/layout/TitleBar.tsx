@@ -59,24 +59,24 @@ export function TitleBar() {
   const hasChanges = gitDirtyCount > 0
 
   return (
-    <div className="titlebar-drag h-10 flex items-center bg-ghost-sidebar border-b border-ghost-border px-3 select-none gap-2">
+    <div className="titlebar-drag h-12 flex items-center bg-ghost-sidebar border-b border-ghost-border px-3 select-none gap-2">
       {/* Logo + Project name */}
       <div className="flex items-center gap-1.5 shrink-0">
-        <Terminal className="w-4 h-4 text-ghost-accent" />
-        <span className="text-xs font-semibold text-ghost-text">{projectName}</span>
+        <Terminal className="w-5 h-5 text-ghost-accent" />
+        <span className="text-sm font-semibold text-ghost-text">{projectName}</span>
       </div>
 
       {/* Git info */}
       {gitStatus?.isRepo && (
         <div className="titlebar-no-drag flex items-center gap-1 ml-2 shrink-0">
           <div
-            className={`flex items-center gap-1 h-6 px-2 rounded-lg text-xs transition-colors ${
+            className={`flex items-center gap-1 h-7 px-2 rounded-lg text-xs transition-colors ${
               hasChanges
                 ? 'bg-ghost-warning/10 text-ghost-warning'
                 : 'bg-ghost-success/10 text-ghost-success'
             }`}
           >
-            <GitBranch className="w-3 h-3" />
+            <GitBranch className="w-3.5 h-3.5" />
             <span className="max-w-[120px] truncate">{gitStatus.branch}</span>
             {hasChanges && (
               <span className="text-[10px] opacity-75">
@@ -100,15 +100,15 @@ export function TitleBar() {
         {/* Notification mute toggle */}
         <button
           onClick={() => setMuteNotifications(!muteNotifications)}
-          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+          className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
             muteNotifications ? 'text-ghost-text-dim/50 hover:bg-slate-800' : 'text-ghost-text-dim hover:bg-slate-800'
           }`}
           title={muteNotifications ? 'Unmute Notifications' : 'Mute Notifications'}
         >
           {muteNotifications ? (
-            <BellOff className="w-3 h-3" />
+            <BellOff className="w-4 h-4" />
           ) : (
-            <Bell className="w-3 h-3" />
+            <Bell className="w-4 h-4" />
           )}
         </button>
 
@@ -117,28 +117,28 @@ export function TitleBar() {
         {/* Window controls */}
         <button
           onClick={() => window.ghostshell.windowMinimize()}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
           title="Minimize"
         >
-          <Minus className="w-3 h-3 text-ghost-text-dim" />
+          <Minus className="w-3.5 h-3.5 text-ghost-text-dim" />
         </button>
         <button
           onClick={handleMaximize}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
           title={isMaximized ? 'Restore' : 'Maximize'}
         >
           {isMaximized ? (
-            <CopyIcon className="w-3 h-3 text-ghost-text-dim" />
+            <CopyIcon className="w-3.5 h-3.5 text-ghost-text-dim" />
           ) : (
             <Square className="w-2.5 h-2.5 text-ghost-text-dim" />
           )}
         </button>
         <button
           onClick={() => window.ghostshell.windowClose()}
-          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-500/80 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-500/80 transition-colors"
           title="Close"
         >
-          <X className="w-3 h-3 text-ghost-text-dim" />
+          <X className="w-3.5 h-3.5 text-ghost-text-dim" />
         </button>
       </div>
     </div>

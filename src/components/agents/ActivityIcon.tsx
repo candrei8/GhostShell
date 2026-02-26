@@ -131,8 +131,8 @@ function smartTruncate(text: string, maxLen: number): string {
 export function ActivityIcon({ activity, detail, size = 'sm', showLabel = true }: ActivityIconProps) {
   const config = activityMap[activity]
   const Icon = config.icon
-  const iconSize = size === 'xs' ? 'w-3 h-3' : size === 'sm' ? 'w-3 h-3' : 'w-4 h-4'
-  const textSize = 'text-[11px]'
+  const iconSize = size === 'xs' ? 'w-3.5 h-3.5' : size === 'sm' ? 'w-3.5 h-3.5' : 'w-5 h-5'
+  const textSize = 'text-xs'
 
   if (activity === 'idle') return null
 
@@ -140,12 +140,12 @@ export function ActivityIcon({ activity, detail, size = 'sm', showLabel = true }
 
   return (
     <span
-      className={`inline-flex items-center gap-1 ${config.bgColor} ${config.color} px-2 py-0.5 rounded ${textSize} transition-all`}
+      className={`inline-flex items-center gap-1 ${config.bgColor} ${config.color} px-2.5 py-1 rounded ${textSize} transition-all`}
       title={detail || config.label}
     >
       <Icon className={`${iconSize} shrink-0`} />
       {showLabel && (
-        <span className="truncate max-w-[140px] font-medium">
+        <span className="truncate max-w-[180px] font-medium">
           {config.label}
           {truncatedDetail && (
             <span className="opacity-60 ml-0.5 font-normal">{truncatedDetail}</span>

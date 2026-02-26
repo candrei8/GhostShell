@@ -3,7 +3,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { useThreadStore } from '../stores/threadStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { AnimalAvatar, ClaudeConfig, GeminiConfig, Provider } from '../lib/types'
+import { AnimalAvatar, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../lib/types'
 import { buildClaudeCommand, buildLaunchCommand, resolveProvider } from '../lib/providers'
 
 // Re-export for backward compat
@@ -32,8 +32,9 @@ export function useAgent() {
       launchClaude?: boolean,
       provider?: Provider,
       geminiConfig?: GeminiConfig,
+      codexConfig?: CodexConfig,
     ) => {
-      const agent = addAgent(name, avatar, color, claudeConfig, cwd, templateId, provider, geminiConfig)
+      const agent = addAgent(name, avatar, color, claudeConfig, cwd, templateId, provider, geminiConfig, codexConfig)
 
       const sessionId = `term-${agent.id}`
       addSession({
@@ -127,7 +128,7 @@ export function useAgent() {
 
       const sessionId = `term-${agent.id}-${Date.now()}`
       const provider = resolveProvider(agent)
-      const hasConfig = provider === 'gemini' ? !!agent.geminiConfig : !!agent.claudeConfig
+      const hasConfig = provider === 'gemini' ? !!agent.geminiConfig : provider === 'codex' ? !!agent.codexConfig : !!agent.claudeConfig
       addSession({
         id: sessionId,
         agentId: agent.id,
@@ -179,6 +180,7 @@ export function useAgent() {
         true,
         agent.provider,
         agent.geminiConfig,
+        agent.codexConfig,
       )
     },
     [createAgent],
@@ -219,6 +221,7 @@ export function useAgent() {
         templateId?: string
         provider?: Provider
         geminiConfig?: GeminiConfig
+        codexConfig?: CodexConfig
       }>,
       groupName: string,
     ) => {
@@ -237,6 +240,7 @@ export function useAgent() {
           true,
           config.provider,
           config.geminiConfig,
+          config.codexConfig,
         )
         sessionIds.push(result.sessionId)
         createdAgents.push(result)

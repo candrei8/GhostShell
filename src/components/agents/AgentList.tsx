@@ -28,26 +28,26 @@ export function AgentList() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="px-4 pt-5 pb-4 mb-3 shrink-0">
+      <div className="px-5 pt-6 pb-5 mb-3 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-ghost-accent" />
-            <span className="text-xs font-bold text-ghost-text uppercase tracking-widest">Agents</span>
+            <Layers className="w-5 h-5 text-ghost-accent" />
+            <span className="text-sm font-bold text-ghost-text uppercase tracking-widest">Agents</span>
             {workingAgents.length > 0 && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-950/50 text-ghost-success font-semibold flex items-center gap-1">
-                <Zap className="w-3 h-3" />
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-950/50 text-ghost-success font-semibold flex items-center gap-1">
+                <Zap className="w-3.5 h-3.5" />
                 {workingAgents.length} active
               </span>
             )}
           </div>
           <motion.button
             onClick={() => setShowCreator(true)}
-            className="w-8 h-8 flex items-center justify-center rounded-xl bg-indigo-950/50 hover:bg-ghost-accent/20 text-ghost-accent transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-indigo-950/50 hover:bg-ghost-accent/20 text-ghost-accent transition-colors"
             title="New Agent"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-5 h-5" />
           </motion.button>
         </div>
       </div>
@@ -68,18 +68,18 @@ export function AgentList() {
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="w-12 h-12 rounded-xl bg-indigo-950/50 flex items-center justify-center">
-                <Layers className="w-5 h-5 text-ghost-accent/60" />
+              <div className="w-14 h-14 rounded-xl bg-indigo-950/50 flex items-center justify-center">
+                <Layers className="w-6 h-6 text-ghost-accent/60" />
               </div>
-              <span className="text-[11px] text-ghost-text-dim">
+              <span className="text-xs text-ghost-text-dim">
                 Launch your first agent
               </span>
-              <span className="text-[11px] text-ghost-text-dim/40">
+              <span className="text-xs text-ghost-text-dim/40">
                 Create a specialist or quick-launch from home
               </span>
             </motion.button>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2.5">
               {/* Working agents — full cards */}
               {workingAgents.map((agent, index) => (
                 <motion.div
@@ -120,24 +120,24 @@ export function AgentList() {
                           </button>
                         ))}
                         {idleAgents.length > 6 && (
-                          <div className="w-6 h-6 rounded-full bg-ghost-border flex items-center justify-center text-[10px] text-ghost-text-dim font-medium">
+                          <div className="w-8 h-8 rounded-full bg-ghost-border flex items-center justify-center text-[11px] text-ghost-text-dim font-medium">
                             +{idleAgents.length - 6}
                           </div>
                         )}
                       </div>
                       <button
                         onClick={() => setIdleExpanded(true)}
-                        className="text-[11px] text-ghost-text-dim hover:text-ghost-text transition-colors ml-1"
+                        className="text-xs text-ghost-text-dim hover:text-ghost-text transition-colors ml-1"
                       >
                         {idleAgents.length} idle
                       </button>
                     </div>
                   ) : (
                     /* Expanded: full cards */
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-2.5">
                       <button
                         onClick={() => setIdleExpanded(false)}
-                        className="text-[11px] text-ghost-text-dim hover:text-ghost-text transition-colors px-2 py-1 text-left"
+                        className="text-xs text-ghost-text-dim hover:text-ghost-text transition-colors px-2 py-1 text-left"
                       >
                         {idleAgents.length} idle &mdash; collapse
                       </button>

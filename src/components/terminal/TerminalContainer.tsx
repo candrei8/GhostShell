@@ -679,7 +679,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
       <div
         key={session.id}
         data-tab-id={session.id}
-        className={`group/tab flex items-center gap-1 h-full px-2.5 rounded-lg text-xs whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+        className={`group/tab flex items-center gap-1.5 h-full px-3 rounded-lg text-sm whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
           isNested ? 'ml-4 ' : ''
         }${
           isActive
@@ -708,7 +708,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             }`}
           />
         )}
-        {!agent && <TerminalIcon className="w-3 h-3 shrink-0" />}
+        {!agent && <TerminalIcon className="w-3.5 h-3.5 shrink-0" />}
 
         {renamingTabId === session.id ? (
           <input
@@ -738,9 +738,9 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             e.stopPropagation()
             handleCloseSession(session.id)
           }}
-          className="w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-slate-800 transition-all shrink-0 ml-0.5"
+          className="w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-slate-800 transition-all shrink-0 ml-0.5"
         >
-          <X className="w-3 h-3" />
+          <X className="w-3.5 h-3.5" />
         </button>
       </div>
     )
@@ -749,7 +749,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Tab bar - hidden when no sessions */}
-      {!hasNoSessions && <div className="h-10 flex items-center bg-ghost-sidebar/50 border-b border-ghost-border px-2 shrink-0">
+      {!hasNoSessions && <div className="h-11 flex items-center bg-ghost-sidebar/50 border-b border-ghost-border px-2 shrink-0">
         <div className="flex items-center gap-0.5 flex-1 overflow-x-auto min-w-0">
           {/* Group tabs */}
           {groups.map((group) => {
@@ -818,9 +818,9 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                       e.stopPropagation()
                       handleCloseGroup(group.id)
                     }}
-                    className="w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-slate-800 transition-all shrink-0 ml-0.5"
+                    className="w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-slate-800 transition-all shrink-0 ml-0.5"
                   >
-                    <X className="w-3 h-3" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
@@ -899,7 +899,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 <MoreHorizontal className="w-3.5 h-3.5" />
               </button>
               {headerMenuOpen && (
-                <div ref={headerMenuRef} className="absolute top-full right-0 mt-1 w-52 py-1 bg-ghost-surface border border-ghost-border rounded-xl shadow-qubria-lg z-50">
+                <div ref={headerMenuRef} className="absolute top-full right-0 mt-1 w-56 py-1 bg-ghost-surface border border-ghost-border rounded-xl shadow-qubria-lg z-50">
                   <button onClick={handleSendCtrlC} className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text transition-colors">
                     <SquareSlash className="w-3.5 h-3.5" />
                     Send Ctrl+C
@@ -1063,7 +1063,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
         {showQuickLaunch && (
           <div className="absolute inset-0 z-30 flex flex-col bg-ghost-bg overflow-hidden">
             {!hasNoSessions && (
-              <div className="h-9 flex items-center justify-between px-3 bg-ghost-sidebar/50 border-b border-ghost-border shrink-0">
+              <div className="h-11 flex items-center justify-between px-3 bg-ghost-sidebar/50 border-b border-ghost-border shrink-0">
                 <span className="text-xs text-ghost-text-dim">
                   {sessions.length} terminal{sessions.length !== 1 ? 's' : ''} running
                 </span>
@@ -1086,24 +1086,24 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
         {hasNoSessions && !showQuickLaunch && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-ghost-bg">
             <div className="text-center space-y-4">
-              <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto">
-                <TerminalIcon className="w-7 h-7 text-ghost-text-dim/30" />
+              <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto">
+                <TerminalIcon className="w-8 h-8 text-ghost-text-dim/30" />
               </div>
               <div>
-                <h3 className="text-sm text-ghost-text-dim mb-1">No terminals open</h3>
+                <h3 className="text-base text-ghost-text-dim mb-1">No terminals open</h3>
                 <p className="text-xs text-ghost-text-dim/60">Launch an agent or open a terminal to get started</p>
               </div>
               <div className="flex gap-2 justify-center">
                 <button
                   onClick={() => onShowQuickLaunch(true)}
-                  className="flex items-center gap-1.5 h-9 rounded-xl px-3 bg-ghost-accent text-white text-xs font-medium hover:bg-ghost-accent/80 transition-colors"
+                  className="flex items-center gap-1.5 h-10 rounded-xl px-4 bg-ghost-accent text-white text-sm font-medium hover:bg-ghost-accent/80 transition-colors"
                 >
                   <Zap className="w-3.5 h-3.5" />
                   Quick Launch
                 </button>
                 <button
                   onClick={handleNewTerminal}
-                  className="flex items-center gap-1.5 h-9 rounded-xl px-3 bg-ghost-surface text-ghost-text text-xs hover:bg-slate-800 transition-colors border border-ghost-border"
+                  className="flex items-center gap-1.5 h-10 rounded-xl px-4 bg-ghost-surface text-ghost-text text-sm hover:bg-slate-800 transition-colors border border-ghost-border"
                 >
                   <TerminalIcon className="w-3.5 h-3.5" />
                   New Terminal
@@ -1156,7 +1156,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             }}
             className="w-full px-3 py-1.5 flex items-center gap-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
           >
-            <X className="w-3 h-3" />
+            <X className="w-3.5 h-3.5" />
             Close Tab
           </button>
         </div>

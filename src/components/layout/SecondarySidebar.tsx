@@ -20,7 +20,7 @@ const cubicEase = [0.4, 0, 0.2, 1] as const
 
 export function SecondarySidebar({ activeView, collapsed }: SecondarySidebarProps) {
   const effectiveCollapsed = collapsed || activeView === 'settings'
-  const [width, setWidth] = useState(300)
+  const [width, setWidth] = useState(340)
   const [isResizing, setIsResizing] = useState(false)
   const prevViewRef = useRef(activeView)
   const directionRef = useRef(1)
@@ -43,7 +43,7 @@ export function SecondarySidebar({ activeView, collapsed }: SecondarySidebarProp
 
       const onMove = (ev: MouseEvent) => {
         const delta = ev.clientX - startX
-        setWidth(Math.min(420, Math.max(240, startWidth + delta)))
+        setWidth(Math.min(500, Math.max(280, startWidth + delta)))
       }
       const onUp = () => {
         setIsResizing(false)

@@ -481,10 +481,134 @@ export function parseGeminiOutput(stripped: string): ParseResult[] {
   return results
 }
 
-/** Unified parser: dispatches to Claude or Gemini parser based on provider */
+// --- Codex CLI output parsing ---
+// Codex uses similar agentic patterns (tool calls, file ops, shell commands)
+const CODEX_TOOL_READ = /\breadFile\s*\(\s*(?:path|file):\s*"([^"]+)"/
+const CODEX_TOOL_WRITE = /\bwriteFile\s*\(\s*(?:path|file):\s*"([^"]+)"/
+const CODEX_TOOL_PATCH = /\bpatch\s*\(\s*(?:path|file):\s*"([^"]+)"/
+const CODEX_TOOL_SHELL = /\bshell\s*\(\s*command:\s*"([^"]+)"/
+
+// Codex alternative display patterns
+const CODEX_READ_ALT = /(?:Reading|Read)\s+([^\s\n]+)/
+const CODEX_WRITE_ALT = /(?:Writing|Wrote|Creating)\s+([^\s\n]+)/
+const CODEX_EDIT_ALT = /(?:Editing|Patching|Updating)\s+([^\s\n]+)/
+const CODEX_SHELL_ALT = /(?:Running|Executing|Ran)\s+`?([^`\n]+)`?/
+const CODEX_SEARCH_ALT = /(?:Searching|Grepping)\s+(.+)/
+
+export function parseCodexOutput(stripped: string): ParseResult[] {
+  const results: ParseResult[] = []
+  let match: RegExpExecArray | null
+
+  // Tool calls (formal format)
+  match = CODEX_TOOL_READ.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'reading',
+      tool: 'readFile',
+      detail: match[1],
+      fileTouch: { path: match[1], operation: 'read' },
+    })
+  }
+
+  match = CODEX_TOOL_WRITE.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'writing',
+      tool: 'writeFile',
+      detail: match[1],
+      fileTouch: { path: match[1], operation: 'write' },
+    })
+  }
+
+  match = CODEX_TOOL_PATCH.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'editing',
+      tool: 'patch',
+      detail: match[1],
+      fileTouch: { path: match[1], operation: 'edit' },
+    })
+  }
+
+  match = CODEX_TOOL_SHELL.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'running_bash',
+      tool: 'shell',
+      detail: match[1],
+    })
+  }
+
+  // Alternative display formats
+  if (results.length === 0) {
+    match = CODEX_READ_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'reading',
+        tool: 'readFile',
+        detail: match[1],
+        fileTouch: { path: match[1], operation: 'read' },
+      })
+    }
+
+    match = CODEX_WRITE_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'writing',
+        tool: 'writeFile',
+        detail: match[1],
+        fileTouch: { path: match[1], operation: 'write' },
+      })
+    }
+
+    match = CODEX_EDIT_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'editing',
+        tool: 'patch',
+        detail: match[1],
+        fileTouch: { path: match[1], operation: 'edit' },
+      })
+    }
+
+    match = CODEX_SHELL_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'running_bash',
+        tool: 'shell',
+        detail: match[1],
+      })
+    }
+
+    match = CODEX_SEARCH_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'searching',
+        tool: 'search',
+        detail: match[1],
+      })
+    }
+  }
+
+  // High-level activity patterns
+  if (results.length === 0) {
+    if (PERMISSION_PATTERN.test(stripped)) {
+      results.push({ activity: 'permission' })
+    } else if (SPINNER_CHARS.test(stripped)) {
+      results.push({ activity: 'thinking' })
+    }
+  }
+
+  return results
+}
+
+/** Unified parser: dispatches to Claude, Gemini, or Codex parser based on provider */
 export function parseOutput(stripped: string, provider: Provider = 'claude'): ParseResult[] {
   if (provider === 'gemini') {
     return parseGeminiOutput(stripped)
+  }
+  if (provider === 'codex') {
+    return parseCodexOutput(stripped)
   }
   return parseClaudeOutput(stripped)
 }

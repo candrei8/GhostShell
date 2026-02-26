@@ -94,30 +94,30 @@ function SubAgentNode({ agent, isLast }: { agent: SubAgent; isLast: boolean }) {
             : 'hover:bg-white/3'
         }`}
       >
-        <Icon className={`w-3 h-3 ${config.color} shrink-0`} />
+        <Icon className={`w-3.5 h-3.5 ${config.color} shrink-0`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1">
-            <span className={`text-[10px] font-semibold ${isActive ? config.color : 'text-ghost-text-dim'}`}>
+            <span className={`text-[11px] font-semibold ${isActive ? config.color : 'text-ghost-text-dim'}`}>
               {config.label}
             </span>
             {agent.model && (
-              <span className="text-[10px] px-1 py-px rounded-full bg-white/5 text-ghost-text-dim/60">
+              <span className="text-[11px] px-1 py-px rounded-full bg-white/5 text-ghost-text-dim/60">
                 {agent.model}
               </span>
             )}
           </div>
-          <p className="text-[10px] text-ghost-text-dim/70 truncate leading-tight">
+          <p className="text-[11px] text-ghost-text-dim/70 truncate leading-tight">
             {agent.description}
           </p>
         </div>
 
         {/* Status + duration */}
         <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[10px] text-ghost-text-dim/50 font-mono tabular-nums">
+          <span className="text-[11px] text-ghost-text-dim/50 font-mono tabular-nums">
             {formatDuration(agent.startTime, agent.endTime)}
           </span>
           <StatusIcon
-            className={`w-3 h-3 shrink-0 ${
+            className={`w-3.5 h-3.5 shrink-0 ${
               agent.status === 'completed' ? 'text-green-500' :
               agent.status === 'error' ? 'text-red-500' :
               isActive ? `${config.color} animate-spin` :
@@ -144,16 +144,16 @@ export function SubAgentTree({ subAgents, compact = false }: SubAgentTreeProps) 
   return (
     <div className="flex flex-col">
       <div className="flex items-center gap-2 mb-1">
-        <Cpu className="w-3 h-3 text-indigo-400" />
-        <span className="text-[10px] text-ghost-text-dim uppercase tracking-wider font-semibold">
+        <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+        <span className="text-[11px] text-ghost-text-dim uppercase tracking-wider font-semibold">
           Sub-agents
         </span>
         {activeCount > 0 && (
-          <span className="text-[10px] px-2 py-px rounded-full bg-indigo-400/15 text-indigo-400 font-medium">
+          <span className="text-[11px] px-2 py-px rounded-full bg-indigo-400/15 text-indigo-400 font-medium">
             {activeCount} active
           </span>
         )}
-        <span className="text-[10px] text-ghost-text-dim/40">
+        <span className="text-[11px] text-ghost-text-dim/40">
           ({sorted.length} total)
         </span>
       </div>
@@ -167,7 +167,7 @@ export function SubAgentTree({ subAgents, compact = false }: SubAgentTreeProps) 
         ))}
       </div>
       {compact && sorted.length > 5 && (
-        <span className="text-[10px] text-ghost-text-dim/40 ml-5 mt-0.5">
+        <span className="text-[11px] text-ghost-text-dim/40 ml-5 mt-0.5">
           +{sorted.length - 5} more
         </span>
       )}

@@ -92,7 +92,7 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
       {/* Pane label for grid view identification */}
       {showPaneLabel && (
         <div
-          className={`h-7 flex items-center gap-1.5 px-2 border-b shrink-0 transition-colors ${
+          className={`h-8 flex items-center gap-1.5 px-2 border-b shrink-0 transition-colors ${
             isActive ? 'bg-ghost-surface border-ghost-accent/30' : 'bg-ghost-surface/50 border-ghost-border'
           }`}
           onMouseEnter={() => setLabelHovered(true)}
@@ -111,7 +111,7 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
           )}
 
           {/* Title */}
-          <span className="text-xs font-medium text-ghost-text truncate flex-1 min-w-0">{session.title}</span>
+          <span className="text-sm font-medium text-ghost-text truncate flex-1 min-w-0">{session.title}</span>
 
           {/* Status: activity or working badge */}
           {agent && activityName && activityName !== 'idle' ? (

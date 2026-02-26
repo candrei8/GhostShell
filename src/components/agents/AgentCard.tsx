@@ -28,6 +28,11 @@ function getModelShort(model?: string): string {
   if (model === 'flash-lite') return 'Flash Lite'
   // Gemini full model IDs (fallback)
   if (model.startsWith('gemini-')) return model.replace('gemini-', '')
+  // Codex models
+  if (model === 'gpt-5.3-codex') return '5.3 Codex'
+  if (model === 'gpt-5.3-codex-spark') return 'Spark'
+  if (model === 'gpt-5.2-codex') return '5.2 Codex'
+  if (model === 'o3') return 'o3'
   return model
 }
 
@@ -115,11 +120,15 @@ export function AgentCard({ agent }: AgentCardProps) {
 
   const agentProvider = resolveProvider(agent)
   const modelShort = getModelShort(
-    agentProvider === 'gemini' ? agent.geminiConfig?.model : agent.claudeConfig?.model
+    agentProvider === 'gemini' ? agent.geminiConfig?.model
+      : agentProvider === 'codex' ? agent.codexConfig?.model
+      : agent.claudeConfig?.model
   )
   const folderName = getFolderName(agent.cwd)
   const isAutoApprove = agentProvider === 'gemini'
     ? agent.geminiConfig?.yolo
+    : agentProvider === 'codex'
+    ? agent.codexConfig?.fullAuto
     : agent.claudeConfig?.dangerouslySkipPermissions
   const filesTouchedCount = activity?.filesTouched.length || 0
   const subAgentCount = activity?.subAgents.length || 0
@@ -141,33 +150,42 @@ export function AgentCard({ agent }: AgentCardProps) {
         }`}
       >
         {/* Main row */}
-        <div className="flex items-start gap-3 px-4 py-3">
+        <div className="flex items-start gap-3.5 px-5 py-4">
           {/* Avatar with status ring */}
           <div className="relative mt-0.5">
             <div className={`rounded-full ${isWorking ? 'ring-1 ring-ghost-success/40 ring-offset-1 ring-offset-ghost-sidebar' : ''}`}>
               <AgentAvatar avatar={agent.avatar} size="sm" />
             </div>
             <div
-              className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-ghost-sidebar ${status.dotClass}`}
+              className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-ghost-sidebar ${status.dotClass}`}
             />
           </div>
 
           <div className="flex-1 min-w-0">
             {/* Name + badges row */}
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-ghost-text truncate">{agent.name}</span>
+              <span className="text-sm font-semibold text-ghost-text truncate">{agent.name}</span>
               {agentProvider === 'gemini' && (
                 <span
-                  className="text-[9px] px-1 py-px rounded-full font-semibold text-white/90 shrink-0"
+                  className="text-[11px] px-1.5 py-px rounded-full font-semibold text-white/90 shrink-0"
                   style={{ backgroundColor: getProviderColor('gemini') }}
                   title="Gemini"
                 >
                   G
                 </span>
               )}
+              {agentProvider === 'codex' && (
+                <span
+                  className="text-[11px] px-1.5 py-px rounded-full font-semibold text-white/90 shrink-0"
+                  style={{ backgroundColor: getProviderColor('codex') }}
+                  title="Codex"
+                >
+                  O
+                </span>
+              )}
               {isAutoApprove && (
-                <span title={agentProvider === 'gemini' ? '--yolo enabled' : 'Skip permissions enabled'}>
-                  <ShieldOff className="w-3 h-3 text-orange-400/60 shrink-0" />
+                <span title={agentProvider === 'gemini' ? '--yolo enabled' : agentProvider === 'codex' ? '--full-auto enabled' : 'Skip permissions enabled'}>
+                  <ShieldOff className="w-3.5 h-3.5 text-orange-400/60 shrink-0" />
                 </span>
               )}
             </div>
@@ -176,7 +194,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {modelShort && (
                 <span
-                  className="text-[11px] px-2 py-px rounded-full font-semibold"
+                  className="text-xs px-2 py-px rounded-full font-semibold"
                   style={{
                     backgroundColor: `${getProviderColor(agentProvider)}15`,
                     color: getProviderColor(agentProvider),
@@ -186,14 +204,14 @@ export function AgentCard({ agent }: AgentCardProps) {
                 </span>
               )}
               {folderName && (
-                <span className="text-[11px] text-ghost-text-dim flex items-center gap-1 truncate">
-                  <Folder className="w-3 h-3 shrink-0" />
+                <span className="text-xs text-ghost-text-dim flex items-center gap-1 truncate">
+                  <Folder className="w-3.5 h-3.5 shrink-0" />
                   {folderName}
                 </span>
               )}
               {activity?.sessionStartTime && isAlive && (
-                <span className="text-[11px] text-ghost-text-dim/40 flex items-center gap-1 font-mono tabular-nums">
-                  <Clock className="w-3 h-3 shrink-0" />
+                <span className="text-xs text-ghost-text-dim/40 flex items-center gap-1 font-mono tabular-nums">
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
                   {formatElapsed(activity.sessionStartTime)}
                 </span>
               )}
@@ -215,13 +233,13 @@ export function AgentCard({ agent }: AgentCardProps) {
             {isAlive && (filesTouchedCount > 0 || subAgentCount > 0) && (
               <div className="flex items-center gap-2 mt-1">
                 {filesTouchedCount > 0 && (
-                  <span className="text-[11px] text-ghost-text-dim/40 flex items-center gap-1">
-                    <FileText className="w-3 h-3" />
+                  <span className="text-xs text-ghost-text-dim/40 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" />
                     {filesTouchedCount}
                   </span>
                 )}
                 {activeSubAgents.length > 0 && (
-                  <span className="text-[11px] text-indigo-400/60 flex items-center gap-1 font-medium">
+                  <span className="text-xs text-indigo-400/60 flex items-center gap-1 font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
                     {activeSubAgents.length} sub-agent{activeSubAgents.length > 1 ? 's' : ''}
                   </span>
@@ -238,7 +256,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                   e.stopPropagation()
                   setExpanded(!expanded)
                 }}
-                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
                 title="Toggle details"
               >
                 {expanded ? <ChevronUp className="w-3.5 h-3.5 text-ghost-text-dim" /> : <ChevronDown className="w-3.5 h-3.5 text-ghost-text-dim" />}
@@ -247,7 +265,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             {canRestart ? (
               <button
                 onClick={handleRestart}
-                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-ghost-accent/20 transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-ghost-accent/20 transition-colors"
                 title="Restart Agent"
               >
                 <RotateCw className="w-3.5 h-3.5 text-ghost-accent" />
@@ -258,7 +276,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                   e.stopPropagation()
                   setShowPrompt(!showPrompt)
                 }}
-                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-colors"
                 title="Send command"
               >
                 <Send className="w-3.5 h-3.5 text-ghost-text-dim" />
@@ -278,7 +296,7 @@ export function AgentCard({ agent }: AgentCardProps) {
                 e.stopPropagation()
                 deleteAgent(agent.id)
               }}
-              className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-500/20 transition-colors"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-500/20 transition-colors"
               title="Delete Agent"
             >
               <X className="w-3.5 h-3.5 text-ghost-text-dim" />
@@ -307,7 +325,7 @@ export function AgentCard({ agent }: AgentCardProps) {
             {activeSubAgents.slice(0, 2).map((sub) => {
               const typeLabel = sub.type === 'general-purpose' ? 'General' : sub.type
               return (
-                <div key={sub.id} className="flex items-center gap-2 text-[11px] text-indigo-300/60 ml-7">
+                <div key={sub.id} className="flex items-center gap-2 text-xs text-indigo-300/60 ml-7">
                   <span className="w-1 h-1 rounded-full bg-indigo-400 shrink-0" />
                   <span className="font-medium text-indigo-400/80">{typeLabel}</span>
                   <span className="truncate opacity-60">{sub.description}</span>
@@ -326,13 +344,13 @@ export function AgentCard({ agent }: AgentCardProps) {
             value={promptInput}
             onChange={(e) => setPromptInput(e.target.value)}
             placeholder="Send to terminal..."
-            className="flex-1 h-8 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+            className="flex-1 h-9 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
             autoFocus
             onKeyDown={(e) => { if (e.key === 'Escape') setShowPrompt(false) }}
           />
           <button
             type="submit"
-            className="h-8 px-3 text-xs bg-indigo-950/50 text-ghost-accent rounded-xl hover:bg-ghost-accent/20 transition-colors"
+            className="h-9 px-3 text-xs bg-indigo-950/50 text-ghost-accent rounded-xl hover:bg-ghost-accent/20 transition-colors"
           >
             Send
           </button>

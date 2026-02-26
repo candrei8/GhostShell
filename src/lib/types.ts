@@ -5,7 +5,7 @@ export interface AnimalAvatar {
   color: string
 }
 
-export type Provider = 'claude' | 'gemini'
+export type Provider = 'claude' | 'gemini' | 'codex'
 
 export interface ClaudeConfig {
   model?: string
@@ -24,6 +24,13 @@ export interface GeminiConfig {
   customFlags?: string[]
 }
 
+export interface CodexConfig {
+  model?: string
+  fullAuto?: boolean
+  sandbox?: 'workspace-write' | 'read-only' | 'danger-full-access'
+  customFlags?: string[]
+}
+
 export interface Agent {
   id: string
   name: string
@@ -37,6 +44,7 @@ export interface Agent {
   provider?: Provider
   claudeConfig: ClaudeConfig
   geminiConfig?: GeminiConfig
+  codexConfig?: CodexConfig
   cwd: string
   /** Whether this agent had a conversation (enables --continue on restart for Claude) */
   hasConversation?: boolean

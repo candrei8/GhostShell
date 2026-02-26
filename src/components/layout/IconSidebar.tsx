@@ -33,7 +33,7 @@ function SidebarTooltip({ label, shortcut }: { label: string; shortcut?: string 
       className="absolute left-full ml-2.5 top-1/2 -translate-y-1/2 z-50 pointer-events-none"
     >
       <div className="bg-ghost-surface border border-ghost-border/60 rounded-xl px-3 py-1.5 shadow-qubria-lg whitespace-nowrap flex items-center gap-1.5">
-        <span className="text-xs text-ghost-text font-medium">{label}</span>
+        <span className="text-sm text-ghost-text font-medium">{label}</span>
         {shortcut && (
           <span className="text-[10px] text-ghost-text-dim/50 font-mono">{shortcut}</span>
         )}
@@ -84,14 +84,14 @@ export function IconSidebar({
   const workingCount = agents.filter((a) => a.status === 'working').length
 
   return (
-    <div className="w-14 h-full bg-ghost-sidebar flex flex-col items-center py-3 border-r border-ghost-border shrink-0">
+    <div className="w-16 h-full bg-ghost-sidebar flex flex-col items-center py-4 border-r border-ghost-border shrink-0">
       {/* Navigation */}
       <div className="flex flex-col gap-1 flex-1">
         {navItems.map(({ view, icon: Icon, label, shortcut }) => (
           <IconButton
             key={view}
             onClick={() => onViewChange(view)}
-            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all relative ${
+            className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all relative ${
               activeView === view
                 ? 'bg-indigo-950/50 text-ghost-accent'
                 : 'text-ghost-text-dim hover:bg-slate-800 hover:text-ghost-text'
@@ -103,11 +103,11 @@ export function IconSidebar({
             {activeView === view && (
               <motion.div
                 layoutId="sidebar-active-pill"
-                className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-ghost-accent rounded-r glow-accent-sm"
+                className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-ghost-accent rounded-r glow-accent-sm"
                 transition={{ type: 'spring', stiffness: 350, damping: 28 }}
               />
             )}
-            <Icon className="w-[18px] h-[18px]" />
+            <Icon className="w-5 h-5" />
             {/* Working agents badge */}
             {view === 'agents' && workingCount > 0 && (
               <motion.div
@@ -117,8 +117,8 @@ export function IconSidebar({
                 exit={{ scale: 0, opacity: 0 }}
                 transition={{ type: 'spring', stiffness: 500, damping: 25 }}
               >
-                <div className="w-4 h-4 rounded-full bg-ghost-success flex items-center justify-center pulse-ring">
-                  <span className="text-[8px] font-bold text-ghost-bg">{workingCount}</span>
+                <div className="w-5 h-5 rounded-full bg-ghost-success flex items-center justify-center pulse-ring">
+                  <span className="text-[9px] font-bold text-ghost-bg">{workingCount}</span>
                 </div>
               </motion.div>
             )}
@@ -131,21 +131,21 @@ export function IconSidebar({
         {/* Quick launch / New agent */}
         <IconButton
           onClick={onQuickLaunch}
-          className="w-10 h-10 flex items-center justify-center rounded-xl text-ghost-accent hover:bg-indigo-950/50 transition-colors relative"
+          className="w-11 h-11 flex items-center justify-center rounded-xl text-ghost-accent hover:bg-indigo-950/50 transition-colors relative"
           label="New Agent"
           shortcut="Quick Launch"
         >
-          <Plus className="w-[18px] h-[18px]" />
+          <Plus className="w-5 h-5" />
         </IconButton>
 
         {/* Settings */}
         <IconButton
           onClick={() => onViewChange('settings')}
-          className="w-10 h-10 flex items-center justify-center rounded-xl text-ghost-text-dim hover:bg-slate-800 hover:text-ghost-text transition-colors relative"
+          className="w-11 h-11 flex items-center justify-center rounded-xl text-ghost-text-dim hover:bg-slate-800 hover:text-ghost-text transition-colors relative"
           label="Settings"
           shortcut="Ctrl+,"
         >
-          <SettingsIcon className="w-[18px] h-[18px]" />
+          <SettingsIcon className="w-5 h-5" />
         </IconButton>
       </div>
     </div>

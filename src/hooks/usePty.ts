@@ -87,27 +87,55 @@ const GEMINI_WORKING_PATTERNS = [
   /Running command/i,
 ]
 
+// --- Codex CLI patterns ---
+const CODEX_IDLE_PATTERNS = [
+  /codex>\s*$/,              // Codex's input prompt
+  /\$ $/,                     // bash prompt
+  /PS [A-Z]:\\[^>]*>\s*$/,   // PowerShell prompt
+]
+
+const CODEX_AUTO_CONFIRM_PATTERNS = [
+  /\(Y\/n\)/,
+  /\(y\/n\)/i,
+]
+
+const CODEX_WORKING_PATTERNS = [
+  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,  // Braille spinner characters
+  /\u280B|\u2819|\u2838|\u2834|\u2826|\u2807/, // More braille spinners
+  /Thinking/,
+  /Reading/,
+  /Writing/,
+  /Running/,
+  /Searching/,
+]
+
 // Detect "command not found" errors — returns the binary name if matched, null otherwise
-function detectCliNotFound(data: string): 'gemini' | 'claude' | null {
+function detectCliNotFound(data: string): 'gemini' | 'claude' | 'codex' | null {
   // PowerShell patterns: "'gemini' is not recognized" / "'gemini' no se reconoce"
-  const psMatch = data.match(/['"]?(gemini|claude)['"]?\s*:\s*(?:.*(?:is not recognized|no se reconoce|CommandNotFoundException))/i)
-  if (psMatch) return psMatch[1].toLowerCase() as 'gemini' | 'claude'
+  const psMatch = data.match(/['"]?(gemini|claude|codex)['"]?\s*:\s*(?:.*(?:is not recognized|no se reconoce|CommandNotFoundException))/i)
+  if (psMatch) return psMatch[1].toLowerCase() as 'gemini' | 'claude' | 'codex'
   // Bash/zsh: "gemini: command not found" / "gemini: not found"
-  const bashMatch = data.match(/(gemini|claude)\s*:\s*(?:command\s+)?not found/i)
-  if (bashMatch) return bashMatch[1].toLowerCase() as 'gemini' | 'claude'
+  const bashMatch = data.match(/(gemini|claude|codex)\s*:\s*(?:command\s+)?not found/i)
+  if (bashMatch) return bashMatch[1].toLowerCase() as 'gemini' | 'claude' | 'codex'
   return null
 }
 
 function getWorkingPatterns(provider: Provider): RegExp[] {
-  return provider === 'gemini' ? GEMINI_WORKING_PATTERNS : CLAUDE_WORKING_PATTERNS
+  if (provider === 'gemini') return GEMINI_WORKING_PATTERNS
+  if (provider === 'codex') return CODEX_WORKING_PATTERNS
+  return CLAUDE_WORKING_PATTERNS
 }
 
 function getIdlePatterns(provider: Provider): RegExp[] {
-  return provider === 'gemini' ? GEMINI_IDLE_PATTERNS : CLAUDE_IDLE_PATTERNS
+  if (provider === 'gemini') return GEMINI_IDLE_PATTERNS
+  if (provider === 'codex') return CODEX_IDLE_PATTERNS
+  return CLAUDE_IDLE_PATTERNS
 }
 
 function getAutoConfirmPatterns(provider: Provider): RegExp[] {
-  return provider === 'gemini' ? GEMINI_AUTO_CONFIRM_PATTERNS : CLAUDE_AUTO_CONFIRM_PATTERNS
+  if (provider === 'gemini') return GEMINI_AUTO_CONFIRM_PATTERNS
+  if (provider === 'codex') return CODEX_AUTO_CONFIRM_PATTERNS
+  return CLAUDE_AUTO_CONFIRM_PATTERNS
 }
 
 // Debounce timer for idle detection
@@ -371,7 +399,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             const missingBinary = detectCliNotFound(data)
             if (missingBinary) {
               cliNotFoundDetected = true
-              const detectedProvider: Provider = missingBinary === 'gemini' ? 'gemini' : 'claude'
+              const detectedProvider: Provider = missingBinary === 'gemini' ? 'gemini' : missingBinary === 'codex' ? 'codex' : 'claude'
               const label = getProviderLabel(detectedProvider)
               const installCmd = getInstallCommand(detectedProvider)
               setAgentStatus(agentId, 'error')
@@ -440,6 +468,14 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
         terminal.attachCustomKeyEventHandler((e) => {
           if (e.type !== 'keydown') return true
+
+          // Shift+Enter: Insert newline without executing (multi-line input)
+          if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
+            // Use bracketed paste mode to send a newline that the shell
+            // treats as literal text, not as command execution
+            writeToPty('\x1b[200~\n\x1b[201~')
+            return false
+          }
 
           // Ctrl+Shift+C: Copy selection
           if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
@@ -640,8 +676,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           const launchAgent = getAgent(agentId)
           if (launchAgent) {
             const launchProvider = resolveProvider(launchAgent)
-            const hasConfig = launchProvider === 'gemini' ? !!launchAgent.geminiConfig : !!launchAgent.claudeConfig
-            if (hasConfig || launchProvider === 'gemini') {
+            const hasConfig = launchProvider === 'gemini' ? !!launchAgent.geminiConfig : launchProvider === 'codex' ? !!launchAgent.codexConfig : !!launchAgent.claudeConfig
+            if (hasConfig || launchProvider === 'gemini' || launchProvider === 'codex') {
               const cmd = buildLaunchCommand(launchAgent)
               setTimeout(() => {
                 if (cancelled) return

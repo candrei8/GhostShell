@@ -17,7 +17,7 @@ import { useAgent } from '../../hooks/useAgent'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTerminalStore } from '../../stores/terminalStore'
-import { GridLayout, ClaudeConfig, GeminiConfig, Provider } from '../../lib/types'
+import { GridLayout, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../../lib/types'
 import { getModelsForProvider, getDefaultModel, getProviderColor, getProviderEmoji } from '../../lib/providers'
 
 interface QuickLaunchProps {
@@ -106,7 +106,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const [gridLayout, setGridLayout] = useState<GridLayout>('1x1')
   const [skipPermissions, setSkipPermissions] = useState(defaultSkip)
   const models = useMemo(() => getModelsForProvider(provider), [provider])
-  const [model, setModel] = useState(provider === 'claude' ? (defaultModel || getDefaultModel('claude')) : getDefaultModel('gemini'))
+  const [model, setModel] = useState(provider === 'claude' ? (defaultModel || getDefaultModel('claude')) : getDefaultModel(provider))
   const [launching, setLaunching] = useState(false)
   const [specialistSearch, setSpecialistSearch] = useState('')
   const [expandedCategory, setExpandedCategory] = useState<TemplateCategory | 'all'>('all')
@@ -162,12 +162,17 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
     yolo: skipPermissions,
   })
 
+  const buildCodexCfg = (): CodexConfig => ({
+    model,
+    fullAuto: skipPermissions,
+  })
+
   const handleQuickLaunch = () => {
     setLaunching(true)
     if (projectPath) setLastAgentFolder(projectPath)
     const count = getGridCount()
     const cwd = projectPath || undefined
-    const providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude'
+    const providerLabel = provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Claude'
     const providerEmoji = getProviderEmoji(provider)
     const providerColor = getProviderColor(provider)
 
@@ -182,6 +187,16 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           {},
           cwd, undefined, undefined, true,
           'gemini', buildGeminiCfg(),
+        )
+        sessionIds.push(result.sessionId)
+      } else if (provider === 'codex') {
+        const result = createAgent(
+          agentName,
+          { id: 'robot', name: 'Robot', emoji: providerEmoji, color: providerColor },
+          providerColor,
+          {},
+          cwd, undefined, undefined, true,
+          'codex', undefined, buildCodexCfg(),
         )
         sessionIds.push(result.sessionId)
       } else {
@@ -219,6 +234,12 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         template.name, template.avatar, template.avatar.color,
         {}, cwd, template.id, undefined, true,
         'gemini', buildGeminiCfg(),
+      )
+    } else if (templateProvider === 'codex') {
+      createAgent(
+        template.name, template.avatar, template.avatar.color,
+        {}, cwd, template.id, undefined, true,
+        'codex', undefined, buildCodexCfg(),
       )
     } else {
       createAgent(
@@ -262,7 +283,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const displayRecents = recentProjects.filter((p) => p !== projectPath).slice(0, 4)
 
   const selectedModel = models.find((m) => m.id === model) || models[0]
-  const providerLabel = provider === 'gemini' ? 'Gemini' : 'Claude'
+  const providerLabel = provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Claude'
 
   return (
     <div className="flex-1 flex flex-col items-center justify-start overflow-y-auto py-8 px-4">
@@ -274,15 +295,15 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
       >
         {/* -- Header -- */}
         <motion.div variants={item} className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-950/50 border border-ghost-accent/20 mb-3">
-            <Terminal className="w-6 h-6 text-ghost-accent" />
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-950/50 border border-ghost-accent/20 mb-3">
+            <Terminal className="w-7 h-7 text-ghost-accent" />
           </div>
-          <h1 className="text-lg font-bold text-ghost-text tracking-tight">GhostShell</h1>
+          <h1 className="text-xl font-bold text-ghost-text tracking-tight">GhostShell</h1>
           <p className="text-xs text-ghost-text-dim mt-0.5">Launch terminals & AI agents in seconds</p>
         </motion.div>
 
         {/* -- Quick Actions Row -- */}
-        <motion.div variants={item} className="grid grid-cols-3 gap-2 mb-6">
+        <motion.div variants={item} className="grid grid-cols-4 gap-2 mb-6">
           {/* Open Terminal */}
           <button
             onClick={() => {
@@ -294,7 +315,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               })
               onLaunched()
             }}
-            className="h-11 bg-ghost-surface border border-ghost-border rounded-xl font-medium text-sm flex items-center justify-center gap-2 text-ghost-text hover:bg-slate-800/50 hover:border-ghost-accent/30 transition-all group"
+            className="h-12 bg-ghost-surface border border-ghost-border rounded-xl font-medium text-base flex items-center justify-center gap-2 text-ghost-text hover:bg-slate-800/50 hover:border-ghost-accent/30 transition-all group"
           >
             <Terminal className="w-4 h-4 text-ghost-text-dim group-hover:text-ghost-accent transition-colors" />
             Terminal
@@ -314,7 +335,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               )
               onLaunched()
             }}
-            className="h-11 border rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
+            className="h-12 border rounded-xl font-medium text-base flex items-center justify-center gap-2 transition-all"
             style={{
               backgroundColor: `${getProviderColor('claude')}10`,
               borderColor: `${getProviderColor('claude')}30`,
@@ -322,7 +343,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
             }}
           >
             <Sparkles className="w-4 h-4" />
-            Quick Claude
+            Claude
           </button>
 
           {/* Quick Gemini */}
@@ -338,7 +359,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               )
               onLaunched()
             }}
-            className="h-11 border rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
+            className="h-12 border rounded-xl font-medium text-base flex items-center justify-center gap-2 transition-all"
             style={{
               backgroundColor: `${getProviderColor('gemini')}10`,
               borderColor: `${getProviderColor('gemini')}30`,
@@ -346,28 +367,52 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
             }}
           >
             <span className="text-base">{'\u2726'}</span>
-            Quick Gemini
+            Gemini
+          </button>
+
+          {/* Quick Codex */}
+          <button
+            onClick={() => {
+              const cwd = projectPath || undefined
+              createAgent(
+                'Codex',
+                { id: 'robot', name: 'Robot', emoji: '\uD83E\uDD16', color: '#10a37f' },
+                '#10a37f',
+                {}, cwd, undefined, undefined, true,
+                'codex', undefined, { model: getDefaultModel('codex'), fullAuto: skipPermissions },
+              )
+              onLaunched()
+            }}
+            className="h-12 border rounded-xl font-medium text-base flex items-center justify-center gap-2 transition-all"
+            style={{
+              backgroundColor: `${getProviderColor('codex')}10`,
+              borderColor: `${getProviderColor('codex')}30`,
+              color: getProviderColor('codex'),
+            }}
+          >
+            <span className="text-base">{'\uD83E\uDD16'}</span>
+            Codex
           </button>
         </motion.div>
 
         {/* -- Project Directory -- */}
         <motion.div variants={item} className="mb-4">
-          <label className="text-[11px] font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
+          <label className="text-xs font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
             Project
           </label>
           <button
             onClick={selectProject}
-            className="w-full h-11 px-4 bg-ghost-surface border border-ghost-border rounded-xl flex items-center gap-3 hover:border-ghost-accent/40 transition-all group"
+            className="w-full h-12 px-4 bg-ghost-surface border border-ghost-border rounded-xl flex items-center gap-3 hover:border-ghost-accent/40 transition-all group"
           >
             <div className="w-7 h-7 rounded-lg bg-indigo-950/50 flex items-center justify-center shrink-0 group-hover:bg-indigo-950/50 transition-colors">
               <FolderOpen className="w-3.5 h-3.5 text-ghost-accent" />
             </div>
             {projectPath ? (
               <div className="flex flex-col items-start min-w-0">
-                <span className="text-sm font-medium text-ghost-text truncate w-full">
+                <span className="text-base font-medium text-ghost-text truncate w-full">
                   {getFolderName(projectPath)}
                 </span>
-                <span className="text-[11px] text-ghost-text-dim truncate w-full">{projectPath}</span>
+                <span className="text-xs text-ghost-text-dim truncate w-full">{projectPath}</span>
               </div>
             ) : (
               <span className="text-sm text-ghost-text-dim">Select project folder...</span>
@@ -385,7 +430,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                   className="h-6 px-3 bg-ghost-surface/60 border border-ghost-border/50 rounded-lg flex items-center gap-2 hover:border-ghost-accent/30 hover:bg-ghost-surface transition-all text-left"
                 >
                   <Clock className="w-3 h-3 text-ghost-text-dim/50 shrink-0" />
-                  <span className="text-[11px] text-ghost-text-dim truncate max-w-[140px]">
+                  <span className="text-xs text-ghost-text-dim truncate max-w-[140px]">
                     {getFolderName(path)}
                   </span>
                 </button>
@@ -396,13 +441,13 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
 
         {/* -- Provider Toggle -- */}
         <motion.div variants={item} className="mb-4">
-          <label className="text-[11px] font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
+          <label className="text-xs font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
             Provider
           </label>
           <div className="flex gap-1 p-1 bg-ghost-surface rounded-xl border border-ghost-border w-fit">
             <button
               onClick={() => handleProviderSwitch('claude')}
-              className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
                 provider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
               }`}
               style={provider === 'claude' ? { backgroundColor: getProviderColor('claude') } : undefined}
@@ -411,12 +456,21 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
             </button>
             <button
               onClick={() => handleProviderSwitch('gemini')}
-              className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
                 provider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
               }`}
               style={provider === 'gemini' ? { backgroundColor: getProviderColor('gemini') } : undefined}
             >
               {'\u2726'} Gemini
+            </button>
+            <button
+              onClick={() => handleProviderSwitch('codex')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                provider === 'codex' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
+              }`}
+              style={provider === 'codex' ? { backgroundColor: getProviderColor('codex') } : undefined}
+            >
+              {'\uD83E\uDD16'} Codex
             </button>
           </div>
         </motion.div>
@@ -425,7 +479,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         <motion.div variants={item} className="grid grid-cols-2 gap-3 mb-4">
           {/* Layout Selector */}
           <div>
-            <label className="text-[11px] font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
+            <label className="text-xs font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
               Layout
             </label>
             <div className="grid grid-cols-6 gap-1">
@@ -433,7 +487,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 <button
                   key={opt.layout}
                   onClick={() => setGridLayout(opt.layout)}
-                  className={`h-10 rounded-lg border flex flex-col items-center justify-center gap-1 transition-all ${
+                  className={`h-12 rounded-lg border flex flex-col items-center justify-center gap-1 transition-all ${
                     gridLayout === opt.layout
                       ? 'border-ghost-accent bg-indigo-950/50'
                       : 'border-ghost-border bg-ghost-surface hover:border-ghost-accent/25 hover:bg-white/[0.02]'
@@ -442,7 +496,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 >
                   <LayoutPreview layout={opt.layout} active={gridLayout === opt.layout} />
                   <span
-                    className={`text-[11px] leading-none ${
+                    className={`text-xs leading-none ${
                       gridLayout === opt.layout ? 'text-ghost-accent' : 'text-ghost-text-dim/60'
                     }`}
                   >
@@ -455,7 +509,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
 
           {/* Model Selector */}
           <div>
-            <label className="text-[11px] font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
+            <label className="text-xs font-semibold text-ghost-text-dim uppercase tracking-widest mb-2 block">
               Model
             </label>
             <div className="flex flex-col gap-1">
@@ -463,7 +517,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 <button
                   key={m.id}
                   onClick={() => setModel(m.id)}
-                  className={`h-[30px] px-3 rounded-lg border flex items-center gap-2 transition-all ${
+                  className={`h-9 px-3 rounded-lg border flex items-center gap-2 transition-all ${
                     model === m.id
                       ? 'border-ghost-accent/50 bg-ghost-accent/8'
                       : 'border-ghost-border bg-ghost-surface hover:border-ghost-accent/20 hover:bg-white/[0.02]'
@@ -483,7 +537,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                     {m.name}
                   </span>
                   <span
-                    className={`text-[11px] ml-auto ${
+                    className={`text-xs ml-auto ${
                       model === m.id ? 'text-ghost-accent' : 'text-ghost-text-dim/40'
                     }`}
                   >
@@ -499,7 +553,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         <motion.div variants={item} className="mb-4">
           <button
             onClick={() => setSkipPermissions(!skipPermissions)}
-            className={`w-full h-10 px-3 rounded-xl border flex items-center gap-3 transition-all ${
+            className={`w-full h-11 px-3 rounded-xl border flex items-center gap-3 transition-all ${
               skipPermissions
                 ? 'border-orange-500/40 bg-orange-500/8 hover:bg-orange-500/12'
                 : 'border-ghost-border bg-ghost-surface hover:border-ghost-accent/20'
@@ -512,7 +566,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
             )}
             <span className={`text-xs font-medium ${skipPermissions ? 'text-orange-300' : 'text-ghost-text-dim'}`}>
               {skipPermissions
-                ? `Auto-approve ON${provider === 'gemini' ? ' (--yolo)' : ''}`
+                ? `Auto-approve ON${provider === 'gemini' ? ' (--yolo)' : provider === 'codex' ? ' (--full-auto)' : ''}`
                 : 'Safe mode'}
             </span>
             <div
@@ -534,7 +588,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           <button
             onClick={handleQuickLaunch}
             disabled={launching}
-            className="w-full h-12 bg-ghost-accent text-white rounded-xl font-semibold text-sm flex items-center justify-center gap-3 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full h-14 bg-ghost-accent text-white rounded-xl font-semibold text-base flex items-center justify-center gap-3 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {launching ? (
               <span className="text-sm">Launching...</span>
@@ -556,14 +610,14 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           {/* Specialist Header + Search */}
           <div className="flex items-center gap-2 mb-3">
             <div className="flex-1">
-              <h2 className="text-xs font-semibold text-ghost-text uppercase tracking-wider">Specialists</h2>
+              <h2 className="text-sm font-semibold text-ghost-text uppercase tracking-wider">Specialists</h2>
             </div>
 
             {/* Category Filter Pills */}
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setExpandedCategory('all')}
-                className={`h-5 px-2 rounded text-[11px] font-medium transition-all ${
+                className={`h-5 px-2 rounded text-xs font-medium transition-all ${
                   expandedCategory === 'all'
                     ? 'bg-indigo-950/50 text-ghost-accent'
                     : 'text-ghost-text-dim/50 hover:text-ghost-text-dim'
@@ -575,7 +629,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 <button
                   key={cat}
                   onClick={() => setExpandedCategory(cat)}
-                  className={`h-5 px-2 rounded text-[11px] font-medium transition-all ${
+                  className={`h-5 px-2 rounded text-xs font-medium transition-all ${
                     expandedCategory === cat
                       ? 'bg-indigo-950/50 text-ghost-accent'
                       : 'text-ghost-text-dim/50 hover:text-ghost-text-dim'
@@ -616,10 +670,10 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 >
                   {/* Category Label */}
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-widest text-ghost-text-dim/60">
+                    <span className="text-xs font-semibold uppercase tracking-widest text-ghost-text-dim/60">
                       {catInfo.label}
                     </span>
-                    <span className="text-[11px] text-ghost-text-dim/30">{catInfo.description}</span>
+                    <span className="text-xs text-ghost-text-dim/30">{catInfo.description}</span>
                     <div className="flex-1 h-px bg-ghost-border/40" />
                   </div>
 
@@ -630,18 +684,18 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                         key={template.id}
                         onClick={() => handleTemplateLaunch(template)}
                         disabled={launching}
-                        className="p-4 bg-ghost-surface/80 border border-ghost-border/60 rounded-2xl text-left hover:border-ghost-accent/30 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="p-5 bg-ghost-surface/80 border border-ghost-border/60 rounded-2xl text-left hover:border-ghost-accent/30 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <div
-                            className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
+                            className="w-9 h-9 rounded-lg flex items-center justify-center text-sm shrink-0"
                             style={{ backgroundColor: `${template.avatar.color}15` }}
                           >
                             {template.avatar.emoji}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-medium text-ghost-text group-hover:text-white transition-colors truncate">
+                              <span className="text-sm font-medium text-ghost-text group-hover:text-white transition-colors truncate">
                                 {template.name}
                               </span>
                               {template.provider && (
@@ -649,11 +703,11 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                                   className="text-[9px] px-1 py-px rounded-full font-semibold text-white/90 shrink-0"
                                   style={{ backgroundColor: getProviderColor(template.provider) }}
                                 >
-                                  {template.provider === 'gemini' ? 'G' : 'C'}
+                                  {template.provider === 'gemini' ? 'G' : template.provider === 'codex' ? 'O' : 'C'}
                                 </span>
                               )}
                             </div>
-                            <span className="text-[11px] text-ghost-text-dim/60 block truncate">
+                            <span className="text-xs text-ghost-text-dim/60 block truncate">
                               {template.description}
                             </span>
                           </div>
@@ -663,7 +717,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                           {template.tags.slice(0, 3).map((tag) => (
                             <span
                               key={tag}
-                              className="text-[11px] px-2 py-px rounded text-ghost-text-dim/50"
+                              className="text-xs px-2 py-px rounded text-ghost-text-dim/50"
                               style={{ backgroundColor: `${template.avatar.color}08` }}
                             >
                               {tag}

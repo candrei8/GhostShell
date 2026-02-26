@@ -1,4 +1,4 @@
-import { Agent, ClaudeConfig, GeminiConfig, Provider } from './types'
+import { Agent, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from './types'
 
 export interface ModelDef {
   id: string
@@ -20,12 +20,23 @@ export const GEMINI_MODELS: ModelDef[] = [
   { id: 'flash-lite', name: 'Flash Lite', badge: 'Fastest', color: '#fbbc04' },
 ]
 
+export const CODEX_MODELS: ModelDef[] = [
+  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', badge: 'Recommended', color: '#10a37f' },
+  { id: 'gpt-5.3-codex-spark', name: 'Codex Spark', badge: 'Fastest', color: '#19c37d' },
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', badge: 'Stable', color: '#0d8c6d' },
+  { id: 'o3', name: 'o3', badge: 'Reasoning', color: '#6e44ff' },
+]
+
 export function getModelsForProvider(provider: Provider): ModelDef[] {
-  return provider === 'gemini' ? GEMINI_MODELS : CLAUDE_MODELS
+  if (provider === 'gemini') return GEMINI_MODELS
+  if (provider === 'codex') return CODEX_MODELS
+  return CLAUDE_MODELS
 }
 
 export function getDefaultModel(provider: Provider): string {
-  return provider === 'gemini' ? 'flash' : 'claude-opus-4-6'
+  if (provider === 'gemini') return 'flash'
+  if (provider === 'codex') return 'gpt-5.3-codex'
+  return 'claude-opus-4-6'
 }
 
 /**
@@ -34,6 +45,7 @@ export function getDefaultModel(provider: Provider): string {
  */
 export function getInstallCommand(provider: Provider): string {
   if (provider === 'gemini') return 'npm install -g @google/gemini-cli'
+  if (provider === 'codex') return 'npm install -g @openai/codex'
   return 'npm install -g @anthropic-ai/claude-code'
 }
 
@@ -42,6 +54,7 @@ export function getInstallCommand(provider: Provider): string {
  */
 export function getUpdateCommand(provider: Provider): string {
   if (provider === 'gemini') return 'npm install -g @google/gemini-cli@latest'
+  if (provider === 'codex') return 'npm install -g @openai/codex@latest'
   return 'npm install -g @anthropic-ai/claude-code@latest'
 }
 
@@ -110,10 +123,39 @@ export function buildGeminiCommand(config: GeminiConfig, resume?: boolean): stri
   return parts.join(' ')
 }
 
+export function buildCodexCommand(config: CodexConfig, resume?: boolean): string {
+  if (resume) {
+    return 'codex resume --last'
+  }
+
+  const parts = ['codex']
+
+  if (config.model) {
+    parts.push('--model', config.model)
+  }
+
+  if (config.fullAuto) {
+    parts.push('--full-auto')
+  }
+
+  if (config.sandbox) {
+    parts.push('--sandbox', config.sandbox)
+  }
+
+  if (config.customFlags) {
+    parts.push(...config.customFlags)
+  }
+
+  return parts.join(' ')
+}
+
 export function buildCommand(agent: Agent, resume?: boolean): string {
   const provider = resolveProvider(agent)
   if (provider === 'gemini') {
     return buildGeminiCommand(agent.geminiConfig || {}, resume)
+  }
+  if (provider === 'codex') {
+    return buildCodexCommand(agent.codexConfig || {}, resume)
   }
   return buildClaudeCommand(agent.claudeConfig, resume)
 }
@@ -131,13 +173,19 @@ export function resolveProvider(agent: Agent): Provider {
 }
 
 export function getProviderLabel(provider: Provider): string {
-  return provider === 'gemini' ? 'Gemini' : 'Claude'
+  if (provider === 'gemini') return 'Gemini'
+  if (provider === 'codex') return 'Codex'
+  return 'Claude'
 }
 
 export function getProviderColor(provider: Provider): string {
-  return provider === 'gemini' ? '#4285f4' : '#a855f7'
+  if (provider === 'gemini') return '#4285f4'
+  if (provider === 'codex') return '#10a37f'
+  return '#a855f7'
 }
 
 export function getProviderEmoji(provider: Provider): string {
-  return provider === 'gemini' ? '\u2726' : '\uD83D\uDC7B'
+  if (provider === 'gemini') return '\u2726'
+  if (provider === 'codex') return '\uD83E\uDD16'
+  return '\uD83D\uDC7B'
 }

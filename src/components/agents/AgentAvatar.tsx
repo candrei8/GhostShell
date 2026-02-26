@@ -7,9 +7,9 @@ interface AgentAvatarProps {
 }
 
 const sizeConfig = {
-  sm: { container: 'w-6 h-6', emoji: '14px' },
-  md: { container: 'w-8 h-8', emoji: '18px' },
-  lg: { container: 'w-12 h-12', emoji: '28px' },
+  sm: { container: 'w-8 h-8', emoji: '18px' },
+  md: { container: 'w-10 h-10', emoji: '22px' },
+  lg: { container: 'w-14 h-14', emoji: '32px' },
 }
 
 export function AgentAvatar({ avatar, size = 'md', className = '' }: AgentAvatarProps) {

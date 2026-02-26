@@ -17,6 +17,8 @@ interface SettingsState {
   defaultProvider: Provider
   geminiCliPath: string
   defaultGeminiModel: string
+  codexCliPath: string
+  defaultCodexModel: string
   lastAgentFolder: string
   muteNotifications: boolean
   notificationVolume: number
@@ -34,6 +36,8 @@ interface SettingsState {
   setDefaultProvider: (provider: Provider) => void
   setGeminiCliPath: (path: string) => void
   setDefaultGeminiModel: (model: string) => void
+  setCodexCliPath: (path: string) => void
+  setDefaultCodexModel: (model: string) => void
   setMuteNotifications: (mute: boolean) => void
   setNotificationVolume: (volume: number) => void
   getTheme: () => Theme
@@ -56,6 +60,8 @@ export const useSettingsStore = create<SettingsState>()(
       defaultProvider: 'claude',
       geminiCliPath: 'gemini',
       defaultGeminiModel: 'flash',
+      codexCliPath: 'codex',
+      defaultCodexModel: 'gpt-5.3-codex',
       lastAgentFolder: '',
       muteNotifications: false,
       notificationVolume: 50,
@@ -76,6 +82,8 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultProvider: (provider) => set({ defaultProvider: provider }),
       setGeminiCliPath: (path) => set({ geminiCliPath: path }),
       setDefaultGeminiModel: (model) => set({ defaultGeminiModel: model }),
+      setCodexCliPath: (path) => set({ codexCliPath: path }),
+      setDefaultCodexModel: (model) => set({ defaultCodexModel: model }),
       setMuteNotifications: (mute) => set({ muteNotifications: mute }),
       setNotificationVolume: (volume) => set({ notificationVolume: volume }),
       getTheme: () => getTheme(get().themeId),
@@ -99,6 +107,8 @@ export const useSettingsStore = create<SettingsState>()(
         defaultProvider: state.defaultProvider,
         geminiCliPath: state.geminiCliPath,
         defaultGeminiModel: state.defaultGeminiModel,
+        codexCliPath: state.codexCliPath,
+        defaultCodexModel: state.defaultCodexModel,
         lastAgentFolder: state.lastAgentFolder,
         muteNotifications: state.muteNotifications,
         notificationVolume: state.notificationVolume,

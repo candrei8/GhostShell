@@ -7,7 +7,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { ThemeCustomizer } from './ThemeCustomizer'
 import { Toggle } from '../common/Toggle'
 import { RangeSlider } from '../common/RangeSlider'
-import { CLAUDE_MODELS, GEMINI_MODELS, getProviderColor, getInstallCommand, getUpdateCommand } from '../../lib/providers'
+import { CLAUDE_MODELS, GEMINI_MODELS, CODEX_MODELS, getProviderColor, getInstallCommand, getUpdateCommand } from '../../lib/providers'
 import { playNotificationSound } from '../../lib/sounds'
 import { Provider } from '../../lib/types'
 
@@ -41,6 +41,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     defaultProvider,
     geminiCliPath,
     defaultGeminiModel,
+    codexCliPath,
+    defaultCodexModel,
     setFontSize,
     setTerminalFontSize,
     setCursorBlink,
@@ -53,6 +55,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setDefaultProvider,
     setGeminiCliPath,
     setDefaultGeminiModel,
+    setCodexCliPath,
+    setDefaultCodexModel,
   } = useSettingsStore()
 
   // Run a command in a new dedicated terminal
@@ -72,12 +76,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }, [onClose])
 
   const handleInstallCli = useCallback((provider: Provider) => {
-    const label = provider === 'gemini' ? 'Gemini' : 'Claude'
+    const label = provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Claude'
     runInTerminal(`Install ${label} CLI`, getInstallCommand(provider))
   }, [runInTerminal])
 
   const handleUpdateCli = useCallback((provider: Provider) => {
-    const label = provider === 'gemini' ? 'Gemini' : 'Claude'
+    const label = provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Claude'
     runInTerminal(`Update ${label} CLI`, getUpdateCommand(provider))
   }, [runInTerminal])
 
@@ -92,9 +96,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [isOpen, onClose])
 
-  const selectClass = 'w-full h-11 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-sm text-ghost-text focus:outline-none focus:border-ghost-accent transition-colors appearance-none cursor-pointer ghost-select'
-  const inputClass = 'w-full h-11 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-sm text-ghost-text font-mono focus:outline-none focus:border-ghost-accent transition-colors'
-  const actionBtnClass = 'h-9 px-3 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all border'
+  const selectClass = 'w-full h-12 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-base text-ghost-text focus:outline-none focus:border-ghost-accent transition-colors appearance-none cursor-pointer ghost-select'
+  const inputClass = 'w-full h-12 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-base text-ghost-text font-mono focus:outline-none focus:border-ghost-accent transition-colors'
+  const actionBtnClass = 'h-10 px-4 rounded-xl text-sm font-medium flex items-center gap-1.5 transition-all border'
 
   return (
     <AnimatePresence>
@@ -119,7 +123,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <motion.div
             ref={panelRef}
             tabIndex={-1}
-            className="relative w-[580px] max-h-[80vh] bg-ghost-surface rounded-2xl border border-ghost-border shadow-2xl flex flex-col overflow-hidden outline-none"
+            className="relative w-[660px] max-h-[80vh] bg-ghost-surface rounded-2xl border border-ghost-border shadow-2xl flex flex-col overflow-hidden outline-none"
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -127,7 +131,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-ghost-border shrink-0">
-              <h2 className="text-sm font-bold text-ghost-text uppercase tracking-wider">Settings</h2>
+              <h2 className="text-base font-bold text-ghost-text uppercase tracking-wider">Settings</h2>
               <button
                 onClick={onClose}
                 className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-800 text-ghost-text-dim hover:text-ghost-text transition-colors"
@@ -193,11 +197,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   >
                     {/* Provider toggle */}
                     <div>
-                      <label className="text-xs text-ghost-text-dim uppercase tracking-wider mb-2 block">Default Provider</label>
+                      <label className="text-sm text-ghost-text-dim uppercase tracking-wider mb-2 block">Default Provider</label>
                       <div className="flex gap-1 p-1 bg-ghost-bg rounded-xl border border-ghost-border w-fit">
                         <button
                           onClick={() => setDefaultProvider('claude')}
-                          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                          className={`px-4 py-2 rounded-lg text-base font-medium transition-all ${
                             defaultProvider === 'claude' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
                           }`}
                           style={defaultProvider === 'claude' ? { backgroundColor: getProviderColor('claude') } : undefined}
@@ -206,19 +210,28 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </button>
                         <button
                           onClick={() => setDefaultProvider('gemini')}
-                          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                          className={`px-4 py-2 rounded-lg text-base font-medium transition-all ${
                             defaultProvider === 'gemini' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
                           }`}
                           style={defaultProvider === 'gemini' ? { backgroundColor: getProviderColor('gemini') } : undefined}
                         >
                           Gemini
                         </button>
+                        <button
+                          onClick={() => setDefaultProvider('codex')}
+                          className={`px-4 py-2 rounded-lg text-base font-medium transition-all ${
+                            defaultProvider === 'codex' ? 'text-white' : 'text-ghost-text-dim hover:bg-slate-800/50'
+                          }`}
+                          style={defaultProvider === 'codex' ? { backgroundColor: getProviderColor('codex') } : undefined}
+                        >
+                          Codex
+                        </button>
                       </div>
                     </div>
 
                     {/* Active provider config */}
                     <AnimatePresence mode="wait">
-                      {defaultProvider === 'claude' ? (
+                      {defaultProvider === 'claude' && (
                         <motion.div
                           key="claude-settings"
                           initial={{ opacity: 0, y: 4 }}
@@ -233,7 +246,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           </div>
 
                           <div>
-                            <label className="text-xs text-ghost-text-dim mb-1.5 block">Default Model</label>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">Default Model</label>
                             <select
                               value={defaultModel}
                               onChange={(e) => setDefaultModel(e.target.value)}
@@ -254,7 +267,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           />
 
                           <div>
-                            <label className="text-xs text-ghost-text-dim mb-1.5 block">CLI Path</label>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">CLI Path</label>
                             <input
                               type="text"
                               value={claudeCliPath}
@@ -264,9 +277,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <p className="text-xs text-ghost-text-dim/60 mt-1.5">Path to the Claude CLI binary</p>
                           </div>
 
-                          {/* Install / Update */}
                           <div>
-                            <label className="text-xs text-ghost-text-dim mb-1.5 block">CLI Management</label>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">CLI Management</label>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleInstallCli('claude')}
@@ -286,7 +298,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <p className="text-xs text-ghost-text-dim/60 mt-1.5">Opens a terminal to install or update the CLI</p>
                           </div>
                         </motion.div>
-                      ) : (
+                      )}
+
+                      {defaultProvider === 'gemini' && (
                         <motion.div
                           key="gemini-settings"
                           initial={{ opacity: 0, y: 4 }}
@@ -301,7 +315,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           </div>
 
                           <div>
-                            <label className="text-xs text-ghost-text-dim mb-1.5 block">Default Model</label>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">Default Model</label>
                             <select
                               value={defaultGeminiModel}
                               onChange={(e) => setDefaultGeminiModel(e.target.value)}
@@ -314,7 +328,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           </div>
 
                           <div>
-                            <label className="text-xs text-ghost-text-dim mb-1.5 block">CLI Path</label>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">CLI Path</label>
                             <input
                               type="text"
                               value={geminiCliPath}
@@ -324,9 +338,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <p className="text-xs text-ghost-text-dim/60 mt-1.5">Path to the Gemini CLI binary</p>
                           </div>
 
-                          {/* Install / Update */}
                           <div>
-                            <label className="text-xs text-ghost-text-dim mb-1.5 block">CLI Management</label>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">CLI Management</label>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleInstallCli('gemini')}
@@ -337,6 +350,67 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                               </button>
                               <button
                                 onClick={() => handleUpdateCli('gemini')}
+                                className={`${actionBtnClass} border-ghost-border bg-ghost-bg text-ghost-text hover:border-ghost-accent/40 hover:bg-ghost-accent/5`}
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                Update to Latest
+                              </button>
+                            </div>
+                            <p className="text-xs text-ghost-text-dim/60 mt-1.5">Opens a terminal to install or update the CLI</p>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {defaultProvider === 'codex' && (
+                        <motion.div
+                          key="codex-settings"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.1 }}
+                          className="flex flex-col gap-4"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getProviderColor('codex') }} />
+                            <span className="text-sm font-semibold text-ghost-text">Codex</span>
+                          </div>
+
+                          <div>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">Default Model</label>
+                            <select
+                              value={defaultCodexModel}
+                              onChange={(e) => setDefaultCodexModel(e.target.value)}
+                              className={selectClass}
+                            >
+                              {CODEX_MODELS.map((m) => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">CLI Path</label>
+                            <input
+                              type="text"
+                              value={codexCliPath}
+                              onChange={(e) => setCodexCliPath(e.target.value)}
+                              className={inputClass}
+                            />
+                            <p className="text-xs text-ghost-text-dim/60 mt-1.5">Path to the Codex CLI binary</p>
+                          </div>
+
+                          <div>
+                            <label className="text-sm text-ghost-text-dim mb-1.5 block">CLI Management</label>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleInstallCli('codex')}
+                                className={`${actionBtnClass} border-ghost-border bg-ghost-bg text-ghost-text hover:border-ghost-accent/40 hover:bg-ghost-accent/5`}
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                Install
+                              </button>
+                              <button
+                                onClick={() => handleUpdateCli('codex')}
                                 className={`${actionBtnClass} border-ghost-border bg-ghost-bg text-ghost-text hover:border-ghost-accent/40 hover:bg-ghost-accent/5`}
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
@@ -369,13 +443,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     />
 
                     <div>
-                      <label className="text-xs text-ghost-text-dim mb-2 block">Cursor Style</label>
+                      <label className="text-sm text-ghost-text-dim mb-2 block">Cursor Style</label>
                       <div className="flex gap-1 p-1 bg-ghost-bg rounded-xl border border-ghost-border w-fit">
                         {(['bar', 'block', 'underline'] as const).map((style) => (
                           <button
                             key={style}
                             onClick={() => setCursorStyle(style)}
-                            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize ${
+                            className={`px-4 py-2 rounded-md text-base font-medium transition-all capitalize ${
                               cursorStyle === style
                                 ? 'bg-ghost-accent text-white'
                                 : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
