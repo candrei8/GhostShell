@@ -70,6 +70,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   // Header controls state
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [outputViewMode, setOutputViewMode] = useState<'terminal' | 'companion'>('terminal')
   const headerMenuRef = useRef<HTMLDivElement>(null)
   const headerMenuBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -664,7 +665,18 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     const a = s.activities[activeAgentId]
     return a ? (a.currentDetail || null) : null
   })
+  const activeActivityStartedAt = useActivityStore((s) => {
+    if (!activeAgentId) return null
+    const a = s.activities[activeAgentId]
+    return a ? a.lastActivityTime : null
+  })
   const showActivity = activeAgent && activeActivityName && activeActivityName !== 'idle'
+
+  useEffect(() => {
+    if (outputViewMode === 'companion' && !activeAgent) {
+      setOutputViewMode('terminal')
+    }
+  }, [activeAgent, outputViewMode])
 
   // Whether we're in multi-pane grid view (panes need labels)
   const isMultiPaneGrid = effectiveViewMode === 'grid' && gridSessions.length > 1 && !isMaximized
@@ -866,6 +878,8 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 activity={activeActivityName}
                 detail={activeActivityDetail || undefined}
                 size="sm"
+                startedAt={activeActivityStartedAt || undefined}
+                showElapsed={activeActivityName === 'thinking'}
               />
             ) : (
               activeAgent && activeAgent.status === 'working' && (
@@ -887,6 +901,21 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               title="Search (Ctrl+Shift+F)"
             >
               <Search className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Terminal/Companion toggle */}
+          {activeSessionId && activeAgent && (
+            <button
+              onClick={() => setOutputViewMode((prev) => (prev === 'terminal' ? 'companion' : 'terminal'))}
+              className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${
+                outputViewMode === 'companion'
+                  ? 'bg-ghost-accent/20 text-ghost-accent'
+                  : 'text-ghost-text-dim hover:bg-slate-800/50 hover:text-ghost-text'
+              }`}
+              title={outputViewMode === 'terminal' ? 'Switch to Companion View' : 'Switch to Terminal View'}
+            >
+              {outputViewMode === 'terminal' ? 'Companion' : 'Terminal'}
             </button>
           )}
 
@@ -1020,6 +1049,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 showPaneLabel={isMultiPaneGrid}
                 searchOpen={session.id === activeSessionId ? searchOpen : false}
                 onSearchClose={() => setSearchOpen(false)}
+                outputViewMode={outputViewMode}
               />
             </div>
           )

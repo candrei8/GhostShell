@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { MoreHorizontal, Folder, X, RotateCw, Send, ShieldOff, FileText, ChevronDown, ChevronUp, Clock } from 'lucide-react'
 import { Agent } from '../../lib/types'
 import { AgentAvatar } from './AgentAvatar'
@@ -42,13 +42,17 @@ function getFolderName(path?: string): string {
   return parts[parts.length - 1] || parts[parts.length - 2] || ''
 }
 
-function formatElapsed(startTime: number): string {
-  const elapsed = Date.now() - startTime
-  if (elapsed < 60000) return `${Math.round(elapsed / 1000)}s`
-  if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)}m`
-  const hrs = Math.floor(elapsed / 3600000)
-  const mins = Math.floor((elapsed % 3600000) / 60000)
-  return `${hrs}h${mins}m`
+function formatElapsed(elapsedMs: number): string {
+  if (elapsedMs < 1000) return '<1s'
+  if (elapsedMs < 60000) return `${Math.floor(elapsedMs / 1000)}s`
+  if (elapsedMs < 3600000) {
+    const mins = Math.floor(elapsedMs / 60000)
+    const secs = Math.floor((elapsedMs % 60000) / 1000)
+    return `${mins}m${secs.toString().padStart(2, '0')}s`
+  }
+  const hrs = Math.floor(elapsedMs / 3600000)
+  const mins = Math.floor((elapsedMs % 3600000) / 60000)
+  return `${hrs}h${mins.toString().padStart(2, '0')}m`
 }
 
 const statusConfig: Record<Agent['status'], { label: string; dotClass: string; textClass: string; borderClass: string }> = {
@@ -83,6 +87,7 @@ export function AgentCard({ agent }: AgentCardProps) {
   const [promptInput, setPromptInput] = useState('')
   const [showPrompt, setShowPrompt] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const setActiveAgent = useAgentStore((s) => s.setActiveAgent)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
   const activity = useActivityStore((s) => s.activities[agent.id])
@@ -136,6 +141,20 @@ export function AgentCard({ agent }: AgentCardProps) {
     activity?.subAgents.filter((s) => s.status === 'running' || s.status === 'spawning') || [],
     [activity?.subAgents],
   )
+  const isThinking = activity?.currentActivity === 'thinking'
+
+  useEffect(() => {
+    if (!isAlive) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [isAlive])
+
+  const sessionElapsed = activity?.sessionStartTime
+    ? formatElapsed(Math.max(0, now - activity.sessionStartTime))
+    : null
+  const thinkingElapsed = isThinking && activity?.lastActivityTime
+    ? formatElapsed(Math.max(0, now - activity.lastActivityTime))
+    : null
 
   return (
     <div className="relative">
@@ -209,10 +228,27 @@ export function AgentCard({ agent }: AgentCardProps) {
                   {folderName}
                 </span>
               )}
-              {activity?.sessionStartTime && isAlive && (
-                <span className="text-xs text-ghost-text-dim/40 flex items-center gap-1 font-mono tabular-nums">
-                  <Clock className="w-3.5 h-3.5 shrink-0" />
-                  {formatElapsed(activity.sessionStartTime)}
+              {sessionElapsed && isAlive && (
+                <span className="inline-flex items-center gap-1 rounded-md border border-ghost-border/70 bg-ghost-bg/70 px-1.5 py-px text-[11px] text-ghost-text font-mono tabular-nums">
+                  <Clock className="w-3.5 h-3.5 shrink-0 text-ghost-text-dim" />
+                  {sessionElapsed}
+                </span>
+              )}
+              {thinkingElapsed && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-md border px-1.5 py-px text-[11px] font-semibold font-mono tabular-nums"
+                  style={{
+                    borderColor: `${getProviderColor(agentProvider)}66`,
+                    backgroundColor: `${getProviderColor(agentProvider)}22`,
+                    color: 'var(--ghost-text)',
+                  }}
+                  title="Time spent thinking"
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
+                    style={{ backgroundColor: getProviderColor(agentProvider) }}
+                  />
+                  Thinking {thinkingElapsed}
                 </span>
               )}
             </div>
@@ -225,6 +261,8 @@ export function AgentCard({ agent }: AgentCardProps) {
                   detail={activity.currentDetail}
                   size="sm"
                   showGlow={false}
+                  startedAt={activity.lastActivityTime}
+                  showElapsed={activity.currentActivity === 'thinking'}
                 />
               </div>
             )}

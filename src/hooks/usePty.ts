@@ -5,6 +5,7 @@ import { useTerminalStore } from '../stores/terminalStore'
 import { useHistoryStore } from '../stores/historyStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useActivityStore } from '../stores/activityStore'
+import { useCompanionStore } from '../stores/companionStore'
 import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel } from '../lib/providers'
 import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
 import { Provider, SubAgentOutputLine } from '../lib/types'
@@ -201,6 +202,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     if (!terminal || connectedRef.current || !window.ghostshell) return
 
     connectedRef.current = true
+    useCompanionStore.getState().initSession(sessionId)
     const cleanups: (() => void)[] = []
     const { setAgentStatus, getAgent, updateAgent } = useAgentStore.getState()
 
@@ -222,6 +224,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     let pendingOutputLines: SubAgentOutputLine[] = []
     let outputFlushTimer: ReturnType<typeof setTimeout> | null = null
     const OUTPUT_FLUSH_MS = 200
+    let companionLineBuffer = ''
+    let lastContextSummary = ''
 
     function flushOutputLines() {
       if (pendingOutputLines.length > 0 && lastSubAgentId && agentId) {
@@ -229,6 +233,27 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         pendingOutputLines = []
       }
       outputFlushTimer = null
+    }
+
+    function flushCompanionOutput(force = false) {
+      if (!agentId) return
+      if (force && companionLineBuffer.trim()) {
+        useCompanionStore.getState().addAssistantMessage(sessionId, companionLineBuffer, provider)
+      }
+      companionLineBuffer = ''
+    }
+
+    function accumulateCompanionOutput(rawData: string) {
+      if (!agentId) return
+      const normalized = stripAnsi(rawData)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+      companionLineBuffer += normalized
+      const lines = companionLineBuffer.split('\n')
+      companionLineBuffer = lines.pop() || ''
+      for (const line of lines) {
+        useCompanionStore.getState().addAssistantMessage(sessionId, line, provider)
+      }
     }
 
     function accumulateOutput(rawData: string) {
@@ -259,12 +284,20 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     const batchParser = agentId
       ? createBatchParser((results) => {
           const store = useActivityStore.getState()
+          const companion = useCompanionStore.getState()
           for (const result of results) {
             store.setActivity(agentId, result.activity, result.detail)
             if (result.fileTouch) {
               store.addFileTouch(agentId, result.fileTouch.path, result.fileTouch.operation)
             }
             store.addEvent(agentId, result.activity, result.tool, result.detail)
+            companion.addActivityEvent(sessionId, {
+              provider,
+              activity: result.activity,
+              tool: result.tool,
+              detail: result.detail,
+              fileTouch: result.fileTouch,
+            })
 
             // Track subagent spawning
             if (result.subAgent) {
@@ -311,6 +344,21 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             // Update context metrics
             if (result.contextUpdate) {
               store.updateContextMetrics(agentId, result.contextUpdate)
+              const parts: string[] = []
+              if (typeof result.contextUpdate.tokenEstimate === 'number') {
+                parts.push(`${Math.round(result.contextUpdate.tokenEstimate).toLocaleString()} tokens`)
+              }
+              if (typeof result.contextUpdate.turnCount === 'number') {
+                parts.push(`turn ${result.contextUpdate.turnCount}`)
+              }
+              if (typeof result.contextUpdate.costEstimate === 'number') {
+                parts.push(`$${result.contextUpdate.costEstimate.toFixed(2)}`)
+              }
+              const summary = parts.join(' | ')
+              if (summary && summary !== lastContextSummary) {
+                lastContextSummary = summary
+                companion.addSystemMessage(sessionId, `Context: ${summary}`, provider)
+              }
             }
           }
         }, 100, provider)
@@ -348,6 +396,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           // Feed data to batch parser for activity detection
           if (batchParser) {
             batchParser.push(data)
+          }
+
+          if (agentId) {
+            accumulateCompanionOutput(data)
           }
 
           // Accumulate output for active sub-agent
@@ -411,6 +463,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                 8000,
                 'full'
               )
+              useCompanionStore.getState().addSystemMessage(
+                sessionId,
+                `${label} CLI not found. Install with: ${installCmd}`,
+                provider,
+              )
               // Write a helpful message directly in the terminal
               terminal.writeln('')
               terminal.writeln(`\x1b[33m[GhostShell] ${label} CLI not found.\x1b[0m`)
@@ -471,9 +528,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
           // Shift+Enter: Insert newline without executing (multi-line input)
           if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
-            // Use bracketed paste mode to send a newline that the shell
-            // treats as literal text, not as command execution
-            writeToPty('\x1b[200~\n\x1b[201~')
+            writeToPty('\n')
             return false
           }
 
@@ -505,35 +560,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             return false
           }
 
-          // Ctrl+Shift+V or Ctrl+V: Paste from clipboard (image-aware)
-          if (e.ctrlKey && e.code === 'KeyV') {
-            e.preventDefault()
-            ;(async () => {
-              try {
-                const items = await navigator.clipboard.read()
-                for (const item of items) {
-                  const imageType = item.types.find((t) => t.startsWith('image/'))
-                  if (imageType) {
-                    const blob = await item.getType(imageType)
-                    const buffer = await blob.arrayBuffer()
-                    const filePath = await (window.ghostshell as any).saveTempImage(buffer, imageType) as string
-                    if (filePath) writeToPty(filePath)
-                    return
-                  }
-                }
-                // No image — fall back to text paste
-                const text = await navigator.clipboard.readText()
-                if (text) writeToPty(text)
-              } catch {
-                // Fallback if clipboard.read() not available
-                navigator.clipboard.readText().then((text) => {
-                  if (text) writeToPty(text)
-                }).catch(() => {})
-              }
-            })()
-            return false
-          }
-
           return true
         })
         cleanups.push(() => terminal.attachCustomKeyEventHandler(() => true))
@@ -555,8 +581,44 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           termEl.addEventListener('contextmenu', handleContextMenu)
           cleanups.push(() => termEl.removeEventListener('contextmenu', handleContextMenu))
 
-          // Drag-and-drop: drop files/images onto terminal writes their path to PTY
-          // Uses dragCounter to avoid flicker when moving between child elements
+          // Paste event: intercept only for images, let text paste flow natively through xterm.
+          // This replaces the old Ctrl+V keydown interception that blocked Wispr Flow and
+          // similar tools that inject text via OS-level paste or input events.
+          const handlePaste = (e: ClipboardEvent) => {
+            if (!e.clipboardData) return
+            // Check for image data synchronously
+            const items = e.clipboardData.items
+            for (let i = 0; i < items.length; i++) {
+              if (items[i].type.startsWith('image/')) {
+                e.preventDefault()
+                e.stopPropagation()
+                const mimeType = items[i].type
+                const blob = items[i].getAsFile()
+                if (!blob) return
+                ;(async () => {
+                  try {
+                    const buffer = await blob.arrayBuffer()
+                    const filePath = await (window.ghostshell as any).saveTempImage(buffer, mimeType)
+                    if (filePath) {
+                      writeToPty(filePath)
+                      terminal.writeln(`\r\n\x1b[36m[Image saved: ${filePath}]\x1b[0m`)
+                    }
+                  } catch {
+                    // Silently fail — clipboard permission may be denied
+                  }
+                })()
+                return
+              }
+            }
+            // Text paste: do nothing — xterm handles it natively via its textarea.
+            // The onData handler will pick it up and route through sync mode if active.
+          }
+          termEl.addEventListener('paste', handlePaste, true)
+          cleanups.push(() => termEl.removeEventListener('paste', handlePaste, true))
+
+          // Drag-and-drop: drop files/images onto terminal writes their path to PTY.
+          // Handles OS files (have .path), web images (save to temp), and mixed drops.
+          // Uses dragCounter to avoid flicker when moving between child elements.
           let dragCounter = 0
           const paneEl = termEl.closest('[data-terminal-pane]') as HTMLElement | null
           const handleDragEnter = (e: DragEvent) => {
@@ -582,20 +644,58 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             dragCounter = 0
             if (paneEl) paneEl.classList.remove('drop-target')
             if (!e.dataTransfer) return
-            const files = e.dataTransfer.files
-            if (files.length > 0) {
+
+            ;(async () => {
               const paths: string[] = []
+              const files = e.dataTransfer!.files
+
               for (let i = 0; i < files.length; i++) {
-                // Electron File objects have .path with the full system path
-                const filePath = (files[i] as File & { path?: string }).path
-                if (filePath) paths.push(filePath)
+                const file = files[i] as File & { path?: string }
+                if (file.path) {
+                  // Electron file from OS — has full system path
+                  paths.push(file.path)
+                } else if (file.type.startsWith('image/')) {
+                  // Web-dragged image (no OS path) — save to temp
+                  try {
+                    const buffer = await file.arrayBuffer()
+                    const savedPath = await (window.ghostshell as any).saveTempImage(buffer, file.type)
+                    if (savedPath) paths.push(savedPath)
+                  } catch {
+                    // skip on failure
+                  }
+                }
               }
+
+              // Also check DataTransferItems for image blobs with no File entry
+              if (paths.length === 0 && e.dataTransfer!.items) {
+                for (let i = 0; i < e.dataTransfer!.items.length; i++) {
+                  const item = e.dataTransfer!.items[i]
+                  if (item.kind === 'file' && item.type.startsWith('image/')) {
+                    const blob = item.getAsFile()
+                    if (blob) {
+                      try {
+                        const buffer = await blob.arrayBuffer()
+                        const savedPath = await (window.ghostshell as any).saveTempImage(buffer, item.type)
+                        if (savedPath) paths.push(savedPath)
+                      } catch {
+                        // skip on failure
+                      }
+                    }
+                  }
+                }
+              }
+
               if (paths.length > 0) {
                 // Quote paths with spaces, join with space
                 const text = paths.map((p) => p.includes(' ') ? `"${p}"` : p).join(' ')
                 writeToPty(text)
+                // Show feedback for saved images
+                const imageCount = paths.filter((p) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)).length
+                if (imageCount > 0) {
+                  terminal.writeln(`\r\n\x1b[36m[${imageCount} image${imageCount > 1 ? 's' : ''} dropped → path${imageCount > 1 ? 's' : ''} sent to terminal]\x1b[0m`)
+                }
               }
-            }
+            })()
           }
           termEl.addEventListener('dragenter', handleDragEnter)
           termEl.addEventListener('dragover', handleDragOver)
@@ -620,6 +720,9 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             if (inputBuffer.trim()) {
               const agent = agentId ? getAgent(agentId) : undefined
               useHistoryStore.getState().addEntry(inputBuffer, sessionId, agent?.name)
+              if (agentId) {
+                useCompanionStore.getState().addUserMessage(sessionId, inputBuffer)
+              }
               inputBuffer = ''
             }
           } else if (data === '\x7f') {
@@ -653,6 +756,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         // Exit - set offline
         const removeExitListener = window.ghostshell.ptyOnExit(sessionId, (_exitCode) => {
           terminal.writeln('\r\n\x1b[90m[Process exited]\x1b[0m')
+          flushCompanionOutput(true)
+          useCompanionStore.getState().addSystemMessage(sessionId, 'Process exited.', provider)
           if (agentId) {
             cancelIdleCheck(agentId)
             agentsReachedFirstIdle.delete(agentId)
@@ -704,6 +809,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       } catch (err) {
         console.error('Failed to create PTY:', err)
         terminal.writeln('\r\n\x1b[31m[Failed to create terminal process]\x1b[0m')
+        useCompanionStore.getState().addSystemMessage(sessionId, 'Failed to create terminal process.', provider)
         if (agentId) {
           setAgentStatus(agentId, 'error')
         }
@@ -739,8 +845,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       if (outputFlushTimer) {
         clearTimeout(outputFlushTimer)
       }
+      flushCompanionOutput(true)
       cleanups.forEach((fn) => fn())
       delete (window as unknown as Record<string, unknown>)[`__ghostshell_output_${sessionId}`]
+      useCompanionStore.getState().removeSession(sessionId)
       try {
         window.ghostshell.ptyKill(sessionId)
       } catch {

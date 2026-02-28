@@ -483,17 +483,26 @@ export function parseGeminiOutput(stripped: string): ParseResult[] {
 
 // --- Codex CLI output parsing ---
 // Codex uses similar agentic patterns (tool calls, file ops, shell commands)
-const CODEX_TOOL_READ = /\breadFile\s*\(\s*(?:path|file):\s*"([^"]+)"/
-const CODEX_TOOL_WRITE = /\bwriteFile\s*\(\s*(?:path|file):\s*"([^"]+)"/
-const CODEX_TOOL_PATCH = /\bpatch\s*\(\s*(?:path|file):\s*"([^"]+)"/
-const CODEX_TOOL_SHELL = /\bshell\s*\(\s*command:\s*"([^"]+)"/
+const CODEX_TOOL_READ = /\b(?:readFile|read_file|Read)\s*\(\s*(?:path|file|file_path):\s*"([^"]+)"/i
+const CODEX_TOOL_WRITE = /\b(?:writeFile|write_file|Write)\s*\(\s*(?:path|file|file_path):\s*"([^"]+)"/i
+const CODEX_TOOL_PATCH = /\b(?:patch|apply_patch|Edit|MultiEdit)\s*\(\s*(?:path|file|file_path):\s*"([^"]+)"/i
+const CODEX_TOOL_SHELL = /\b(?:shell|shell_command|Bash)\s*\(\s*command:\s*"([^"]+)"/i
+const CODEX_TOOL_SEARCH = /\b(?:glob|searchFiles|findFiles|Grep)\s*\(\s*(?:pattern|query):\s*"([^"]+)"/i
+const CODEX_TOOL_WEB_SEARCH = /\b(?:webSearch|WebSearch)\s*\(\s*query:\s*"([^"]+)"/i
+const CODEX_TOOL_WEB_FETCH = /\b(?:webFetch|WebFetch)\s*\(\s*url:\s*"([^"]+)"/i
+const CODEX_TOOL_TASK_CREATE = /\bTaskCreate\s*\(\s*subject:\s*"([^"]+)"/i
+const CODEX_TOOL_TASK_UPDATE = /\bTaskUpdate\s*\(\s*taskId:\s*"([^"]+)".*?status:\s*"([^"]+)"/i
 
 // Codex alternative display patterns
-const CODEX_READ_ALT = /(?:Reading|Read)\s+([^\s\n]+)/
-const CODEX_WRITE_ALT = /(?:Writing|Wrote|Creating)\s+([^\s\n]+)/
-const CODEX_EDIT_ALT = /(?:Editing|Patching|Updating)\s+([^\s\n]+)/
-const CODEX_SHELL_ALT = /(?:Running|Executing|Ran)\s+`?([^`\n]+)`?/
-const CODEX_SEARCH_ALT = /(?:Searching|Grepping)\s+(.+)/
+const CODEX_READ_ALT = /(?:Reading|Read(?:ing)?(?: file)?):?\s+([^\s\n]+)/i
+const CODEX_WRITE_ALT = /(?:Writing|Wrote|Creating|Created):?\s+([^\s\n]+)/i
+const CODEX_EDIT_ALT = /(?:Editing|Patching|Updating|Updated|Applying patch to):?\s+([^\s\n]+)/i
+const CODEX_SHELL_ALT = /(?:Running|Executing|Ran)(?: command)?:?\s+`?([^`\n]+)`?/i
+const CODEX_SEARCH_ALT = /(?:Searching|Grepping|Scanning):?\s+(.+)/i
+const CODEX_WEB_SEARCH_ALT = /(?:Web\s*search|Searching web):?\s+(.+)/i
+const CODEX_WEB_FETCH_ALT = /(?:Fetching|Fetched)(?: URL)?:?\s+(\S+)/i
+const CODEX_THINKING = /(?:Thinking|Analyzing|Reasoning|Reflecting)/i
+const CODEX_PLAN_MODE = /plan mode/i
 
 export function parseCodexOutput(stripped: string): ParseResult[] {
   const results: ParseResult[] = []
@@ -536,6 +545,60 @@ export function parseCodexOutput(stripped: string): ParseResult[] {
       activity: 'running_bash',
       tool: 'shell',
       detail: match[1],
+    })
+  }
+
+  match = CODEX_TOOL_SEARCH.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'searching',
+      tool: 'search',
+      detail: match[1],
+    })
+  }
+
+  match = CODEX_TOOL_WEB_SEARCH.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'web_search',
+      tool: 'webSearch',
+      detail: match[1],
+    })
+  }
+
+  match = CODEX_TOOL_WEB_FETCH.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'web_fetch',
+      tool: 'webFetch',
+      detail: match[1],
+    })
+  }
+
+  match = CODEX_TOOL_TASK_CREATE.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'task_create',
+      tool: 'TaskCreate',
+      detail: match[1],
+      taskAction: {
+        action: 'create',
+        subject: match[1],
+      },
+    })
+  }
+
+  match = CODEX_TOOL_TASK_UPDATE.exec(stripped)
+  if (match) {
+    results.push({
+      activity: 'task_update',
+      tool: 'TaskUpdate',
+      detail: `${match[1]}: ${match[2]}`,
+      taskAction: {
+        action: 'update',
+        taskId: match[1],
+        status: match[2],
+      },
     })
   }
 
@@ -588,13 +651,62 @@ export function parseCodexOutput(stripped: string): ParseResult[] {
         detail: match[1],
       })
     }
+
+    match = CODEX_WEB_SEARCH_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'web_search',
+        tool: 'webSearch',
+        detail: match[1],
+      })
+    }
+
+    match = CODEX_WEB_FETCH_ALT.exec(stripped)
+    if (match) {
+      results.push({
+        activity: 'web_fetch',
+        tool: 'webFetch',
+        detail: match[1],
+      })
+    }
+  }
+
+  // Context metrics extraction
+  const contextMatch = CONTEXT_PATTERN.exec(stripped)
+  const tokenMatch = TOKENS_PATTERN.exec(stripped)
+  const costMatch = COST_PATTERN.exec(stripped)
+  const turnMatch = TURN_PATTERN.exec(stripped)
+
+  if (contextMatch || tokenMatch || costMatch || turnMatch) {
+    const contextUpdate: ParseResult['contextUpdate'] = {}
+    if (tokenMatch) {
+      contextUpdate.tokenEstimate = parseTokenCount(tokenMatch[1])
+    }
+    if (costMatch) {
+      contextUpdate.costEstimate = parseFloat(costMatch[1])
+    }
+    if (turnMatch) {
+      contextUpdate.turnCount = parseInt(turnMatch[1], 10)
+    }
+    if (contextMatch && !tokenMatch) {
+      const pct = parseFloat(contextMatch[1])
+      contextUpdate.tokenEstimate = Math.round((pct / 100) * 200000)
+    }
+    if (Object.keys(contextUpdate).length > 0) {
+      results.push({
+        activity: results[0]?.activity || 'thinking',
+        contextUpdate,
+      })
+    }
   }
 
   // High-level activity patterns
   if (results.length === 0) {
     if (PERMISSION_PATTERN.test(stripped)) {
       results.push({ activity: 'permission' })
-    } else if (SPINNER_CHARS.test(stripped)) {
+    } else if (CODEX_PLAN_MODE.test(stripped)) {
+      results.push({ activity: 'planning' })
+    } else if (CODEX_THINKING.test(stripped) || SPINNER_CHARS.test(stripped)) {
       results.push({ activity: 'thinking' })
     }
   }

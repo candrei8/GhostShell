@@ -113,7 +113,7 @@ function SubAgentNode({ agent, isLast }: { agent: SubAgent; isLast: boolean }) {
 
         {/* Status + duration */}
         <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[11px] text-ghost-text-dim/50 font-mono tabular-nums">
+          <span className="inline-flex items-center rounded-md border border-ghost-border/60 bg-ghost-bg/55 px-1.5 py-px text-[10px] text-ghost-text font-mono tabular-nums">
             {formatDuration(agent.startTime, agent.endTime)}
           </span>
           <StatusIcon

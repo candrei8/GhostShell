@@ -190,7 +190,7 @@ function SubAgentListItem({
           <p className="text-[11px] text-ghost-text truncate leading-tight">{agent.description}</p>
           <div className="flex items-center gap-1 mt-0.5">
             <DomainBadge domain={agent.domain} />
-            <span className="text-[10px] text-ghost-text-dim/50 font-mono tabular-nums">
+            <span className="inline-flex items-center rounded-md border border-ghost-border/60 bg-ghost-bg/55 px-1.5 py-px text-[10px] text-ghost-text font-mono tabular-nums">
               {formatDuration(agent.startTime, agent.endTime)}
             </span>
           </div>
@@ -495,7 +495,7 @@ export function SubAgentMonitor({ height, onClose }: SubAgentMonitorProps) {
 
         {/* Stats summary */}
         {stats && (
-          <div className="ml-auto flex items-center gap-2 text-[10px] text-ghost-text-dim/60 font-mono tabular-nums mr-2">
+          <div className="ml-auto flex items-center gap-2 text-[10px] text-ghost-text-dim font-mono tabular-nums mr-2">
             {stats.tasks > 0 && (
               <span>
                 {stats.tasks} task{stats.tasks !== 1 ? 's' : ''}

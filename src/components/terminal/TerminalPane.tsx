@@ -8,6 +8,9 @@ import { useActivityStore } from '../../stores/activityStore'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { ActivityIcon } from '../agents/ActivityIcon'
 import { TerminalSession } from '../../lib/types'
+import { resolveProvider } from '../../lib/providers'
+import { CompanionPanel } from '../companion/CompanionPanel'
+import { InputBoxOverlay } from './InputBoxOverlay'
 
 interface TerminalPaneProps {
   session: TerminalSession
@@ -17,9 +20,19 @@ interface TerminalPaneProps {
   showPaneLabel?: boolean
   searchOpen?: boolean
   onSearchClose?: () => void
+  outputViewMode?: 'terminal' | 'companion'
 }
 
-export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabel, searchOpen: externalSearchOpen, onSearchClose }: TerminalPaneProps) {
+export function TerminalPane({
+  session,
+  isActive,
+  onClose,
+  onClick,
+  showPaneLabel,
+  searchOpen: externalSearchOpen,
+  onSearchClose,
+  outputViewMode = 'terminal',
+}: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const agent = useAgentStore((s) =>
     session.agentId ? s.agents.find((a) => a.id === session.agentId) : undefined,
@@ -36,11 +49,18 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
     const a = s.activities[agentId]
     return a ? (a.currentDetail || null) : null
   })
+  const activityStartedAt = useActivityStore((s) => {
+    if (!agentId) return null
+    const a = s.activities[agentId]
+    return a ? a.lastActivityTime : null
+  })
   const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerRef, isActive)
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const [labelHovered, setLabelHovered] = useState(false)
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
+  const showCompanion = outputViewMode === 'companion' && !!session.agentId
+  const provider = agent ? resolveProvider(agent) : undefined
 
   usePty({
     sessionId: session.id,
@@ -115,7 +135,13 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
 
           {/* Status: activity or working badge */}
           {agent && activityName && activityName !== 'idle' ? (
-            <ActivityIcon activity={activityName} detail={activityDetail || undefined} size="sm" />
+            <ActivityIcon
+              activity={activityName}
+              detail={activityDetail || undefined}
+              size="sm"
+              startedAt={activityStartedAt || undefined}
+              showElapsed={activityName === 'thinking'}
+            />
           ) : agent?.status === 'working' ? (
             <span className="text-[10px] px-1 rounded-lg bg-ghost-success/15 text-ghost-success shrink-0">Working</span>
           ) : agent?.status === 'error' ? (
@@ -150,7 +176,22 @@ export function TerminalPane({ session, isActive, onClose, onClick, showPaneLabe
         onSearchPrev={searchPrev}
         onClear={clearSearch}
       />
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden" />
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        <div ref={containerRef} className="absolute inset-0 overflow-hidden" />
+        {session.agentId && (
+          <InputBoxOverlay
+            terminal={terminal}
+            agentStatus={agent?.status}
+            provider={provider}
+            containerRef={containerRef}
+          />
+        )}
+        {showCompanion && (
+          <div className="absolute inset-0 z-20 border-t border-ghost-border/40">
+            <CompanionPanel session={session} provider={provider} agentName={agent?.name} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

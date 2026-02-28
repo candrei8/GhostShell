@@ -100,7 +100,7 @@
 }
 
 [data-terminal-pane].drop-target::after {
-  content: 'Drop files here';
+  content: 'Drop files or images here';
   position: absolute;
   inset: 0;
   display: flex;
@@ -127,4 +127,25 @@
     opacity: 1;
     border-spacing: 0;
   }
+}
+
+/* Input box overlay — visual frame around agent prompt area */
+.input-box-overlay {
+  position: absolute;
+  left: 4px;
+  right: 16px; /* 12px scrollbar + 4px padding */
+  pointer-events: none;
+  z-index: 10;
+  border-top: 1px solid var(--input-box-color, rgba(99, 102, 241, 0.35));
+  border-bottom: 1px solid var(--input-box-color, rgba(99, 102, 241, 0.35));
+  border-left: 2px solid var(--input-box-color, rgba(99, 102, 241, 0.35));
+  border-right: 2px solid var(--input-box-color, rgba(99, 102, 241, 0.35));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input-box-color, var(--ghost-accent)) 4%, transparent);
+  opacity: 0;
+  transition: opacity 200ms ease, top 80ms ease, height 80ms ease;
+}
+
+.input-box-overlay.visible {
+  opacity: 1;
 }
