@@ -112,13 +112,16 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
     try {
       const webglAddon = new WebglAddon()
       webglAddon.onContextLoss(() => {
-        webglAddon.dispose()
+        console.warn('WebGL context lost, falling back to canvas renderer')
+        try { webglAddon.dispose() } catch {}
         webglAddonRef.current = null
+        // Force full content re-render so the canvas fallback renderer paints all lines
+        try { term.refresh(0, term.rows - 1) } catch {}
       })
       term.loadAddon(webglAddon)
       webglAddonRef.current = webglAddon
     } catch {
-      console.warn('WebGL addon failed to load, using DOM renderer')
+      console.warn('WebGL addon failed to load, using canvas renderer')
     }
 
     // Load Search addon
@@ -215,28 +218,37 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
     if (!terminal) return
 
     const unsub = useSettingsStore.subscribe((state, prevState) => {
-      if (state.terminalFontSize !== prevState.terminalFontSize) {
-        terminal.options.fontSize = state.terminalFontSize
-        fit()
-      }
-      if (state.fontFamily !== prevState.fontFamily) {
-        terminal.options.fontFamily = state.fontFamily
-        fit()
-      }
-      if (state.cursorBlink !== prevState.cursorBlink) {
-        terminal.options.cursorBlink = state.cursorBlink
-      }
-      if (state.cursorStyle !== prevState.cursorStyle) {
-        terminal.options.cursorStyle = state.cursorStyle
-      }
-      if (state.themeId !== prevState.themeId) {
-        const theme = state.getTheme()
-        terminal.options.theme = theme.terminalColors
+      // Guard: skip if terminal has been disposed
+      if (!termRef.current) return
+
+      try {
+        if (state.terminalFontSize !== prevState.terminalFontSize) {
+          terminal.options.fontSize = state.terminalFontSize
+          debouncedFit() // debounced to avoid hammering fit() on rapid slider changes
+        }
+        if (state.fontFamily !== prevState.fontFamily) {
+          terminal.options.fontFamily = state.fontFamily
+          debouncedFit()
+        }
+        if (state.cursorBlink !== prevState.cursorBlink) {
+          terminal.options.cursorBlink = state.cursorBlink
+        }
+        if (state.cursorStyle !== prevState.cursorStyle) {
+          terminal.options.cursorStyle = state.cursorStyle
+        }
+        if (state.themeId !== prevState.themeId) {
+          const theme = state.getTheme()
+          terminal.options.theme = theme.terminalColors
+          // Force re-render to apply new colors immediately
+          try { terminal.refresh(0, terminal.rows - 1) } catch {}
+        }
+      } catch {
+        // Terminal may have been disposed between guard check and property access
       }
     })
 
     return unsub
-  }, [terminal, fit])
+  }, [terminal, debouncedFit])
 
   const searchNext = useCallback((query: string) => {
     return searchAddonRef.current?.findNext(query, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#a855f780', activeMatchColorOverviewRuler: '#a855f7', matchBackground: '#a855f730', activeMatchBackground: '#a855f760' } }) ?? false

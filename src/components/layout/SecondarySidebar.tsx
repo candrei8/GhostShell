@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SidebarView } from '../../lib/types'
-import { AgentList } from '../agents/AgentList'
+import { MissionControlFeed } from '../agents/MissionControlFeed'
 import { FileExplorer } from '../files/FileExplorer'
 import { HistoryPanel } from '../common/HistoryPanel'
 
@@ -80,7 +80,7 @@ export function SecondarySidebar({ activeView, collapsed }: SecondarySidebarProp
               transition={{ duration: 0.18, ease: cubicEase }}
             >
               {activeView === 'files' && <FileExplorer />}
-              {activeView === 'agents' && <AgentList />}
+              {activeView === 'agents' && <MissionControlFeed />}
               {activeView === 'history' && <HistoryPanel />}
             </motion.div>
           </AnimatePresence>

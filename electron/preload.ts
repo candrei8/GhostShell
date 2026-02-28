@@ -66,6 +66,14 @@ const api = {
     ipcRenderer.on('updater:status', handler)
     return () => { ipcRenderer.removeListener('updater:status', handler) }
   },
+
+  // Close handshake (for tab snapshot save)
+  onBeforeClose: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('app:before-close', handler)
+    return () => { ipcRenderer.removeListener('app:before-close', handler) }
+  },
+  closeReady: () => ipcRenderer.send('app:close-ready'),
 }
 
 contextBridge.exposeInMainWorld('ghostshell', api)

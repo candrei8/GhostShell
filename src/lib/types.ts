@@ -298,6 +298,8 @@ declare global {
       updaterDownload: () => Promise<{ success: boolean; error?: string }>
       updaterInstall: () => void
       onUpdaterStatus: (cb: (status: Record<string, unknown>) => void) => () => void
+      onBeforeClose: (callback: () => void) => () => void
+      closeReady: () => void
     }
   }
 }

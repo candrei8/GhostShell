@@ -33,6 +33,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     terminalFontSize,
     cursorBlink,
     cursorStyle,
+    restoreTabs,
     muteNotifications,
     notificationVolume,
     claudeCliPath,
@@ -47,6 +48,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setTerminalFontSize,
     setCursorBlink,
     setCursorStyle,
+    setRestoreTabs,
     setMuteNotifications,
     setNotificationVolume,
     setClaudeCliPath,
@@ -465,6 +467,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       checked={cursorBlink}
                       onChange={setCursorBlink}
                       label="Cursor Blink"
+                    />
+
+                    <Toggle
+                      checked={restoreTabs}
+                      onChange={setRestoreTabs}
+                      label="Restore Previous Tabs"
+                      description="Reopen terminal tabs and agents from your last session."
                     />
 
                     <Toggle

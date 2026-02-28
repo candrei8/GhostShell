@@ -151,6 +151,10 @@ const lastWorkingPatternTime = new Map<string, number>()
 // Dedup guard: last idle notification time per agent (10s cooldown)
 const lastIdleNotificationTime = new Map<string, number>()
 
+// Timing constants for idle detection (tuned to avoid false "finished" during multi-step tool chains)
+const IDLE_DELAY_MS = 8000   // 8s — time without activity before declaring idle
+const IDLE_GRACE_MS = 5000   // 5s — grace period before a prompt triggers idle check
+
 function scheduleIdleCheck(agentId: string, delayMs: number, agentName: string) {
   const existing = idleTimers.get(agentId)
   if (existing) clearTimeout(existing)
@@ -160,6 +164,15 @@ function scheduleIdleCheck(agentId: string, delayMs: number, agentName: string) 
     // Guard: agent may have been deleted while timer was pending
     const agent = useAgentStore.getState().getAgent(agentId)
     if (!agent) return
+    // Confirm no activity during wait period
+    const lastWorking = lastWorkingPatternTime.get(agentId) || 0
+    const elapsed = Date.now() - lastWorking
+    if (elapsed < delayMs) {
+      // Activity happened during wait — reschedule remaining time + buffer
+      scheduleIdleCheck(agentId, delayMs - elapsed + 1000, agentName)
+      return
+    }
+
     if (agent.status === 'working') {
       useAgentStore.getState().setAgentStatus(agentId, 'idle')
       useActivityStore.getState().setActivity(agentId, 'idle')
@@ -286,6 +299,22 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           const store = useActivityStore.getState()
           const companion = useCompanionStore.getState()
           for (const result of results) {
+            // Bridge: batch parser activity resets idle detection
+            if (result.activity !== 'idle') {
+              const now = Date.now()
+              lastWorkingPatternTime.set(agentId, now)
+              cancelIdleCheck(agentId)
+              const currentAgent = getAgent(agentId)
+              if (currentAgent && currentAgent.status !== 'working' && now - lastWorkingSet > WORKING_COOLDOWN_MS) {
+                setAgentStatus(agentId, 'working')
+                lastWorkingSet = now
+              }
+              if (currentAgent && !currentAgent.hasConversation) {
+                updateAgent(agentId, { hasConversation: true })
+              }
+              scheduleIdleCheck(agentId, IDLE_DELAY_MS, agentName)
+            }
+
             store.setActivity(agentId, result.activity, result.detail)
             if (result.fileTouch) {
               store.addFileTouch(agentId, result.fileTouch.path, result.fileTouch.operation)
@@ -493,17 +522,17 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               if (currentAgent && !currentAgent.hasConversation) {
                 updateAgent(agentId, { hasConversation: true })
               }
-              scheduleIdleCheck(agentId, 3000, agentName)
+              scheduleIdleCheck(agentId, IDLE_DELAY_MS, agentName)
             }
 
             const isPrompt = idlePatterns.some((p) => p.test(data))
             if (isPrompt) {
-              // Only schedule short idle if no working pattern in the last 2 seconds
+              // Only schedule idle if no working pattern in the grace period
               const lastWorking = lastWorkingPatternTime.get(agentId) || 0
-              if (now - lastWorking > 2000) {
+              if (now - lastWorking > IDLE_GRACE_MS) {
                 const currentAgent = getAgent(agentId)
                 if (currentAgent && currentAgent.status === 'working') {
-                  scheduleIdleCheck(agentId, 3000, agentName)
+                  scheduleIdleCheck(agentId, IDLE_DELAY_MS, agentName)
                 }
               }
             }

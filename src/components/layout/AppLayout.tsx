@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { TitleBar } from './TitleBar'
 import { IconSidebar } from './IconSidebar'
 import { SecondarySidebar } from './SecondarySidebar'
@@ -11,6 +11,9 @@ import { ResizeHandle } from '../common/ResizeHandle'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { UpdateBanner } from '../common/UpdateBanner'
 import { useTerminalStore } from '../../stores/terminalStore'
+import { useAgentStore } from '../../stores/agentStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { loadTabSnapshot, clearTabSnapshot } from '../../lib/tabSnapshot'
 import { SidebarView } from '../../lib/types'
 
 export function AppLayout() {
@@ -66,6 +69,85 @@ export function AppLayout() {
       setShowQuickLaunch(false)
     }
   }, [activeSessionId, sessions.length])
+
+  // Restore previous tabs on startup (one-time)
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+
+    const restore = async () => {
+      const restoreTabs = useSettingsStore.getState().restoreTabs
+      if (!restoreTabs) return
+
+      const snapshot = await loadTabSnapshot()
+      if (!snapshot) return
+
+      // Clear immediately to prevent double-restore
+      await clearTabSnapshot()
+
+      const { addAgent, setAgentStatus, updateAgent } = useAgentStore.getState()
+      const { addSession, setActiveSession, setViewMode } = useTerminalStore.getState()
+
+      // Map old agent IDs to new ones
+      const agentIdMap = new Map<string, string>()
+
+      // Restore agents as 'offline'
+      for (const saved of snapshot.agents) {
+        const agent = addAgent(
+          saved.name,
+          saved.avatar,
+          saved.color,
+          saved.claudeConfig,
+          saved.cwd,
+          saved.templateId,
+          saved.provider,
+          saved.geminiConfig,
+          saved.codexConfig,
+        )
+        agentIdMap.set(saved.originalId, agent.id)
+        setAgentStatus(agent.id, 'offline')
+        if (saved.hasConversation) {
+          updateAgent(agent.id, { hasConversation: true })
+        }
+      }
+
+      // Restore sessions
+      const restoredSessionIds: string[] = []
+      for (const saved of snapshot.sessions) {
+        const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+        const mappedAgentId = saved.agentId ? agentIdMap.get(saved.agentId) : undefined
+
+        addSession({
+          id: newId,
+          title: saved.title,
+          cwd: saved.cwd,
+          shell: saved.shell,
+          agentId: mappedAgentId,
+          skipAutoLaunch: true,
+        })
+        restoredSessionIds.push(newId)
+
+        // Link agent back to its terminal
+        if (mappedAgentId) {
+          updateAgent(mappedAgentId, { terminalId: newId })
+        }
+      }
+
+      // Restore view mode
+      if (snapshot.viewMode) {
+        setViewMode(snapshot.viewMode)
+      }
+
+      // Restore active session
+      if (restoredSessionIds.length > 0) {
+        const idx = Math.min(snapshot.activeSessionIndex, restoredSessionIds.length - 1)
+        setActiveSession(restoredSessionIds[Math.max(0, idx)])
+      }
+    }
+
+    restore()
+  }, [])
 
   useKeyboardShortcuts({
     onToggleCommandPalette: toggleCommandPalette,

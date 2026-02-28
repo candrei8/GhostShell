@@ -199,6 +199,34 @@ img, canvas, svg {
   background: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.2) 0%, transparent 70%);
 }
 
+/* Tree connector for Mission Control sub-agent nodes */
+.mc-tree-line {
+  position: relative;
+}
+.mc-tree-line::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ghost-border);
+  opacity: 0.25;
+}
+.mc-tree-line:last-child::before {
+  height: 12px;
+}
+
+/* Task active indicator pulse */
+.task-active-glow {
+  border-left: 2px solid var(--ghost-success);
+  animation: task-pulse 2s ease-in-out infinite;
+}
+@keyframes task-pulse {
+  0%, 100% { border-left-color: rgba(16, 185, 129, 0.3); }
+  50% { border-left-color: rgba(16, 185, 129, 0.8); }
+}
+
 /* Drag handle for resizable sidebar */
 .resize-handle {
   position: absolute;

@@ -6,6 +6,7 @@ import { WorkspaceManager } from './workspace-manager'
 import { initUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
+let isClosing = false
 const ptyManager = new PtyManager()
 const workspaceManager = new WorkspaceManager()
 
@@ -37,6 +38,18 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
     initUpdater(mainWindow!)
+  })
+
+  // Close handshake: let renderer save tab snapshot before quitting
+  mainWindow.on('close', (e) => {
+    if (isClosing) return // already confirmed, let it close
+    e.preventDefault()
+    mainWindow?.webContents.send('app:before-close')
+    // Safety timeout: if renderer doesn't respond in 3s, force close
+    setTimeout(() => {
+      isClosing = true
+      mainWindow?.destroy()
+    }, 3000)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -313,6 +326,12 @@ function setupIPC(): void {
     const filePath = path.join(dir, fileName)
     await fs.writeFile(filePath, Buffer.from(buffer))
     return filePath
+  })
+
+  // Close handshake: renderer signals it's done saving
+  ipcMain.on('app:close-ready', () => {
+    isClosing = true
+    mainWindow?.destroy()
   })
 
   // App version

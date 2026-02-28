@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Layers,
+  Crown,
   FolderOpen,
   Settings as SettingsIcon,
   Clock,
@@ -16,8 +16,8 @@ interface IconSidebarProps {
   onQuickLaunch: () => void
 }
 
-const navItems: { view: SidebarView; icon: typeof Layers; label: string; shortcut: string }[] = [
-  { view: 'agents', icon: Layers, label: 'Agents', shortcut: '' },
+const navItems: { view: SidebarView; icon: typeof Crown; label: string; shortcut: string }[] = [
+  { view: 'agents', icon: Crown, label: 'Control', shortcut: '' },
   { view: 'files', icon: FolderOpen, label: 'Files', shortcut: '' },
   { view: 'history', icon: Clock, label: 'History', shortcut: 'Ctrl+Shift+H' },
 ]

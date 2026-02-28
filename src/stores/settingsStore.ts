@@ -20,10 +20,12 @@ interface SettingsState {
   codexCliPath: string
   defaultCodexModel: string
   lastAgentFolder: string
+  restoreTabs: boolean
   muteNotifications: boolean
   notificationVolume: number
   savedAgents: SavedAgentConfig[]
 
+  setRestoreTabs: (restore: boolean) => void
   addSavedAgent: (config: SavedAgentConfig) => void
   removeSavedAgent: (id: string) => void
   setLastAgentFolder: (path: string) => void
@@ -66,10 +68,12 @@ export const useSettingsStore = create<SettingsState>()(
       codexCliPath: 'codex',
       defaultCodexModel: 'gpt-5.3-codex',
       lastAgentFolder: '',
+      restoreTabs: true,
       muteNotifications: false,
       notificationVolume: 50,
       savedAgents: [],
 
+      setRestoreTabs: (restore) => set({ restoreTabs: restore }),
       addSavedAgent: (config) => set((state) => ({ savedAgents: [...state.savedAgents, config] })),
       removeSavedAgent: (id) => set((state) => ({ savedAgents: state.savedAgents.filter((a) => a.id !== id) })),
       setLastAgentFolder: (path) => set({ lastAgentFolder: path }),
@@ -116,6 +120,7 @@ export const useSettingsStore = create<SettingsState>()(
         codexCliPath: state.codexCliPath,
         defaultCodexModel: state.defaultCodexModel,
         lastAgentFolder: state.lastAgentFolder,
+        restoreTabs: state.restoreTabs,
         muteNotifications: state.muteNotifications,
         notificationVolume: state.notificationVolume,
         savedAgents: state.savedAgents,
