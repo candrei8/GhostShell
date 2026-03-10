@@ -224,7 +224,7 @@ export function TerminalPane({
   return (
     <div
       data-terminal-pane
-      className="relative m-1 flex h-full flex-col overflow-hidden rounded-xl border transition-all duration-200"
+      className="relative m-1 flex h-full flex-col overflow-hidden rounded-xl border transition duration-200"
       style={paneStyle}
       onClick={onClick}
       onMouseEnter={() => setLabelHovered(true)}

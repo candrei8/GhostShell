@@ -653,8 +653,9 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         </div>
 
         <div className="grid gap-5 xl:flex-1 xl:min-h-0 xl:grid-cols-[minmax(430px,500px)_minmax(0,1fr)]">
-          <section className="ghost-glass-panel flex min-h-0 flex-col rounded-[30px] p-5 lg:p-6 xl:overflow-hidden">
-            <div className="mb-5">
+          <section className="ghost-glass-panel relative flex min-h-0 flex-col overflow-hidden rounded-[30px] shadow-2xl">
+            <div className="flex-1 overflow-y-auto p-5 pb-8 lg:p-6 lg:pb-8 ql-templates-scroll">
+              <div className="mb-5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/34">Session Setup</p>
               <h2 className="mt-2 text-[24px] font-semibold tracking-tight text-white/96">Configure the launch</h2>
               <p className="mt-2 text-[13px] leading-6 text-white/52">
@@ -662,7 +663,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               </p>
             </div>
 
-            <div className="space-y-4 xl:min-h-0 xl:flex-1 xl:overflow-auto xl:pr-1">
+            <div className="space-y-4">
               <div className="rounded-[20px] border border-white/[0.04] bg-black/20 p-4 shadow-sm backdrop-blur-md">
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
@@ -851,6 +852,32 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                     </div>
                   </div>
 
+                  <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+                    <button
+                      onClick={handleSavePreset}
+                      className="flex h-12 flex-1 items-center justify-center gap-2 rounded-[14px] border border-white/[0.06] bg-white/[0.02] px-4 text-[13px] font-medium text-white/60 shadow-sm transition-all hover:bg-white/[0.04] hover:text-white"
+                    >
+                      <Save className="h-4 w-4" />
+                      Save Preset
+                    </button>
+
+                    <motion.button
+                      onClick={handlePrimaryLaunch}
+                      disabled={launching}
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      className="group relative flex h-12 flex-[2] items-center justify-center gap-2.5 overflow-hidden rounded-[14px] px-5 text-[14px] font-medium text-white shadow-md transition-all disabled:opacity-50"
+                      style={{
+                        background: `linear-gradient(135deg, ${providerColor}40, ${providerColor}20)`,
+                        border: `1px solid ${providerColor}40`,
+                        boxShadow: `0 4px 12px ${providerColor}20`,
+                      }}
+                    >
+                      <Zap className="h-4 w-4" />
+                      {launching ? 'Launching...' : `Launch ${providerLabel}`}
+                    </motion.button>
+                  </div>
+
                   <button
                     onClick={() => setSkipPermissions((value) => !value)}
                     className={`flex w-full items-center justify-between gap-4 rounded-[16px] border px-4 py-3.5 text-left transition-all ${
@@ -952,35 +979,11 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               </div>
             )}
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-white/[0.04] pt-5 sm:flex-row">
-              <button
-                onClick={handleSavePreset}
-                className="flex h-12 flex-1 items-center justify-center gap-2 rounded-[16px] border border-white/[0.06] bg-white/[0.02] px-4 text-[13px] font-medium text-white/60 shadow-sm transition-all hover:bg-white/[0.04] hover:text-white"
-              >
-                <Save className="h-4 w-4" />
-                Save Preset
-              </button>
-
-              <motion.button
-                onClick={handlePrimaryLaunch}
-                disabled={launching}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                className="group relative flex h-12 flex-[1.5] items-center justify-center gap-3 overflow-hidden rounded-[16px] px-5 text-[14px] font-medium text-white shadow-md transition-all disabled:opacity-50"
-                style={{
-                  background: `linear-gradient(135deg, ${providerColor}40, ${providerColor}20)`,
-                  border: `1px solid ${providerColor}40`,
-                  boxShadow: `0 4px 12px ${providerColor}20`,
-                }}
-              >
-                <Zap className="h-4 w-4" />
-                {launching ? 'Launching...' : `Launch ${providerLabel}`}
-              </motion.button>
             </div>
           </section>
 
-          <section className="ghost-glass-panel flex min-h-0 flex-col rounded-[30px] p-5 lg:p-6 xl:overflow-hidden">
-            <div className="mb-5 border-b border-white/[0.06] pb-5">
+          <section className="ghost-glass-panel relative flex min-h-0 flex-col overflow-hidden rounded-[30px] shadow-2xl">
+            <div className="flex-none border-b border-white/[0.04] p-5 pb-5 lg:p-6 lg:pb-6">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/34">Specialists</p>
               <h2 className="mt-2 text-[24px] font-semibold tracking-tight text-white/96">Launch a purpose-built teammate</h2>
               <p className="mt-2 text-[13px] leading-6 text-white/52">
@@ -1027,7 +1030,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               </div>
             </div>
 
-            <div className="ql-templates-scroll space-y-6 xl:min-h-0 xl:flex-1 xl:overflow-auto xl:pr-1">
+            <div className="flex-1 overflow-y-auto p-5 pb-8 lg:p-6 lg:pb-8 ql-templates-scroll space-y-6">
               {categoryOrder.map((cat) => {
                 const templates = groupedTemplates[cat]
                 if (templates.length === 0) return null

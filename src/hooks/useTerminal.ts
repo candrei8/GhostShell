@@ -189,6 +189,11 @@ export function useTerminal(
     // Delay fit to ensure container has dimensions (force=true to allow initial hidden mount)
     requestAnimationFrame(() => {
       try { fitAddon.fit() } catch {}
+      setTimeout(() => {
+        if (mounted.current) {
+          try { fitAddon.fit() } catch {}
+        }
+      }, 30)
     })
 
     // ResizeObserver with debounced fit
