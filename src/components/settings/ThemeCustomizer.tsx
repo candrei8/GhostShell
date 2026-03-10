@@ -1,32 +1,37 @@
-import { useSettingsStore } from '../../stores/settingsStore'
 import { Check } from 'lucide-react'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 export function ThemeCustomizer() {
   const { themeId, setTheme, getAvailableThemes } = useSettingsStore()
   const availableThemes = getAvailableThemes()
 
   return (
-    <div>
-      <label className="text-xs text-ghost-text-dim uppercase tracking-wider mb-2 block">Theme</label>
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className="text-xs text-ghost-text-dim uppercase tracking-wider mb-2 block">Theme</label>
+        <p className="text-xs text-ghost-text-dim/80">
+          Tema visual de la app. Esta vista se mantiene ligera para que el modal abra sin bloquear el renderer.
+        </p>
+      </div>
+
       <div className="flex flex-col gap-1.5">
         {availableThemes.map((theme) => (
           <button
             key={theme.id}
             onClick={() => setTheme(theme.id)}
-            className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all border ${
+            className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-left transition-all ${
               themeId === theme.id
-                ? 'border-ghost-accent bg-indigo-950/40'
-                : 'border-ghost-border hover:border-ghost-accent/50 hover:bg-slate-800/50'
+                ? 'border-ghost-accent bg-ghost-accent/12'
+                : 'border-white/10 bg-black/20 hover:border-ghost-accent/40 hover:bg-white/5'
             }`}
           >
-            {/* Color preview dots */}
             <div className="flex gap-1">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: theme.colors.accent }} />
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: theme.colors.accent2 }} />
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: theme.colors.accent3 }} />
+              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: theme.colors.accent }} />
+              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: theme.colors.accent2 }} />
+              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: theme.colors.accent3 }} />
             </div>
-            <span className="text-sm text-ghost-text flex-1 text-left">{theme.name}</span>
-            {themeId === theme.id && <Check className="w-3.5 h-3.5 text-ghost-accent" />}
+            <span className="flex-1 text-sm text-ghost-text">{theme.name}</span>
+            {themeId === theme.id && <Check className="h-3.5 w-3.5 text-ghost-accent" />}
           </button>
         ))}
       </div>

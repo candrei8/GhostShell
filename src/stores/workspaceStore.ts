@@ -17,6 +17,71 @@ interface WorkspaceState {
   addRecentProject: (path: string) => void
 }
 
+function pickPath(value: unknown, fallback = 'C:\\Users'): string {
+  return typeof value === 'string' && value.trim() ? value : fallback
+}
+
+function sanitizeWorkspace(value: unknown): Workspace | null {
+  if (!value || typeof value !== 'object') return null
+
+  const raw = value as Record<string, unknown>
+  const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id : ''
+  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name : ''
+  const path = pickPath(raw.path, '')
+
+  if (!id || !name || !path) return null
+
+  return {
+    id,
+    name,
+    path,
+    lastOpened:
+      typeof raw.lastOpened === 'number' && Number.isFinite(raw.lastOpened) && raw.lastOpened > 0
+        ? raw.lastOpened
+        : Date.now(),
+  }
+}
+
+function sanitizeRecentProjects(value: unknown, currentPath: string): string[] {
+  const entries = Array.isArray(value) ? value : []
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const entry of entries) {
+    if (typeof entry !== 'string' || !entry.trim() || seen.has(entry)) continue
+    seen.add(entry)
+    out.push(entry)
+  }
+
+  if (currentPath && !seen.has(currentPath)) {
+    out.unshift(currentPath)
+  }
+
+  return out.slice(0, 10)
+}
+
+function normalizePersistedWorkspaceState(persistedState: unknown) {
+  const raw = (persistedState && typeof persistedState === 'object'
+    ? persistedState
+    : {}) as Record<string, unknown>
+  const currentPath = pickPath(raw.currentPath)
+  const workspaces = (Array.isArray(raw.workspaces) ? raw.workspaces : [])
+    .map((entry) => sanitizeWorkspace(entry))
+    .filter((entry): entry is Workspace => !!entry)
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id))
+  const currentWorkspaceId =
+    typeof raw.currentWorkspaceId === 'string' && workspaceIds.has(raw.currentWorkspaceId)
+      ? raw.currentWorkspaceId
+      : null
+
+  return {
+    workspaces,
+    currentWorkspaceId,
+    currentPath,
+    recentProjects: sanitizeRecentProjects(raw.recentProjects, currentPath),
+  }
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()(
   persist(
     (set, get) => ({
@@ -58,10 +123,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       setCurrentPath: (path) => {
-        const recent = get().recentProjects.filter((p) => p !== path)
+        const nextPath = pickPath(path)
+        const recent = get().recentProjects.filter((p) => p !== nextPath)
         set({
-          currentPath: path,
-          recentProjects: [path, ...recent].slice(0, 10),
+          currentPath: nextPath,
+          recentProjects: [nextPath, ...recent].slice(0, 10),
         })
       },
 
@@ -71,13 +137,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       addRecentProject: (path) => {
-        const recent = get().recentProjects.filter((p) => p !== path)
-        set({ recentProjects: [path, ...recent].slice(0, 10) })
+        const nextPath = pickPath(path, '')
+        if (!nextPath) return
+        const recent = get().recentProjects.filter((p) => p !== nextPath)
+        set({ recentProjects: [nextPath, ...recent].slice(0, 10) })
       },
     }),
     {
       name: 'ghostshell-workspaces',
+      version: 1,
       storage: createJSONStorage(() => electronStorage),
+      migrate: (persistedState) => normalizePersistedWorkspaceState(persistedState),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...normalizePersistedWorkspaceState(persistedState),
+      }),
     }
   )
 )

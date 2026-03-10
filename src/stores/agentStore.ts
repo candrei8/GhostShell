@@ -1,14 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { Agent, AnimalAvatar, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../lib/types'
-import { getRandomAnimal } from '../lib/animals'
+import { Agent, AgentAvatarConfig, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../lib/types'
+import { getRandomAvatar } from '../lib/avatars'
 import { useWorkspaceStore } from './workspaceStore'
 
 interface AgentState {
   agents: Agent[]
   activeAgentId: string | null
 
-  addAgent: (name: string, avatar?: AnimalAvatar, color?: string, claudeConfig?: ClaudeConfig, cwd?: string, templateId?: string, provider?: Provider, geminiConfig?: GeminiConfig, codexConfig?: CodexConfig) => Agent
+  addAgent: (name: string, avatar?: AgentAvatarConfig, color?: string, claudeConfig?: ClaudeConfig, cwd?: string, templateId?: string, provider?: Provider, geminiConfig?: GeminiConfig, codexConfig?: CodexConfig) => Agent
   removeAgent: (id: string) => void
   updateAgent: (id: string, updates: Partial<Agent>) => void
   setActiveAgent: (id: string | null) => void
@@ -26,7 +26,7 @@ export const useAgentStore = create<AgentState>()(
       activeAgentId: null,
 
       addAgent: (name, avatar, color, claudeConfig, cwd, templateId, provider, geminiConfig, codexConfig) => {
-        const av = avatar || getRandomAnimal()
+        const av = avatar || getRandomAvatar()
         const agent: Agent = {
           id: `agent-${Date.now()}-${nextId++}`,
           name,

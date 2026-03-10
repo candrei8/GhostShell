@@ -12,9 +12,12 @@ type UpdateStatus =
 export function UpdateBanner() {
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [dismissed, setDismissed] = useState(false)
+  const api = window.ghostshell
 
   useEffect(() => {
-    const cleanup = window.ghostshell.onUpdaterStatus((raw) => {
+    if (!api?.onUpdaterStatus) return
+
+    const cleanup = api.onUpdaterStatus((raw) => {
       const status = raw as UpdateStatus
       setUpdate(status)
       if (status.status === 'available' || status.status === 'downloaded') {
@@ -22,20 +25,21 @@ export function UpdateBanner() {
       }
     })
     return cleanup
-  }, [])
+  }, [api])
 
   const handleDownload = useCallback(() => {
-    window.ghostshell.updaterDownload()
-  }, [])
+    api?.updaterDownload?.()
+  }, [api])
 
   const handleInstall = useCallback(() => {
-    window.ghostshell.updaterInstall()
-  }, [])
+    api?.updaterInstall?.()
+  }, [api])
 
   const handleRetry = useCallback(() => {
-    window.ghostshell.updaterCheck()
-  }, [])
+    api?.updaterCheck?.()
+  }, [api])
 
+  if (!api) return null
   if (!update || dismissed) return null
   if (update.status === 'not-available' || update.status === 'checking') return null
 

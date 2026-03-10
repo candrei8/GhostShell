@@ -1,14 +1,17 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, FolderOpen, Zap, Users, Minus, Plus } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { animals } from '../../lib/animals'
+import { AgentAvatar } from './AgentAvatar'
+import { defaultAvatars } from '../../lib/avatars'
 import { agentTemplates, AgentTemplate } from '../../lib/agent-templates'
-import { AnimalAvatar, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../../lib/types'
+import { AgentAvatarConfig, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../../lib/types'
 import { useAgent } from '../../hooks/useAgent'
 import { useThreadStore } from '../../stores/threadStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { getModelsForProvider, getDefaultModel, getProviderColor } from '../../lib/providers'
+import { selectDirectorySafe } from '../../lib/ghostshell'
+import { getDefaultModel, getProviderColor, resolveModelsForProvider } from '../../lib/providers'
+import { useModelStore } from '../../stores/modelStore'
 
 interface AgentCreatorProps {
   onClose: () => void
@@ -16,18 +19,43 @@ interface AgentCreatorProps {
 
 type Tab = 'templates' | 'custom' | 'squad'
 
+function isProvider(value: unknown): value is Provider {
+  return value === 'claude' || value === 'gemini' || value === 'codex'
+}
+
+function sanitizeProvider(value: unknown): Provider {
+  return isProvider(value) ? value : 'claude'
+}
+
 export function AgentCreator({ onClose }: AgentCreatorProps) {
   const defaultProvider = useSettingsStore((s) => s.defaultProvider)
+  const defaultModel = useSettingsStore((s) => s.defaultModel)
+  const defaultGeminiModel = useSettingsStore((s) => s.defaultGeminiModel)
+  const defaultCodexModel = useSettingsStore((s) => s.defaultCodexModel)
   const lastAgentFolder = useSettingsStore((s) => s.lastAgentFolder)
   const setLastAgentFolder = useSettingsStore((s) => s.setLastAgentFolder)
+  const safeDefaultProvider = sanitizeProvider(defaultProvider)
   const [tab, setTab] = useState<Tab>('templates')
-  const [provider, setProvider] = useState<Provider>(defaultProvider)
+  const [provider, setProvider] = useState<Provider>(safeDefaultProvider)
   const [name, setName] = useState('')
-  const [selectedAvatar, setSelectedAvatar] = useState<AnimalAvatar>(animals[0])
+  const [selectedAvatar, setSelectedAvatar] = useState<AgentAvatarConfig>(defaultAvatars[0])
   const [selectedThread, setSelectedThread] = useState('')
-  const [projectPath, setProjectPath] = useState(lastAgentFolder || useWorkspaceStore.getState().currentPath)
-  const models = getModelsForProvider(provider)
-  const [model, setModel] = useState(getDefaultModel(provider))
+  const [projectPath, setProjectPath] = useState(
+    (typeof lastAgentFolder === 'string' && lastAgentFolder) ||
+      useWorkspaceStore.getState().currentPath,
+  )
+  const resolveConfiguredModel = (targetProvider: Provider): string => {
+    if (targetProvider === 'gemini') return defaultGeminiModel || getDefaultModel('gemini')
+    if (targetProvider === 'codex') return defaultCodexModel || getDefaultModel('codex')
+    return defaultModel || getDefaultModel('claude')
+  }
+  const [model, setModel] = useState(() => resolveConfiguredModel(safeDefaultProvider))
+  const discoveredModels = useModelStore((s) => s.discovered[provider])
+  const ensureFreshModels = useModelStore((s) => s.ensureFresh)
+  const models = useMemo(
+    () => resolveModelsForProvider(provider, discoveredModels, typeof model === 'string' ? model : ''),
+    [discoveredModels, model, provider],
+  )
   const [systemPrompt, setSystemPrompt] = useState('')
   const [skipPermissions, setSkipPermissions] = useState(false)
   const [yoloMode, setYoloMode] = useState(false)
@@ -39,13 +67,26 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
   const threads = useThreadStore((s) => s.threads)
   const setCurrentPath = useWorkspaceStore((s) => s.setCurrentPath)
 
+  useEffect(() => {
+    void ensureFreshModels(provider)
+  }, [ensureFreshModels, provider])
+
+  useEffect(() => {
+    if (models.some((entry) => entry.id === model)) return
+    const preferred = resolveConfiguredModel(provider)
+    const nextModel = models.find((entry) => entry.id === preferred)?.id || models[0]?.id || preferred
+    if (nextModel && nextModel !== model) {
+      setModel(nextModel)
+    }
+  }, [defaultCodexModel, defaultGeminiModel, defaultModel, model, models, provider])
+
   const handleProviderChange = (p: Provider) => {
     setProvider(p)
-    setModel(getDefaultModel(p))
+    setModel(resolveConfiguredModel(p))
   }
 
   const selectProject = async () => {
-    const path = await window.ghostshell.selectDirectory()
+    const path = await selectDirectorySafe()
     if (path) {
       setProjectPath(path)
       setCurrentPath(path)
@@ -64,7 +105,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
 
   const handleTemplateCreate = (template: AgentTemplate) => {
     if (projectPath) setLastAgentFolder(projectPath)
-    const templateProvider = template.provider || provider
+    const templateProvider = sanitizeProvider(template.provider || provider)
     if (templateProvider === 'gemini') {
       const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
       createAgent(
@@ -125,7 +166,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
     const configs = Object.entries(squadPicks).flatMap(([templateId, qty]) => {
       const template = agentTemplates.find((t) => t.id === templateId)
       if (!template || qty <= 0) return []
-      const templateProvider = template.provider || provider
+      const templateProvider = sanitizeProvider(template.provider || provider)
       return Array.from({ length: qty }, (_, i) => {
         const agentName = qty > 1 ? `${template.name} ${i + 1}` : template.name
         if (templateProvider === 'gemini') {
@@ -221,7 +262,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-[640px] max-h-[85vh] bg-ghost-surface border border-ghost-border rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        className="w-[640px] max-h-[85vh] bg-ghost-surface border border-ghost-border rounded-md shadow-2xl flex flex-col overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-3">
@@ -233,7 +274,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
 
         {/* Provider Toggle */}
         <div className="flex px-5 gap-1 mb-3">
-          <div className="flex gap-1 p-1 bg-ghost-bg rounded-xl border border-ghost-border mr-3">
+          <div className="flex gap-1 p-1 bg-ghost-bg rounded-md border border-ghost-border mr-3">
             <button
               onClick={() => handleProviderChange('claude')}
               className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
@@ -265,7 +306,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
 
           <button
             onClick={() => setTab('templates')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-sm text-sm font-medium transition-colors ${
               tab === 'templates' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-slate-800/50'
             }`}
           >
@@ -273,7 +314,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           </button>
           <button
             onClick={() => setTab('custom')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-sm text-sm font-medium transition-colors ${
               tab === 'custom' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-slate-800/50'
             }`}
           >
@@ -281,7 +322,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           </button>
           <button
             onClick={() => setTab('squad')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+            className={`px-4 py-2 rounded-sm text-sm font-medium transition-colors flex items-center gap-1.5 ${
               tab === 'squad' ? 'bg-ghost-accent/20 text-ghost-accent' : 'text-ghost-text-dim hover:bg-slate-800/50'
             }`}
           >
@@ -295,7 +336,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           <div className="flex gap-2">
             <button
               onClick={selectProject}
-              className="flex-1 h-11 px-3 bg-ghost-bg border border-ghost-border rounded-lg flex items-center gap-2 hover:border-ghost-accent/50 transition-colors text-left"
+              className="flex-1 h-11 px-3 bg-ghost-bg border border-ghost-border rounded-sm flex items-center gap-2 hover:border-ghost-accent/50 transition-colors text-left"
             >
               <FolderOpen className="w-3.5 h-3.5 text-ghost-text-dim shrink-0" />
               <span className="text-xs text-ghost-text truncate">{projectPath || 'Select project...'}</span>
@@ -303,7 +344,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="h-11 px-2 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+              className="h-11 px-2 bg-ghost-bg border border-ghost-border rounded-sm text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
             >
               {models.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
@@ -334,7 +375,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                 <select
                   value={codexSandbox}
                   onChange={(e) => setCodexSandbox(e.target.value as CodexConfig['sandbox'])}
-                  className="h-7 px-2 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+                  className="h-7 px-2 bg-ghost-bg border border-ghost-border rounded-sm text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
                 >
                   <option value="workspace-write">workspace-write</option>
                   <option value="read-only">read-only</option>
@@ -370,10 +411,10 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                 <button
                   key={template.id}
                   onClick={() => handleTemplateCreate(template)}
-                  className="p-5 bg-ghost-bg border border-ghost-border rounded-2xl text-left hover:border-ghost-accent/50 hover:bg-ghost-accent/5 transition-all group"
+                  className="p-5 bg-ghost-bg border border-ghost-border rounded-md text-left hover:border-ghost-accent/50 hover:bg-ghost-accent/5 transition-all group"
                 >
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-lg">{template.avatar.emoji}</span>
+                    <AgentAvatar avatar={template.avatar} size="sm" />
                     <span className="text-sm font-medium text-ghost-text group-hover:text-ghost-accent">{template.name}</span>
                     {template.provider && (
                       <span
@@ -403,7 +444,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={provider === 'gemini' ? 'e.g. Gemini Agent' : provider === 'codex' ? 'e.g. Codex Agent' : 'e.g. Frontend Agent'}
-                  className="w-full h-12 px-3 bg-ghost-bg border border-ghost-border rounded-xl text-sm text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors"
+                  className="w-full h-12 px-3 bg-ghost-bg border border-ghost-border rounded-md text-sm text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors"
                   autoFocus
                 />
               </div>
@@ -412,16 +453,16 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
               <div>
                 <label className="text-xs text-ghost-text-dim uppercase tracking-wider mb-1.5 block">Avatar</label>
                 <div className="grid grid-cols-8 gap-1">
-                  {animals.map((animal) => (
+                  {defaultAvatars.map((avatar) => (
                     <button
-                      key={animal.id}
-                      onClick={() => setSelectedAvatar(animal)}
-                      className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl transition-all ${
-                        selectedAvatar.id === animal.id ? 'bg-ghost-accent/20 ring-2 ring-ghost-accent' : 'hover:bg-slate-800'
+                      key={avatar.id}
+                      onClick={() => setSelectedAvatar(avatar)}
+                      className={`w-10 h-10 rounded-sm flex items-center justify-center transition-all ${
+                        selectedAvatar.id === avatar.id ? 'bg-ghost-accent/20 ring-2 ring-ghost-accent' : 'hover:bg-slate-800'
                       }`}
-                      title={animal.name}
+                      title={avatar.name}
                     >
-                      {animal.emoji}
+                      <AgentAvatar avatar={avatar} size="sm" />
                     </button>
                   ))}
                 </div>
@@ -436,17 +477,17 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     placeholder="Custom instructions for Claude..."
                     rows={4}
-                    className="w-full px-3 py-2 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors resize-none font-mono"
+                    className="w-full px-3 py-2 bg-ghost-bg border border-ghost-border rounded-sm text-xs text-ghost-text placeholder:text-ghost-text-dim/50 focus:outline-none focus:border-ghost-accent transition-colors resize-none font-mono"
                   />
                 </div>
               )}
               {provider === 'gemini' && (
-                <div className="px-3 py-2 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                <div className="px-3 py-2 bg-blue-500/5 border border-blue-500/20 rounded-sm">
                   <p className="text-xs text-blue-300/70">Gemini uses GEMINI.md files for system instructions. Place a GEMINI.md in your project root.</p>
                 </div>
               )}
               {provider === 'codex' && (
-                <div className="px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
+                <div className="px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-sm">
                   <p className="text-xs text-emerald-300/70">Codex uses AGENTS.md files for system instructions. Place an AGENTS.md in your project root.</p>
                 </div>
               )}
@@ -458,7 +499,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                   <select
                     value={selectedThread}
                     onChange={(e) => setSelectedThread(e.target.value)}
-                    className="w-full h-9 px-3 bg-ghost-bg border border-ghost-border rounded-lg text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
+                    className="w-full h-9 px-3 bg-ghost-bg border border-ghost-border rounded-sm text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
                   >
                     <option value="">None</option>
                     {threads.map((t) => (
@@ -471,7 +512,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
               <button
                 onClick={handleCustomCreate}
                 disabled={!name.trim()}
-                className="w-full h-12 text-white rounded-xl font-medium text-base flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-1"
+                className="w-full h-12 text-white rounded-md font-medium text-base flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-1"
                 style={{ backgroundColor: getProviderColor(provider) }}
               >
                 <Zap className="w-4 h-4" />
@@ -487,11 +528,11 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
                 return (
                   <div
                     key={template.id}
-                    className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${
+                    className={`flex items-center gap-3 p-4 rounded-md border transition-all ${
                       qty > 0 ? 'bg-ghost-accent/5 border-ghost-accent/30' : 'bg-ghost-bg border-ghost-border hover:border-ghost-border/80'
                     }`}
                   >
-                    <span className="text-lg shrink-0">{template.avatar.emoji}</span>
+                    <AgentAvatar avatar={template.avatar} size="md" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-medium text-ghost-text truncate">{template.name}</span>
@@ -532,7 +573,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
               <button
                 onClick={handleSquadLaunch}
                 disabled={squadTotal === 0}
-                className="w-full h-12 bg-ghost-accent text-white rounded-xl font-medium text-base flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                className="w-full h-12 bg-ghost-accent text-white rounded-md font-medium text-base flex items-center justify-center gap-2 hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-2"
               >
                 <Users className="w-4 h-4" />
                 Launch Squad ({squadTotal} agent{squadTotal !== 1 ? 's' : ''})

@@ -16,11 +16,14 @@ import {
   PanelLeftClose,
   Bell,
   BellOff,
+  Blocks,
 } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useAgentStore } from '../../stores/agentStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useShortcutStore } from '../../stores/shortcutStore'
+import { SHORTCUT_EVENTS } from '../../lib/shortcutEvents'
 
 interface CommandAction {
   id: string
@@ -57,6 +60,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
   const currentPath = useWorkspaceStore((s) => s.currentPath)
   const agents = useAgentStore((s) => s.agents)
 
+  const getShortcutDisplay = useShortcutStore((s) => s.getDisplayString)
+
   const commands = useMemo<CommandAction[]>(() => {
     const cmds: CommandAction[] = [
       {
@@ -64,7 +69,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'New Terminal',
         description: 'Open a new terminal tab',
         icon: <Terminal className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+T',
+        shortcut: getShortcutDisplay('terminal.new'),
         action: () => {
           addSession({ id: `term-standalone-${Date.now()}`, title: 'Terminal', cwd: currentPath })
           onClose()
@@ -76,7 +81,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Duplicate Tab',
         description: 'Duplicate the active terminal tab',
         icon: <Copy className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+D',
+        shortcut: getShortcutDisplay('terminal.split'),
         action: () => {
           if (activeSessionId) duplicateSession(activeSessionId)
           onClose()
@@ -88,7 +93,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Toggle Maximize Pane',
         description: 'Maximize or restore the active pane',
         icon: <Maximize2 className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+Enter',
+        shortcut: getShortcutDisplay('terminal.maximize'),
         action: () => {
           if (activeSessionId) toggleMaximize(activeSessionId)
           onClose()
@@ -100,7 +105,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Close Tab',
         description: 'Close the active terminal tab',
         icon: <X className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+W',
+        shortcut: getShortcutDisplay('terminal.close'),
         action: () => {
           // Handled by keyboard shortcuts hook
           onClose()
@@ -112,7 +117,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: syncInputsMode === 'off' ? 'Enable Synchronized Inputs' : 'Disable Synchronized Inputs',
         description: 'Send commands to all visible panes simultaneously',
         icon: <Radio className="w-4 h-4" />,
-        shortcut: 'Ctrl+Alt+I',
+        shortcut: getShortcutDisplay('terminal.syncInputs'),
         action: () => {
           setSyncInputs(syncInputsMode === 'off' ? 'all' : 'off')
           onClose()
@@ -158,9 +163,21 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Show Command History',
         description: 'View and re-send previous commands',
         icon: <Clock className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+H',
+        shortcut: getShortcutDisplay('nav.history'),
         action: () => {
           onNavigate?.('history')
+          onClose()
+        },
+        category: 'Navigation',
+      },
+      {
+        id: 'nav-blocks',
+        label: 'Show Command Blocks',
+        description: 'Open the Warp-style command timeline',
+        icon: <Blocks className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('nav.blocks'),
+        action: () => {
+          onNavigate?.('blocks')
           onClose()
         },
         category: 'Navigation',
@@ -170,7 +187,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Open Settings',
         description: 'Navigate to app settings',
         icon: <Settings className="w-4 h-4" />,
-        shortcut: 'Ctrl+,',
+        shortcut: getShortcutDisplay('nav.settings'),
         action: () => {
           onNavigate?.('settings')
           onClose()
@@ -182,12 +199,10 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Search in Terminal',
         description: 'Find text in the active terminal',
         icon: <Search className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+F',
+        shortcut: getShortcutDisplay('terminal.search'),
         action: () => {
           onClose()
-          // Dispatch event that TerminalPane listens for
-          const e = new KeyboardEvent('keydown', { ctrlKey: true, shiftKey: true, key: 'F', bubbles: true })
-          window.dispatchEvent(e)
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.toggleTerminalSearch))
         },
         category: 'Terminal',
       },
@@ -214,7 +229,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Toggle Sub-Agent Monitor',
         description: 'Show or hide the sub-agent monitor panel',
         icon: <Cpu className="w-4 h-4" />,
-        shortcut: 'Ctrl+Shift+M',
+        shortcut: getShortcutDisplay('nav.monitor'),
         action: () => {
           onToggleMonitor?.()
           onClose()
@@ -226,7 +241,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
         label: 'Toggle Sidebar',
         description: 'Show or hide the secondary sidebar',
         icon: <PanelLeftClose className="w-4 h-4" />,
-        shortcut: 'Ctrl+B',
+        shortcut: getShortcutDisplay('nav.sidebarClose'),
         action: () => {
           onToggleSidebar?.()
           onClose()
@@ -265,7 +280,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
     })
 
     return cmds
-  }, [sessions, activeSessionId, syncInputsMode, agents, currentPath, addSession, duplicateSession, toggleMaximize, setSyncInputs, setActiveSession, onClose, onNavigate])
+  }, [sessions, activeSessionId, syncInputsMode, agents, currentPath, addSession, duplicateSession, toggleMaximize, setSyncInputs, setActiveSession, onClose, onNavigate, getShortcutDisplay])
 
   const filtered = useMemo(() => {
     if (!query.trim()) return commands
@@ -321,13 +336,13 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
 
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15%]" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50" />
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-lg bg-ghost-surface border border-ghost-border rounded-2xl shadow-qubria-lg overflow-hidden"
+        className="ghost-floating-panel relative w-full max-w-lg overflow-hidden rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-ghost-border">
+        <div className="flex items-center gap-2 border-b border-ghost-border/70 px-5 py-4">
           <Search className="w-4 h-4 text-ghost-text-dim shrink-0" />
           <input
             ref={inputRef}
@@ -338,7 +353,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
             placeholder="Type a command..."
             className="flex-1 bg-transparent text-sm text-ghost-text placeholder-ghost-text-dim/50 outline-none"
           />
-          <kbd className="text-2xs px-1.5 py-0.5 rounded bg-ghost-border/50 text-ghost-text-dim">Esc</kbd>
+          <kbd className="ghost-soft-pill text-2xs rounded px-1.5 py-0.5 text-ghost-text-dim">Esc</kbd>
         </div>
 
         {/* Results */}
@@ -351,7 +366,9 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
                 key={cmd.id}
                 onClick={cmd.action}
                 className={`w-full px-5 py-2.5 flex items-center gap-3 text-left transition-colors ${
-                  index === selectedIndex ? 'bg-indigo-950/50 text-ghost-text' : 'text-ghost-text-dim hover:bg-slate-800/50'
+                  index === selectedIndex
+                    ? 'bg-white/[0.08] text-ghost-text'
+                    : 'text-ghost-text-dim hover:bg-white/[0.06]'
                 }`}
               >
                 <span className={index === selectedIndex ? 'text-ghost-accent' : 'text-ghost-text-dim'}>{cmd.icon}</span>

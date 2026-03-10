@@ -3,7 +3,7 @@ import {
   X,
   Cpu,
   Search,
-  Map,
+  Map as MapIcon,
   Terminal,
   Wrench,
   CheckCircle2,
@@ -18,8 +18,10 @@ import {
 } from 'lucide-react'
 import { useActivityStore } from '../../stores/activityStore'
 import { useAgentStore } from '../../stores/agentStore'
+import { useTerminalStore } from '../../stores/terminalStore'
 import { SubAgent, SubAgentType, TaskItem, FileTouch, ContextMetrics } from '../../lib/types'
 import { domainConfig } from '../../lib/domain-detector'
+import { getContextUsagePercentage } from '../../lib/contextMetrics'
 
 interface SubAgentMonitorProps {
   height: number
@@ -28,7 +30,7 @@ interface SubAgentMonitorProps {
 
 const typeConfig: Record<SubAgentType, { icon: React.ElementType; label: string; color: string }> = {
   Explore: { icon: Search, label: 'Explore', color: 'text-cyan-400' },
-  Plan: { icon: Map, label: 'Plan', color: 'text-purple-400' },
+  Plan: { icon: MapIcon, label: 'Plan', color: 'text-purple-400' },
   Bash: { icon: Terminal, label: 'Bash', color: 'text-orange-400' },
   'general-purpose': { icon: Wrench, label: 'General', color: 'text-blue-400' },
   unknown: { icon: Cpu, label: 'Agent', color: 'text-indigo-400' },
@@ -309,10 +311,7 @@ function FileTouchItem({ touch }: { touch: FileTouch }) {
 }
 
 function CompactContextGauge({ metrics }: { metrics: ContextMetrics }) {
-  const pct = useMemo(() => {
-    if (metrics.maxTokens === 0) return 0
-    return Math.min(100, Math.round((metrics.tokenEstimate / metrics.maxTokens) * 100))
-  }, [metrics.tokenEstimate, metrics.maxTokens])
+  const pct = useMemo(() => Math.round(getContextUsagePercentage(metrics) || 0), [metrics])
 
   const barColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-ghost-accent'
 
@@ -323,7 +322,13 @@ function CompactContextGauge({ metrics }: { metrics: ContextMetrics }) {
           Context
         </span>
         <span className="text-[10px] text-ghost-text-dim font-mono tabular-nums">
-          {formatTokens(metrics.tokenEstimate)} / {formatTokens(metrics.maxTokens)}
+          {metrics.tokenEstimate > 0
+            ? metrics.maxTokens > 0
+            ? `${formatTokens(metrics.tokenEstimate)} / ${formatTokens(metrics.maxTokens)}`
+            : formatTokens(metrics.tokenEstimate)
+            : typeof metrics.usagePercentage === 'number'
+              ? `${Math.round(metrics.usagePercentage)}% ctx`
+              : 'No data'}
         </span>
       </div>
       <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
@@ -362,7 +367,11 @@ function FilesContextColumn({
       .slice(0, 15)
   }, [filesTouched])
 
-  const hasContext = contextMetrics.tokenEstimate > 0
+  const hasContext =
+    contextMetrics.tokenEstimate > 0 ||
+    contextMetrics.turnCount > 0 ||
+    contextMetrics.costEstimate > 0 ||
+    typeof contextMetrics.usagePercentage === 'number'
 
   return (
     <div className="flex flex-col h-full">
@@ -399,30 +408,51 @@ function FilesContextColumn({
 
 export function SubAgentMonitor({ height, onClose }: SubAgentMonitorProps) {
   const activities = useActivityStore((s) => s.activities)
+  const sessions = useTerminalStore((s) => s.sessions)
   const agents = useAgentStore((s) => s.agents)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
 
-  // Agents that have any activity worth showing
+  // Agents and standalone terminals that have any activity worth showing
   const agentsWithActivity = useMemo(() => {
-    return agents
-      .map((a) => {
-        const activity = activities[a.id]
+    const seen = new Set<string>()
+
+    return sessions
+      .map((session) => {
+        const activityId = session.agentId || session.id
+        if (seen.has(activityId)) return null
+        seen.add(activityId)
+
+        const linkedAgent = session.agentId ? agents.find((a) => a.id === session.agentId) : undefined
+        const activity = activities[activityId]
         return {
-          agent: a,
+          agent: {
+            id: activityId,
+            name: linkedAgent?.name || session.title,
+          },
           subAgents: activity?.subAgents || [],
           tasks: activity?.tasks || [],
           filesTouched: activity?.filesTouched || [],
           contextMetrics: activity?.contextMetrics,
+          currentActivity: activity?.currentActivity || 'idle',
         }
       })
+      .filter((a): a is NonNullable<typeof a> => !!a)
       .filter(
-        (a) => a.subAgents.length > 0 || a.tasks.length > 0 || a.filesTouched.length > 0,
+        (a) =>
+          a.subAgents.length > 0 ||
+          a.tasks.length > 0 ||
+          a.filesTouched.length > 0 ||
+          a.currentActivity !== 'idle',
       )
-  }, [agents, activities])
+  }, [sessions, agents, activities])
 
-  // Auto-select first agent with activity
+  // Auto-select first source with activity and recover if the selected one disappears
   useEffect(() => {
-    if (!selectedAgentId && agentsWithActivity.length > 0) {
+    if (agentsWithActivity.length === 0) {
+      if (selectedAgentId) setSelectedAgentId(null)
+      return
+    }
+    if (!selectedAgentId || !agentsWithActivity.some((item) => item.agent.id === selectedAgentId)) {
       setSelectedAgentId(agentsWithActivity[0].agent.id)
     }
   }, [agentsWithActivity, selectedAgentId])
@@ -567,7 +597,7 @@ export function SubAgentMonitor({ height, onClose }: SubAgentMonitorProps) {
             <Crown className="w-6 h-6 mx-auto mb-2 opacity-30" />
             <p>No orchestrator activity</p>
             <p className="text-[10px] mt-1 opacity-60">
-              Launch an agent to see tasks, sub-agents, and file operations
+              Launch an agent or run Claude, Codex, or Gemini in a terminal
             </p>
           </div>
         </div>

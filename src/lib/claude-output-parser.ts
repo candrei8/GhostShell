@@ -1,4 +1,5 @@
 import { ClaudeActivity, Provider, SubAgentType } from './types'
+import { getKnownContextWindow } from './providers'
 
 // Strip ANSI escape sequences
 const ANSI_STRIP = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\(B/g
@@ -44,7 +45,9 @@ const TURN_PATTERN = /Turn\s+(\d+)/i
 
 // Subagent completion patterns
 const SUBAGENT_COMPLETE = /Task\s+(?:completed|done|finished)/i
-const SUBAGENT_RESULT = /agent.*?returned|subagent.*?result/i
+const SUBAGENT_RESULT = /\b(?:sub[- ]?agent|task)\b.*\b(?:result|returned|completed|finished|done)\b/i
+const SUBAGENT_START = /\b(?:spawn(?:ing|ed)?|launch(?:ing|ed)?|delegat(?:e|ing|ed)|start(?:ing|ed))\s+(?:an?\s+)?sub[- ]?agent\b[:\s-]*(.*)/i
+const SUBAGENT_INLINE = /\bsub[- ]?agent\b[:#\s-]+(.+)/i
 
 export interface ParseResult {
   activity: ClaudeActivity
@@ -66,8 +69,10 @@ export interface ParseResult {
   }
   contextUpdate?: {
     tokenEstimate?: number
+    maxTokens?: number
     costEstimate?: number
     turnCount?: number
+    usagePercentage?: number
   }
 }
 
@@ -86,18 +91,83 @@ function parseTokenCount(raw: string): number {
   return parseFloat(cleaned)
 }
 
+function extractContextUpdate(stripped: string, provider: Provider): ParseResult['contextUpdate'] | null {
+  const contextMatch = CONTEXT_PATTERN.exec(stripped)
+  const tokenMatch = TOKENS_PATTERN.exec(stripped)
+  const costMatch = COST_PATTERN.exec(stripped)
+  const turnMatch = TURN_PATTERN.exec(stripped)
+
+  if (!contextMatch && !tokenMatch && !costMatch && !turnMatch) {
+    return null
+  }
+
+  const contextUpdate: ParseResult['contextUpdate'] = {}
+  const knownMaxTokens = getKnownContextWindow(provider)
+
+  if (tokenMatch) {
+    contextUpdate.tokenEstimate = parseTokenCount(tokenMatch[1])
+  }
+  if (costMatch) {
+    contextUpdate.costEstimate = parseFloat(costMatch[1])
+  }
+  if (turnMatch) {
+    contextUpdate.turnCount = parseInt(turnMatch[1], 10)
+  }
+  if (contextMatch) {
+    const usagePercentage = parseFloat(contextMatch[1])
+    if (!Number.isNaN(usagePercentage)) {
+      contextUpdate.usagePercentage = usagePercentage
+      if (!tokenMatch && knownMaxTokens > 0) {
+        contextUpdate.tokenEstimate = Math.round((usagePercentage / 100) * knownMaxTokens)
+      }
+    }
+  }
+  if (knownMaxTokens > 0) {
+    contextUpdate.maxTokens = knownMaxTokens
+  }
+
+  return Object.keys(contextUpdate).length > 0 ? contextUpdate : null
+}
+
+function inferSubAgentType(text: string): SubAgentType {
+  const lower = text.toLowerCase()
+  if (/\bplan|planning|roadmap|strategy\b/.test(lower)) return 'Plan'
+  if (/\bexplore|search|research|inspect|analyz|investigat\b/.test(lower)) return 'Explore'
+  if (/\bbash|shell|command|terminal|script\b/.test(lower)) return 'Bash'
+  if (/\bgeneral[-\s]?purpose\b/.test(lower)) return 'general-purpose'
+  return 'unknown'
+}
+
+function detectGenericSubAgent(stripped: string): { type: SubAgentType; description: string } | null {
+  const startMatch = SUBAGENT_START.exec(stripped)
+  const inlineMatch = SUBAGENT_INLINE.exec(stripped)
+  const raw = (startMatch?.[1] || inlineMatch?.[1] || '').trim()
+  if (!raw) return null
+
+  const description = raw.length > 140 ? `${raw.slice(0, 137)}...` : raw
+  return {
+    type: inferSubAgentType(description),
+    description,
+  }
+}
+
+function hasSubAgentCompletion(stripped: string): boolean {
+  return SUBAGENT_COMPLETE.test(stripped) || SUBAGENT_RESULT.test(stripped)
+}
+
 export function parseClaudeOutput(stripped: string): ParseResult[] {
   const results: ParseResult[] = []
 
   let match: RegExpExecArray | null
 
   // Check for subagent/Task tool calls FIRST (highest priority)
-  match = TOOL_TASK.exec(stripped)
-  if (match) {
+  const taskMatch = TOOL_TASK.exec(stripped)
+  if (taskMatch) {
     const typeMatch = TASK_SUBAGENT_TYPE.exec(stripped)
     const descMatch = TASK_DESCRIPTION.exec(stripped)
+    const promptMatch = TASK_PROMPT.exec(stripped)
     const subAgentType = (typeMatch?.[1] || 'unknown') as SubAgentType
-    const description = descMatch?.[1] || match[1] || 'Running task'
+    const description = descMatch?.[1] || taskMatch[1] || promptMatch?.[1] || 'Running task'
 
     results.push({
       activity: 'sub_agent',
@@ -108,6 +178,16 @@ export function parseClaudeOutput(stripped: string): ParseResult[] {
         description,
       },
     })
+  } else {
+    const detectedSubAgent = detectGenericSubAgent(stripped)
+    if (detectedSubAgent) {
+      results.push({
+        activity: 'sub_agent',
+        tool: 'subagent',
+        detail: `${detectedSubAgent.type}: ${detectedSubAgent.description}`,
+        subAgent: detectedSubAgent,
+      })
+    }
   }
 
   // TaskCreate
@@ -277,41 +357,19 @@ export function parseClaudeOutput(stripped: string): ParseResult[] {
   }
 
   // Sub-agent completion detection
-  if (SUBAGENT_COMPLETE.test(stripped) || SUBAGENT_RESULT.test(stripped)) {
+  if (hasSubAgentCompletion(stripped)) {
     results.push({
       activity: 'sub_agent',
       subAgentCompleted: true,
     })
   }
 
-  // Context metrics extraction
-  const contextMatch = CONTEXT_PATTERN.exec(stripped)
-  const tokenMatch = TOKENS_PATTERN.exec(stripped)
-  const costMatch = COST_PATTERN.exec(stripped)
-  const turnMatch = TURN_PATTERN.exec(stripped)
-
-  if (contextMatch || tokenMatch || costMatch || turnMatch) {
-    const contextUpdate: ParseResult['contextUpdate'] = {}
-    if (tokenMatch) {
-      contextUpdate.tokenEstimate = parseTokenCount(tokenMatch[1])
-    }
-    if (costMatch) {
-      contextUpdate.costEstimate = parseFloat(costMatch[1])
-    }
-    if (turnMatch) {
-      contextUpdate.turnCount = parseInt(turnMatch[1], 10)
-    }
-    // If we have context %, estimate tokens
-    if (contextMatch && !tokenMatch) {
-      const pct = parseFloat(contextMatch[1])
-      contextUpdate.tokenEstimate = Math.round((pct / 100) * 200000)
-    }
-    if (Object.keys(contextUpdate).length > 0) {
-      results.push({
-        activity: results[0]?.activity || 'thinking',
-        contextUpdate,
-      })
-    }
+  const contextUpdate = extractContextUpdate(stripped, 'claude')
+  if (contextUpdate) {
+    results.push({
+      activity: results[0]?.activity || 'thinking',
+      contextUpdate,
+    })
   }
 
   // Check for high-level activity patterns (only if no specific tool detected)
@@ -350,6 +408,34 @@ const GEMINI_THINKING = /\u2726|Thinking/
 export function parseGeminiOutput(stripped: string): ParseResult[] {
   const results: ParseResult[] = []
   let match: RegExpExecArray | null
+
+  const taskMatch = TOOL_TASK.exec(stripped)
+  if (taskMatch) {
+    const typeMatch = TASK_SUBAGENT_TYPE.exec(stripped)
+    const descMatch = TASK_DESCRIPTION.exec(stripped)
+    const promptMatch = TASK_PROMPT.exec(stripped)
+    const subAgentType = (typeMatch?.[1] || 'unknown') as SubAgentType
+    const description = descMatch?.[1] || taskMatch[1] || promptMatch?.[1] || 'Running task'
+    results.push({
+      activity: 'sub_agent',
+      tool: 'Task',
+      detail: `${subAgentType}: ${description}`,
+      subAgent: {
+        type: subAgentType,
+        description,
+      },
+    })
+  } else {
+    const detectedSubAgent = detectGenericSubAgent(stripped)
+    if (detectedSubAgent) {
+      results.push({
+        activity: 'sub_agent',
+        tool: 'subagent',
+        detail: `${detectedSubAgent.type}: ${detectedSubAgent.description}`,
+        subAgent: detectedSubAgent,
+      })
+    }
+  }
 
   // Tool calls (formal format)
   match = GEMINI_TOOL_READ.exec(stripped)
@@ -469,6 +555,21 @@ export function parseGeminiOutput(stripped: string): ParseResult[] {
     }
   }
 
+  if (hasSubAgentCompletion(stripped)) {
+    results.push({
+      activity: 'sub_agent',
+      subAgentCompleted: true,
+    })
+  }
+
+  const geminiContextUpdate = extractContextUpdate(stripped, 'gemini')
+  if (geminiContextUpdate) {
+    results.push({
+      activity: results[0]?.activity || 'thinking',
+      contextUpdate: geminiContextUpdate,
+    })
+  }
+
   // High-level activity patterns
   if (results.length === 0) {
     if (PERMISSION_PATTERN.test(stripped)) {
@@ -507,6 +608,34 @@ const CODEX_PLAN_MODE = /plan mode/i
 export function parseCodexOutput(stripped: string): ParseResult[] {
   const results: ParseResult[] = []
   let match: RegExpExecArray | null
+
+  const taskMatch = TOOL_TASK.exec(stripped)
+  if (taskMatch) {
+    const typeMatch = TASK_SUBAGENT_TYPE.exec(stripped)
+    const descMatch = TASK_DESCRIPTION.exec(stripped)
+    const promptMatch = TASK_PROMPT.exec(stripped)
+    const subAgentType = (typeMatch?.[1] || 'unknown') as SubAgentType
+    const description = descMatch?.[1] || taskMatch[1] || promptMatch?.[1] || 'Running task'
+    results.push({
+      activity: 'sub_agent',
+      tool: 'Task',
+      detail: `${subAgentType}: ${description}`,
+      subAgent: {
+        type: subAgentType,
+        description,
+      },
+    })
+  } else {
+    const detectedSubAgent = detectGenericSubAgent(stripped)
+    if (detectedSubAgent) {
+      results.push({
+        activity: 'sub_agent',
+        tool: 'subagent',
+        detail: `${detectedSubAgent.type}: ${detectedSubAgent.description}`,
+        subAgent: detectedSubAgent,
+      })
+    }
+  }
 
   // Tool calls (formal format)
   match = CODEX_TOOL_READ.exec(stripped)
@@ -671,33 +800,19 @@ export function parseCodexOutput(stripped: string): ParseResult[] {
     }
   }
 
-  // Context metrics extraction
-  const contextMatch = CONTEXT_PATTERN.exec(stripped)
-  const tokenMatch = TOKENS_PATTERN.exec(stripped)
-  const costMatch = COST_PATTERN.exec(stripped)
-  const turnMatch = TURN_PATTERN.exec(stripped)
+  if (hasSubAgentCompletion(stripped)) {
+    results.push({
+      activity: 'sub_agent',
+      subAgentCompleted: true,
+    })
+  }
 
-  if (contextMatch || tokenMatch || costMatch || turnMatch) {
-    const contextUpdate: ParseResult['contextUpdate'] = {}
-    if (tokenMatch) {
-      contextUpdate.tokenEstimate = parseTokenCount(tokenMatch[1])
-    }
-    if (costMatch) {
-      contextUpdate.costEstimate = parseFloat(costMatch[1])
-    }
-    if (turnMatch) {
-      contextUpdate.turnCount = parseInt(turnMatch[1], 10)
-    }
-    if (contextMatch && !tokenMatch) {
-      const pct = parseFloat(contextMatch[1])
-      contextUpdate.tokenEstimate = Math.round((pct / 100) * 200000)
-    }
-    if (Object.keys(contextUpdate).length > 0) {
-      results.push({
-        activity: results[0]?.activity || 'thinking',
-        contextUpdate,
-      })
-    }
+  const codexContextUpdate = extractContextUpdate(stripped, 'codex')
+  if (codexContextUpdate) {
+    results.push({
+      activity: results[0]?.activity || 'thinking',
+      contextUpdate: codexContextUpdate,
+    })
   }
 
   // High-level activity patterns
@@ -732,7 +847,7 @@ export function parseOutput(stripped: string, provider: Provider = 'claude'): Pa
 export function createBatchParser(
   onResults: (results: ParseResult[]) => void,
   batchMs = 100,
-  provider: Provider = 'claude',
+  provider: Provider | (() => Provider) = 'claude',
 ) {
   let buffer = ''
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -748,7 +863,8 @@ export function createBatchParser(
       timer = setTimeout(() => {
         timer = null
         const stripped = stripAnsi(buffer)
-        const results = parseOutput(stripped, provider)
+        const resolvedProvider = typeof provider === 'function' ? provider() : provider
+        const results = parseOutput(stripped, resolvedProvider)
         if (results.length > 0) {
           onResults(results)
         }

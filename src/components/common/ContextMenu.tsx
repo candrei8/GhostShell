@@ -30,7 +30,7 @@ export function ContextMenu({ items, onClose, position }: ContextMenuProps) {
   return (
     <div
       ref={ref}
-      className="absolute bg-ghost-surface border border-ghost-border rounded-lg shadow-xl z-50 py-1 min-w-[160px]"
+      className="absolute bg-ghost-surface border border-ghost-border rounded-md shadow-minimal-lg z-50 py-1 min-w-[160px]"
       style={position ? { left: position.x, top: position.y } : undefined}
     >
       {items.map((item, i) => (

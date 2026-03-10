@@ -1,157 +1,304 @@
-import { useEffect, useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
+import { SHORTCUT_EVENTS } from '../lib/shortcutEvents'
+import { matchesKeyCombo } from '../lib/shortcutRegistry'
+import { useAgent } from './useAgent'
+import { useShortcutStore } from '../stores/shortcutStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { useAgent } from './useAgent'
 
 interface KeyboardShortcutsOptions {
   onToggleCommandPalette: () => void
   onNavigate?: (view: string) => void
+  onClearNavigation?: () => void
   onToggleQuickLaunch?: () => void
+  onOpenSettingsTab?: (tab: 'appearance' | 'providers' | 'terminal' | 'shortcuts') => void
   onToggleMonitor?: () => void
+  isSettingsOpen?: boolean
+  isCommandPaletteOpen?: boolean
 }
 
-export function useKeyboardShortcuts({ onToggleCommandPalette, onNavigate, onToggleQuickLaunch, onToggleMonitor }: KeyboardShortcutsOptions) {
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  if (target.closest('.xterm')) return false
+  if (target.closest('[data-allow-global-shortcuts="true"]')) return false
+  if (target.closest('[contenteditable="true"]')) return true
+
+  const tagName = target.tagName
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    tagName === 'INPUT' ||
+    tagName === 'TEXTAREA' ||
+    tagName === 'SELECT' ||
+    target instanceof HTMLElement && target.isContentEditable
+  )
+}
+
+export function useKeyboardShortcuts({
+  onToggleCommandPalette,
+  onNavigate,
+  onClearNavigation,
+  onToggleQuickLaunch,
+  onOpenSettingsTab,
+  onToggleMonitor,
+  isSettingsOpen = false,
+  isCommandPaletteOpen = false,
+}: KeyboardShortcutsOptions) {
   const { stopAgent } = useAgent()
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      const ctrl = e.ctrlKey
-      const shift = e.shiftKey
-      const alt = e.altKey
+    (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (isSettingsOpen || isCommandPaletteOpen) return
+      if (isEditableTarget(event.target)) return
 
-      // Command Palette: Ctrl+Shift+P
-      if (ctrl && shift && e.key === 'P') {
-        e.preventDefault()
-        onToggleCommandPalette()
-        return
+      const getActiveBindings = useShortcutStore.getState().getActiveBindings
+      const matches = (shortcutId: string) =>
+        getActiveBindings(shortcutId).some((binding) => matchesKeyCombo(event, binding.combo))
+
+      const run = (shortcutId: string, action: () => void) => {
+        if (!matches(shortcutId)) return false
+        event.preventDefault()
+        action()
+        return true
       }
 
-      // Rename active tab: F2
-      if (e.key === 'F2' && !ctrl && !shift && !alt) {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('ghostshell:rename-tab'))
-        return
-      }
+      if (run('nav.commandPalette', onToggleCommandPalette)) return
 
-      // New terminal: Ctrl+T or Ctrl+Shift+T
-      if (ctrl && !alt && e.key.toLowerCase() === 't') {
-        e.preventDefault()
-        const currentPath = useWorkspaceStore.getState().currentPath
-        useTerminalStore.getState().addSession({
-          id: `term-standalone-${Date.now()}`,
-          title: 'Terminal',
-          cwd: currentPath,
+      if (
+        run('terminal.rename', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.renameTab))
         })
+      ) {
         return
       }
 
-      // Split / Duplicate tab: Ctrl+Shift+D
-      if (ctrl && shift && e.key === 'D') {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('ghostshell:split-request'))
+      if (
+        run('terminal.new', () => {
+          const currentPath = useWorkspaceStore.getState().currentPath
+          useTerminalStore.getState().addSession({
+            id: `term-standalone-${Date.now()}`,
+            title: 'Terminal',
+            cwd: currentPath,
+          })
+        })
+      ) {
         return
       }
 
-      // Close tab: Ctrl+Shift+W
-      if (ctrl && shift && e.key === 'W') {
-        e.preventDefault()
-        const state = useTerminalStore.getState()
-        if (state.activeSessionId && state.sessions.length > 0) {
-          const session = state.sessions.find((s) => s.id === state.activeSessionId)
+      if (
+        run('terminal.split', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.splitSession))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.close', () => {
+          const state = useTerminalStore.getState()
+          if (!state.activeSessionId || state.sessions.length === 0) return
+
+          const session = state.sessions.find((item) => item.id === state.activeSessionId)
           if (session?.agentId) {
             stopAgent(session.agentId)
-          } else if (state.activeSessionId) {
-            state.removeSession(state.activeSessionId)
+            return
           }
-        }
+
+          state.removeSession(state.activeSessionId)
+        })
+      ) {
         return
       }
 
-      // Toggle maximize: Ctrl+Shift+Enter
-      if (ctrl && shift && e.key === 'Enter') {
-        e.preventDefault()
-        const { activeSessionId, toggleMaximize } = useTerminalStore.getState()
-        if (activeSessionId) toggleMaximize(activeSessionId)
+      if (
+        run('terminal.maximize', () => {
+          const { activeSessionId, toggleMaximize } = useTerminalStore.getState()
+          if (activeSessionId) toggleMaximize(activeSessionId)
+        })
+      ) {
         return
       }
 
-      // Sync inputs: Ctrl+Alt+I
-      if (ctrl && alt && e.key.toLowerCase() === 'i') {
-        e.preventDefault()
-        const { syncInputsMode, setSyncInputs } = useTerminalStore.getState()
-        setSyncInputs(syncInputsMode === 'off' ? 'all' : 'off')
+      if (
+        run('terminal.syncInputs', () => {
+          const { syncInputsMode, setSyncInputs } = useTerminalStore.getState()
+          setSyncInputs(syncInputsMode === 'off' ? 'all' : 'off')
+        })
+      ) {
         return
       }
 
-      // Navigate panes: Ctrl+Alt+Arrow
-      if (ctrl && alt && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        e.preventDefault()
-        const { sessions, activeSessionId, setActiveSession } = useTerminalStore.getState()
-        if (sessions.length < 2 || !activeSessionId) return
-
-        const currentIndex = sessions.findIndex((s) => s.id === activeSessionId)
-        let nextIndex = currentIndex
-
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-          nextIndex = (currentIndex + 1) % sessions.length
-        } else {
-          nextIndex = (currentIndex - 1 + sessions.length) % sessions.length
-        }
-
-        setActiveSession(sessions[nextIndex].id)
+      if (
+        run('terminal.search', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.toggleTerminalSearch))
+        })
+      ) {
         return
       }
 
-      // Switch to tab 1-9: Ctrl+1 through Ctrl+9
-      // If index exceeds tab count, clamp to last tab (e.g. Ctrl+5 with 4 tabs → goes to tab 4)
-      if (ctrl && !shift && !alt && e.key >= '1' && e.key <= '9') {
-        e.preventDefault()
-        const { sessions, setActiveSession } = useTerminalStore.getState()
+      if (matches('pane.prev') || matches('pane.next')) {
+        event.preventDefault()
+        const {
+          sessions,
+          activeSessionId,
+          activeWorkspaceId,
+          viewMode,
+          getWorkspaces,
+          setActiveSession,
+        } = useTerminalStore.getState()
+
+        if (!activeSessionId) return
+
+        const workspace = activeWorkspaceId
+          ? getWorkspaces().find((item) => item.id === activeWorkspaceId)
+          : undefined
+
+        const visibleSessions =
+          viewMode === 'tabs' && activeWorkspaceId
+            ? sessions.filter((session) => !!workspace?.sessionIds.includes(session.id))
+            : sessions
+
+        if (visibleSessions.length < 2) return
+
+        const currentIndex = visibleSessions.findIndex((session) => session.id === activeSessionId)
+        if (currentIndex < 0) return
+
+        const nextIndex = matches('pane.prev')
+          ? (currentIndex - 1 + visibleSessions.length) % visibleSessions.length
+          : (currentIndex + 1) % visibleSessions.length
+
+        setActiveSession(visibleSessions[nextIndex].id)
+        return
+      }
+
+      for (let index = 1; index <= 9; index += 1) {
+        if (!matches(`tab.${index}`)) continue
+
+        event.preventDefault()
+        const { sessions, viewMode, getWorkspaces, setActiveSession, setActiveWorkspace } =
+          useTerminalStore.getState()
+
         if (sessions.length === 0) return
-        const index = parseInt(e.key) - 1
-        if (index >= sessions.length) {
-          setActiveSession(sessions[sessions.length - 1].id)
-        } else {
-          setActiveSession(sessions[index].id)
+
+        const shortcutIndex = index - 1
+        if (viewMode === 'tabs') {
+          const workspaces = getWorkspaces()
+          if (workspaces.length === 0) return
+
+          const clampedIndex = Math.min(shortcutIndex, workspaces.length - 1)
+          setActiveWorkspace(workspaces[clampedIndex].id)
+          return
         }
+
+        const clampedIndex = Math.min(shortcutIndex, sessions.length - 1)
+        setActiveSession(sessions[clampedIndex].id)
         return
       }
 
-      // Previous/Next tab: Ctrl+PgUp/PgDn
-      if (ctrl && !shift && (e.key === 'PageUp' || e.key === 'PageDown')) {
-        e.preventDefault()
-        const { sessions, activeSessionId, setActiveSession } = useTerminalStore.getState()
+      if (matches('tab.prev') || matches('tab.next')) {
+        event.preventDefault()
+        const {
+          sessions,
+          activeSessionId,
+          activeWorkspaceId,
+          viewMode,
+          getWorkspaces,
+          setActiveSession,
+          setActiveWorkspace,
+        } = useTerminalStore.getState()
+
+        if (matches('tab.next')) {
+          if (viewMode === 'tabs') {
+            const workspaces = getWorkspaces()
+            if (workspaces.length < 2) return
+
+            const currentIndex = workspaces.findIndex((workspace) => workspace.id === activeWorkspaceId)
+            const nextIndex = (Math.max(currentIndex, 0) + 1) % workspaces.length
+            setActiveWorkspace(workspaces[nextIndex].id)
+            return
+          }
+
+          if (sessions.length < 2 || !activeSessionId) return
+
+          const currentIndex = sessions.findIndex((session) => session.id === activeSessionId)
+          if (currentIndex < 0) return
+          setActiveSession(sessions[(currentIndex + 1) % sessions.length].id)
+          return
+        }
+
+        if (viewMode === 'tabs') {
+          const workspaces = getWorkspaces()
+          if (workspaces.length < 2) return
+
+          const currentIndex = workspaces.findIndex((workspace) => workspace.id === activeWorkspaceId)
+          const nextIndex = (Math.max(currentIndex, 0) - 1 + workspaces.length) % workspaces.length
+          setActiveWorkspace(workspaces[nextIndex].id)
+          return
+        }
+
         if (sessions.length < 2 || !activeSessionId) return
-        const currentIndex = sessions.findIndex((s) => s.id === activeSessionId)
-        const nextIndex = e.key === 'PageDown'
-          ? (currentIndex + 1) % sessions.length
-          : (currentIndex - 1 + sessions.length) % sessions.length
-        setActiveSession(sessions[nextIndex].id)
+
+        const currentIndex = sessions.findIndex((session) => session.id === activeSessionId)
+        if (currentIndex < 0) return
+        setActiveSession(sessions[(currentIndex - 1 + sessions.length) % sessions.length].id)
         return
       }
 
-      // Settings: Ctrl+,
-      if (ctrl && e.key === ',') {
-        e.preventDefault()
-        onNavigate?.('settings')
+      if (
+        run('nav.settings', () => {
+          onOpenSettingsTab?.('appearance') ?? onNavigate?.('settings')
+        })
+      ) {
         return
       }
 
-      // History: Ctrl+H (when not in terminal focus)
-      if (ctrl && shift && e.key === 'H') {
-        e.preventDefault()
-        onNavigate?.('history')
+      if (
+        run('nav.settingsTerminal', () => {
+          onOpenSettingsTab?.('terminal') ?? onNavigate?.('settings')
+        })
+      ) {
         return
       }
 
-      // Sub-Agent Monitor: Ctrl+Shift+M
-      if (ctrl && shift && e.key === 'M') {
-        e.preventDefault()
-        onToggleMonitor?.()
+      if (
+        run('nav.settingsProviders', () => {
+          onOpenSettingsTab?.('providers') ?? onNavigate?.('settings')
+        })
+      ) {
         return
       }
+
+      if (
+        run('nav.settingsShortcuts', () => {
+          onOpenSettingsTab?.('shortcuts') ?? onNavigate?.('settings')
+        })
+      ) {
+        return
+      }
+
+      if (run('nav.history', () => onNavigate?.('history'))) return
+      if (run('nav.blocks', () => onNavigate?.('blocks'))) return
+      if (run('nav.quickLaunch', () => onToggleQuickLaunch?.())) return
+      if (run('nav.monitor', () => onToggleMonitor?.())) return
+      if (run('nav.sidebarSwarm', () => onNavigate?.('swarm'))) return
+      if (run('nav.sidebarFiles', () => onNavigate?.('files'))) return
+      if (run('nav.sidebarHistory', () => onNavigate?.('history'))) return
+      if (run('nav.sidebarBlocks', () => onNavigate?.('blocks'))) return
+      run('nav.sidebarClose', () => onClearNavigation?.())
     },
-    [onToggleCommandPalette, onNavigate, onToggleMonitor, stopAgent],
+    [
+      isCommandPaletteOpen,
+      isSettingsOpen,
+      onClearNavigation,
+      onNavigate,
+      onOpenSettingsTab,
+      onToggleCommandPalette,
+      onToggleMonitor,
+      onToggleQuickLaunch,
+      stopAgent,
+    ],
   )
 
   useEffect(() => {

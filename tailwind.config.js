@@ -20,34 +20,25 @@ module.exports = {
         }
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'monospace'],
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Cascadia Mono', 'IBM Plex Mono', 'Consolas', 'monospace'],
+        sans: ['Manrope', 'Segoe UI Variable Text', 'SF Pro Display', 'Helvetica Neue', 'sans-serif'],
       },
       fontSize: {
         '2xs': '0.6875rem',
       },
       spacing: {},
       boxShadow: {
-        'qubria': '0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2)',
-        'qubria-lg': '0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3)',
+        /* Very subtle shadows for the new minimalist look */
+        'minimal': '0 1px 2px rgba(0, 0, 0, 0.5)',
+        'minimal-lg': '0 4px 12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)',
       },
       animation: {
-        'fade-in': 'fade-in 200ms ease-out',
-        'breathe': 'ghost-breathe 2.4s ease-in-out infinite',
-        'slide-in': 'ghost-slide-in 180ms ease-out',
+        'fade-in': 'fade-in 150ms ease-out',
       },
       keyframes: {
         'fade-in': {
-          from: { opacity: '0', transform: 'translateY(4px)' },
+          from: { opacity: '0', transform: 'translateY(2px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
-        },
-        'ghost-breathe': {
-          '0%, 100%': { boxShadow: '0 0 4px rgba(99, 102, 241, 0.15)' },
-          '50%': { boxShadow: '0 0 10px rgba(99, 102, 241, 0.35)' },
-        },
-        'ghost-slide-in': {
-          from: { opacity: '0', transform: 'translateX(-6px)' },
-          to: { opacity: '1', transform: 'translateX(0)' },
         },
       },
     },

@@ -5,13 +5,41 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useSettingsStore } from '../stores/settingsStore'
+import { Provider, TerminalTheme } from '../lib/types'
+import { CliVisualProfile, getCliAppearancePreset, type SearchDecorations } from '../lib/terminalPresets'
 
-export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>, isActive?: boolean) {
+function resolveAppearanceSafe(
+  theme: TerminalTheme,
+  provider: Provider | undefined,
+  visualProfile: CliVisualProfile,
+  cursorStyle: 'block' | 'underline' | 'bar',
+  cursorBlink: boolean,
+) {
+  try {
+    return getCliAppearancePreset(theme, provider, visualProfile, cursorStyle, cursorBlink)
+  } catch (err) {
+    console.warn('[useTerminal] Failed to resolve appearance preset, using safe fallback:', err)
+    return getCliAppearancePreset(theme, undefined, 'executive', 'bar', true)
+  }
+}
+
+export function useTerminal(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  isActive?: boolean,
+  provider?: Provider,
+) {
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
+  const webglAvailableRef = useRef(true)
   const searchAddonRef = useRef<SearchAddon | null>(null)
+  const searchDecorationsRef = useRef<SearchDecorations>({
+    matchOverviewRuler: '#94a3b880',
+    activeMatchColorOverviewRuler: '#e2e8f0',
+    matchBackground: '#94a3b830',
+    activeMatchBackground: '#94a3b860',
+  })
   const mounted = useRef(false)
   const fitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -74,6 +102,34 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
     }, 300)
   }, [safeFit])
 
+  const detachWebgl = useCallback(() => {
+    if (!webglAddonRef.current) return
+    try { webglAddonRef.current.dispose() } catch {}
+    webglAddonRef.current = null
+  }, [])
+
+  const attachWebgl = useCallback((term: Terminal) => {
+    if (webglAddonRef.current || !webglAvailableRef.current) return
+
+    try {
+      const webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        console.warn('WebGL context lost, falling back to the default renderer')
+        if (webglAddonRef.current === webglAddon) {
+          webglAddonRef.current = null
+        }
+        webglAvailableRef.current = false
+        try { webglAddon.dispose() } catch {}
+        try { term.refresh(0, term.rows - 1) } catch {}
+      })
+      term.loadAddon(webglAddon)
+      webglAddonRef.current = webglAddon
+    } catch {
+      webglAvailableRef.current = false
+      console.warn('WebGL addon failed to load, using the default renderer')
+    }
+  }, [])
+
   // Create terminal instance
   useEffect(() => {
     const container = containerRef.current
@@ -83,23 +139,32 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
 
     const settings = useSettingsStore.getState()
     const theme = settings.getTheme()
+    const appearance = resolveAppearanceSafe(
+      theme.terminalColors,
+      provider,
+      settings.cliVisualProfile,
+      settings.cursorStyle,
+      settings.cursorBlink,
+    )
+    searchDecorationsRef.current = appearance.searchDecorations
 
     const term = new Terminal({
       fontSize: settings.terminalFontSize,
       fontFamily: settings.fontFamily,
-      cursorBlink: settings.cursorBlink,
-      cursorStyle: settings.cursorStyle,
-      theme: theme.terminalColors,
+      cursorBlink: appearance.cursorBlink,
+      cursorStyle: appearance.cursorStyle,
+      theme: appearance.theme,
       allowTransparency: true,
       scrollback: 10000,
       convertEol: true,
       fontWeight: '400',
       fontWeightBold: '700',
-      letterSpacing: 0,
-      lineHeight: 1.15,
+      letterSpacing: appearance.letterSpacing,
+      lineHeight: appearance.lineHeight,
       drawBoldTextInBrightColors: true,
       minimumContrastRatio: 1,
       rightClickSelectsWord: true,
+      scrollOnUserInput: true,
     })
 
     const fitAddon = new FitAddon()
@@ -108,22 +173,6 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
 
     term.open(container)
 
-    // Load WebGL addon for crisp, GPU-accelerated rendering
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        console.warn('WebGL context lost, falling back to canvas renderer')
-        try { webglAddon.dispose() } catch {}
-        webglAddonRef.current = null
-        // Force full content re-render so the canvas fallback renderer paints all lines
-        try { term.refresh(0, term.rows - 1) } catch {}
-      })
-      term.loadAddon(webglAddon)
-      webglAddonRef.current = webglAddon
-    } catch {
-      console.warn('WebGL addon failed to load, using canvas renderer')
-    }
-
     // Load Search addon
     const searchAddon = new SearchAddon()
     term.loadAddon(searchAddon)
@@ -131,7 +180,9 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
 
     // Load Web Links addon (Ctrl+Click opens URLs in browser)
     const webLinksAddon = new WebLinksAddon((event, uri) => {
-      if (event.ctrlKey || event.metaKey) window.open(uri, '_blank')
+      if (event.ctrlKey || event.metaKey) {
+        window.open(uri, '_blank', 'noopener,noreferrer')
+      }
     })
     term.loadAddon(webLinksAddon)
 
@@ -159,16 +210,34 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       resizeObserver.disconnect()
       window.removeEventListener('ghostshell:refit', handleGlobalRefit)
-      if (webglAddonRef.current) {
-        try { webglAddonRef.current.dispose() } catch {}
-        webglAddonRef.current = null
-      }
+      detachWebgl()
+      termRef.current = null  // null ref BEFORE dispose so concurrent subscribers bail out
       term.dispose()
-      termRef.current = null
       setTerminal(null)
       fitAddonRef.current = null
     }
-  }, [containerRef, debouncedFit])
+  }, [containerRef, debouncedFit, detachWebgl])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+
+    if (isActive === false) {
+      detachWebgl()
+      return
+    }
+
+    let cancelled = false
+    const timer = setTimeout(() => {
+      if (cancelled || termRef.current !== term) return
+      attachWebgl(term)
+    }, 50)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [attachWebgl, detachWebgl, isActive, terminal])
 
   // Refit + focus + refresh when tab becomes active
   // visibility:hidden → visible doesn't trigger ResizeObserver, so we force refit here.
@@ -218,44 +287,88 @@ export function useTerminal(containerRef: React.RefObject<HTMLDivElement | null>
     if (!terminal) return
 
     const unsub = useSettingsStore.subscribe((state, prevState) => {
-      // Guard: skip if terminal has been disposed
-      if (!termRef.current) return
+      // Use ref (not closure) so guard and write are atomic — avoids race with dispose
+      const term = termRef.current
+      if (!term) return
+
+      const applyAppearance = () => {
+        const resolvedTheme = state.getTheme()
+        const appearance = resolveAppearanceSafe(
+          resolvedTheme.terminalColors,
+          provider,
+          state.cliVisualProfile,
+          state.cursorStyle,
+          state.cursorBlink,
+        )
+        searchDecorationsRef.current = appearance.searchDecorations
+        term.options.theme = appearance.theme
+        term.options.cursorBlink = appearance.cursorBlink
+        term.options.cursorStyle = appearance.cursorStyle
+        term.options.letterSpacing = appearance.letterSpacing
+        term.options.lineHeight = appearance.lineHeight
+        debouncedFit()
+        try { term.refresh(0, term.rows - 1) } catch {}
+      }
 
       try {
         if (state.terminalFontSize !== prevState.terminalFontSize) {
-          terminal.options.fontSize = state.terminalFontSize
-          debouncedFit() // debounced to avoid hammering fit() on rapid slider changes
-        }
-        if (state.fontFamily !== prevState.fontFamily) {
-          terminal.options.fontFamily = state.fontFamily
+          term.options.fontSize = state.terminalFontSize
           debouncedFit()
         }
-        if (state.cursorBlink !== prevState.cursorBlink) {
-          terminal.options.cursorBlink = state.cursorBlink
+        if (state.fontFamily !== prevState.fontFamily) {
+          term.options.fontFamily = state.fontFamily
+          debouncedFit()
         }
-        if (state.cursorStyle !== prevState.cursorStyle) {
-          terminal.options.cursorStyle = state.cursorStyle
+        if (
+          state.cursorBlink !== prevState.cursorBlink ||
+          state.cursorStyle !== prevState.cursorStyle ||
+          state.cliVisualProfile !== prevState.cliVisualProfile ||
+          state.themeId !== prevState.themeId
+        ) {
+          applyAppearance()
         }
-        if (state.themeId !== prevState.themeId) {
-          const theme = state.getTheme()
-          terminal.options.theme = theme.terminalColors
-          // Force re-render to apply new colors immediately
-          try { terminal.refresh(0, terminal.rows - 1) } catch {}
-        }
-      } catch {
-        // Terminal may have been disposed between guard check and property access
+      } catch (err) {
+        console.warn('[useTerminal] settings sync error:', err)
       }
     })
 
+    // Ensure profile is reapplied when provider changes without requiring a settings mutation.
+    const initialState = useSettingsStore.getState()
+    const initialAppearance = resolveAppearanceSafe(
+      initialState.getTheme().terminalColors,
+      provider,
+      initialState.cliVisualProfile,
+      initialState.cursorStyle,
+      initialState.cursorBlink,
+    )
+    searchDecorationsRef.current = initialAppearance.searchDecorations
+    terminal.options.theme = initialAppearance.theme
+    terminal.options.cursorBlink = initialAppearance.cursorBlink
+    terminal.options.cursorStyle = initialAppearance.cursorStyle
+    terminal.options.letterSpacing = initialAppearance.letterSpacing
+    terminal.options.lineHeight = initialAppearance.lineHeight
+    debouncedFit()
+    try { terminal.refresh(0, terminal.rows - 1) } catch {}
+
     return unsub
-  }, [terminal, debouncedFit])
+  }, [terminal, debouncedFit, provider])
 
   const searchNext = useCallback((query: string) => {
-    return searchAddonRef.current?.findNext(query, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#a855f780', activeMatchColorOverviewRuler: '#a855f7', matchBackground: '#a855f730', activeMatchBackground: '#a855f760' } }) ?? false
+    const decorations = searchDecorationsRef.current
+    return searchAddonRef.current?.findNext(query, {
+      regex: false,
+      caseSensitive: false,
+      decorations,
+    }) ?? false
   }, [])
 
   const searchPrev = useCallback((query: string) => {
-    return searchAddonRef.current?.findPrevious(query, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#a855f780', activeMatchColorOverviewRuler: '#a855f7', matchBackground: '#a855f730', activeMatchBackground: '#a855f760' } }) ?? false
+    const decorations = searchDecorationsRef.current
+    return searchAddonRef.current?.findPrevious(query, {
+      regex: false,
+      caseSensitive: false,
+      decorations,
+    }) ?? false
   }, [])
 
   const clearSearch = useCallback(() => {

@@ -8,8 +8,14 @@ import { StateStorage } from 'zustand/middleware'
 export const electronStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
     try {
-      const value = await window.ghostshell.storageGet(name)
-      return value ? JSON.stringify(value) : null
+      if (typeof window !== 'undefined' && window.ghostshell?.storageGet) {
+        const value = await window.ghostshell.storageGet(name)
+        return value ? JSON.stringify(value) : null
+      }
+      if (typeof localStorage !== 'undefined') {
+        return localStorage.getItem(name)
+      }
+      return null
     } catch (error) {
       console.error(`Error getting item from storage: ${name}`, error)
       return null
@@ -18,8 +24,14 @@ export const electronStorage: StateStorage = {
 
   setItem: async (name: string, value: string): Promise<void> => {
     try {
-      const parsed = JSON.parse(value)
-      await window.ghostshell.storageSet(name, parsed)
+      if (typeof window !== 'undefined' && window.ghostshell?.storageSet) {
+        const parsed = JSON.parse(value)
+        await window.ghostshell.storageSet(name, parsed)
+        return
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(name, value)
+      }
     } catch (error) {
       console.error(`Error setting item in storage: ${name}`, error)
     }
@@ -27,7 +39,13 @@ export const electronStorage: StateStorage = {
 
   removeItem: async (name: string): Promise<void> => {
     try {
-      await window.ghostshell.storageRemove(name)
+      if (typeof window !== 'undefined' && window.ghostshell?.storageRemove) {
+        await window.ghostshell.storageRemove(name)
+        return
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(name)
+      }
     } catch (error) {
       console.error(`Error removing item from storage: ${name}`, error)
     }

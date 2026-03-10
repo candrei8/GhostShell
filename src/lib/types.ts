@@ -1,7 +1,7 @@
-export interface AnimalAvatar {
+export interface AgentAvatarConfig {
   id: string
   name: string
-  emoji: string
+  icon: string
   color: string
 }
 
@@ -34,7 +34,7 @@ export interface CodexConfig {
 export interface Agent {
   id: string
   name: string
-  avatar: AnimalAvatar
+  avatar: AgentAvatarConfig
   status: 'idle' | 'working' | 'error' | 'offline'
   threadId?: string
   terminalId?: string
@@ -64,9 +64,12 @@ export interface TerminalSession {
   id: string
   agentId?: string
   title: string
+  description?: string
   isActive: boolean
   cwd: string
   shell?: string
+  /** Provider inferred from a standalone CLI launched inside this terminal. */
+  detectedProvider?: Provider
   /** Skip auto-launching Claude in usePty (e.g. restartAgent handles launch with --continue) */
   skipAutoLaunch?: boolean
 }
@@ -149,7 +152,7 @@ export interface GitStatus {
 export interface SavedAgentConfig {
   id: string
   name: string
-  avatar: AnimalAvatar
+  avatar: AgentAvatarConfig
   provider: Provider
   model: string
   systemPrompt?: string
@@ -158,7 +161,7 @@ export interface SavedAgentConfig {
   createdAt: number
 }
 
-export type SidebarView = 'files' | 'agents' | 'settings' | 'history'
+export type SidebarView = 'files' | 'agents' | 'settings' | 'history' | 'blocks' | 'swarm'
 
 // Session grouping
 export interface SessionGroup {
@@ -226,6 +229,8 @@ export interface ContextMetrics {
   maxTokens: number
   turnCount: number
   costEstimate: number
+  usagePercentage?: number
+  lastUpdatedAt?: number
 }
 
 export interface FileTouch {
@@ -271,7 +276,7 @@ declare global {
       windowMaximize: () => void
       windowClose: () => void
       windowIsMaximized: () => Promise<boolean>
-      ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number }) => Promise<{ success: boolean }>
+      ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number; provider?: Provider }) => Promise<{ success: boolean; error?: string }>
       ptyWrite: (id: string, data: string) => void
       ptyResize: (id: string, cols: number, rows: number) => void
       ptyKill: (id: string) => void
@@ -281,6 +286,7 @@ declare global {
       fsReadDir: (path: string) => Promise<FileEntry[]>
       fsCreateFile: (filePath: string, content?: string) => Promise<{ success: boolean; error?: string }>
       fsCreateDir: (dirPath: string) => Promise<{ success: boolean; error?: string }>
+      fsCopy: (sourcePath: string, destinationPath: string) => Promise<{ success: boolean; error?: string }>
       fsRename: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
       fsDelete: (targetPath: string) => Promise<{ success: boolean; error?: string }>
       gitStatus: (cwd: string) => Promise<GitStatus>
@@ -289,11 +295,14 @@ declare global {
       workspaceLoad: (name: string) => Promise<unknown | null>
       workspaceList: () => Promise<string[]>
       fsPreview: (filePath: string, maxLines?: number) => Promise<{ success: boolean; content: string; totalLines: number; error?: string }>
+      saveTempImage: (buffer: ArrayBuffer, mimeType: string) => Promise<string>
       showNotification: (title: string, body?: string) => void
       getVersion: () => Promise<string>
       storageGet: (key: string) => Promise<unknown | null>
       storageSet: (key: string, value: unknown) => Promise<{ success: boolean; error?: string }>
       storageRemove: (key: string) => Promise<{ success: boolean; error?: string }>
+      cliDiscoverModels: (provider: Provider, command?: string) => Promise<{ success: boolean; output: string; error?: string }>
+      cliGetVersion: (cli: string) => Promise<{ installed: boolean; version: string }>
       updaterCheck: () => Promise<{ success: boolean; version?: string; error?: string }>
       updaterDownload: () => Promise<{ success: boolean; error?: string }>
       updaterInstall: () => void

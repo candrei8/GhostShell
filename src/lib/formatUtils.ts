@@ -40,3 +40,10 @@ export function smartTruncatePath(path: string, maxLen: number): string {
   if (fileName.length <= maxLen) return fileName
   return fileName.slice(0, maxLen - 1) + '\u2026'
 }
+
+export function formatClockTime(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp)
+}

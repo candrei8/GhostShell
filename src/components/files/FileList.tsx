@@ -35,8 +35,9 @@ interface FileListProps {
   onSetAsProject?: (path: string) => void
   onDelete?: (entry: FileEntry) => void
   onRename?: (entry: FileEntry, newName: string) => void
-  onSelect?: (entry: FileEntry | null) => void
-  selectedPath?: string | null
+  onMoveEntries?: (sourcePaths: string[], targetDirectory: string) => void
+  onSelect?: (entry: FileEntry | null, options?: { append?: boolean; range?: boolean; index?: number }) => void
+  selectedPaths?: string[]
   gitStatuses?: Record<string, string>
 }
 
@@ -74,8 +75,9 @@ export function FileList({
   onSetAsProject,
   onDelete,
   onRename,
+  onMoveEntries,
   onSelect,
-  selectedPath,
+  selectedPaths,
   gitStatuses,
 }: FileListProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -84,6 +86,7 @@ export function FileList({
   const [renameValue, setRenameValue] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [focusedIndex, setFocusedIndex] = useState(-1)
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -105,7 +108,7 @@ export function FileList({
         if (file.isDirectory) {
           onNavigate?.(file)
         } else {
-          onSelect?.(file)
+          onSelect?.(file, { index: focusedIndex })
         }
       } else if (e.key === 'F2' && focusedIndex >= 0) {
         e.preventDefault()
@@ -211,18 +214,51 @@ export function FileList({
     }
   }, [confirmDelete, onDelete, closeMenu])
 
+  const handleDragStart = useCallback((event: React.DragEvent, entry: FileEntry, index: number) => {
+    const dragPaths = selectedPaths?.includes(entry.path) ? selectedPaths : [entry.path]
+    if (!selectedPaths?.includes(entry.path)) {
+      onSelect?.(entry, { index })
+    }
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('application/x-ghostshell-paths', JSON.stringify(dragPaths))
+    event.dataTransfer.setData('text/plain', dragPaths.join('\n'))
+  }, [onSelect, selectedPaths])
+
+  const handleDragOverDirectory = useCallback((event: React.DragEvent, entry: FileEntry) => {
+    if (!entry.isDirectory) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDragOverPath(entry.path)
+  }, [])
+
+  const handleDropOnDirectory = useCallback((event: React.DragEvent, entry: FileEntry) => {
+    if (!entry.isDirectory) return
+    event.preventDefault()
+    setDragOverPath(null)
+
+    const raw = event.dataTransfer.getData('application/x-ghostshell-paths')
+    if (!raw) return
+
+    try {
+      const sourcePaths = JSON.parse(raw) as string[]
+      void onMoveEntries?.(sourcePaths, entry.path)
+    } catch {
+      // ignore invalid payload
+    }
+  }, [onMoveEntries])
+
   if (files.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-8 text-ghost-text-dim/40">
-        <Folder className="w-8 h-8 mb-2 opacity-30" />
+      <div className="ghost-section-card flex flex-col items-center justify-center rounded-2xl py-8 text-ghost-text-dim/40">
+        <Folder className="mb-2 h-8 w-8 opacity-30" />
         <p className="text-xs">Empty directory</p>
-        <p className="text-2xs mt-0.5 text-ghost-text-dim/25">Create a file or folder to get started</p>
+        <p className="mt-0.5 text-2xs text-ghost-text-dim/25">Create a file or folder to get started</p>
       </div>
     )
   }
 
   return (
-    <div ref={listRef} className="flex flex-col relative" tabIndex={0}>
+    <div ref={listRef} className="relative flex flex-col gap-1" tabIndex={0}>
       {files.map((file, index) => {
         const extLabel = !file.isDirectory ? getExtensionLabel(file.name) : null
         const extColor = !file.isDirectory ? getExtensionColor(file.name) : null
@@ -230,7 +266,7 @@ export function FileList({
         const timeStr = file.modifiedAt ? getRelativeTime(file.modifiedAt) : null
         const isCopied = copiedPath === file.path
         const isRenaming = renamingPath === file.path
-        const isSelected = selectedPath === file.path
+        const isSelected = selectedPaths?.includes(file.path) || false
         const isFocused = focusedIndex === index
         const gitCode = gitStatuses?.[file.name]
         const gitInfo = gitCode ? getGitStatusInfo(gitCode) : null
@@ -238,29 +274,40 @@ export function FileList({
         return (
           <div
             key={file.path}
-            onClick={() => {
+            onClick={(event) => {
+              const append = event.metaKey || event.ctrlKey
+              const range = event.shiftKey
               setFocusedIndex(index)
+              onSelect?.(file, { append, range, index })
+            }}
+            onDoubleClick={() => {
               if (file.isDirectory) {
                 onNavigate?.(file)
-              } else {
-                onSelect?.(file)
               }
             }}
             onContextMenu={(e) => handleContextMenu(e, file)}
-            className={`group flex items-center gap-1.5 px-1.5 py-[5px] rounded-lg transition-all duration-100 ${
-              file.isDirectory ? 'cursor-pointer' : 'cursor-default'
-            } ${isSelected
-              ? 'bg-indigo-950/40 border border-ghost-accent/20'
+            draggable
+            onDragStart={(event) => handleDragStart(event, file, index)}
+            onDragOver={(event) => handleDragOverDirectory(event, file)}
+            onDragLeave={() => {
+              if (dragOverPath === file.path) setDragOverPath(null)
+            }}
+            onDrop={(event) => handleDropOnDirectory(event, file)}
+            className={`group flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2 transition-all duration-100 ${
+              isSelected
+              ? 'border border-cyan-300/30 bg-cyan-300/10 shadow-[0_10px_24px_rgba(0,0,0,0.16)]'
               : isFocused
-                ? 'bg-white/[0.04] border border-ghost-border/30'
-                : 'border border-transparent hover:bg-slate-800/30'
-            } ${isCopied ? 'bg-indigo-950/50' : ''}`}
+                ? 'border border-ghost-border/30 bg-white/[0.05]'
+                : 'ghost-section-card hover:border-white/15'
+            } ${isCopied ? 'ring-1 ring-cyan-300/26' : ''} ${
+              dragOverPath === file.path ? 'border-emerald-300/35 bg-emerald-300/10' : ''
+            }`}
           >
             {/* Git status indicator */}
-            <div className="w-2 shrink-0 flex justify-center">
+            <div className="flex w-2 shrink-0 justify-center">
               {gitInfo && (
                 <div
-                  className="w-1.5 h-1.5 rounded-full"
+                  className="h-1.5 w-1.5 rounded-full"
                   style={{ backgroundColor: gitInfo.color }}
                   title={`Git: ${gitInfo.label}`}
                 />
@@ -268,7 +315,10 @@ export function FileList({
             </div>
 
             {/* File icon */}
-            <span className="shrink-0" style={{ color: file.isDirectory ? '#60a5fa' : (extColor || 'var(--ghost-text-dim)') }}>
+            <span
+              className="ghost-soft-pill flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+              style={{ color: file.isDirectory ? '#60a5fa' : (extColor || 'var(--ghost-text-dim)') }}
+            >
               {file.isDirectory ? (
                 <Folder className="w-3.5 h-3.5" />
               ) : (
@@ -287,14 +337,20 @@ export function FileList({
                   if (e.key === 'Enter') handleSubmitRename(file)
                   if (e.key === 'Escape') { setRenamingPath(null); setRenameValue('') }
                 }}
-                className="flex-1 bg-ghost-surface border border-ghost-accent/50 rounded px-1.5 py-px text-xs text-ghost-text outline-none"
+                className="flex-1 rounded-lg border border-cyan-300/35 bg-black/25 px-2 py-1 text-xs text-ghost-text outline-none"
                 autoFocus
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className={`text-xs truncate flex-1 ${isSelected ? 'text-ghost-text font-medium' : 'text-ghost-text'}`}>
-                {file.name}
-              </span>
+              <div className="min-w-0 flex-1">
+                <span className={`block truncate text-xs ${isSelected ? 'font-medium text-ghost-text' : 'text-ghost-text'}`}>
+                  {file.name}
+                </span>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-ghost-text-dim/45">
+                  {gitInfo && <span>{gitInfo.label}</span>}
+                  {(sizeStr || timeStr) && <span className="truncate">{sizeStr || timeStr}</span>}
+                </div>
+              </div>
             )}
 
             {/* Right side: info or hover actions */}
@@ -303,7 +359,7 @@ export function FileList({
                 {/* Extension badge */}
                 {extLabel && (
                   <span
-                    className="text-2xs px-1 py-px rounded opacity-50 group-hover:opacity-70 transition-opacity"
+                    className="ghost-soft-pill text-2xs rounded-md px-1.5 py-px opacity-65 transition-opacity group-hover:opacity-90"
                     style={{
                       backgroundColor: extColor ? extColor + '15' : 'rgba(255,255,255,0.04)',
                       color: extColor || 'var(--ghost-text-dim)',
@@ -315,33 +371,27 @@ export function FileList({
 
                 {/* Size + time (visible) / Hover actions (on hover) */}
                 <div className="flex items-center gap-1">
-                  {/* Default: show size/time */}
-                  <span className="text-2xs text-ghost-text-dim/30 tabular-nums group-hover:hidden">
-                    {sizeStr || timeStr || ''}
-                  </span>
-
-                  {/* Hover: show quick actions */}
                   <div className="hidden group-hover:flex items-center gap-0.5">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCopyPath(file) }}
-                      className="w-4 h-4 flex items-center justify-center rounded text-ghost-text-dim/40 hover:text-ghost-accent hover:bg-indigo-950/50 transition-colors"
+                      className="ghost-soft-pill flex h-5 w-5 items-center justify-center rounded-md text-ghost-text-dim/55 transition-colors hover:text-ghost-accent"
                       title="Copy path"
                     >
                       <Copy className="w-2.5 h-2.5" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleStartRename(file) }}
-                      className="w-4 h-4 flex items-center justify-center rounded text-ghost-text-dim/40 hover:text-ghost-accent hover:bg-indigo-950/50 transition-colors"
+                      className="ghost-soft-pill flex h-5 w-5 items-center justify-center rounded-md text-ghost-text-dim/55 transition-colors hover:text-ghost-accent"
                       title="Rename (F2)"
                     >
                       <Pencil className="w-2.5 h-2.5" />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDeleteEntry(file) }}
-                      className={`w-4 h-4 flex items-center justify-center rounded transition-colors ${
+                      className={`ghost-soft-pill flex h-5 w-5 items-center justify-center rounded-md transition-colors ${
                         confirmDelete === file.path
-                          ? 'text-red-400 bg-red-500/10'
-                          : 'text-ghost-text-dim/40 hover:text-red-400 hover:bg-red-500/10'
+                          ? 'border-red-400/28 text-red-300'
+                          : 'text-ghost-text-dim/55 hover:text-red-300'
                       }`}
                       title={confirmDelete === file.path ? 'Click again to confirm' : 'Delete'}
                     >
@@ -352,7 +402,7 @@ export function FileList({
 
                 {/* Directory chevron */}
                 {file.isDirectory && (
-                  <ChevronRight className="w-3 h-3 text-ghost-text-dim/20 group-hover:text-ghost-text-dim/40 transition-colors" />
+                  <ChevronRight className="h-3 w-3 text-ghost-text-dim/20 transition-colors group-hover:text-ghost-text-dim/40" />
                 )}
               </div>
             )}
@@ -364,7 +414,7 @@ export function FileList({
       {contextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-[999] min-w-[180px] py-1 bg-ghost-surface border border-ghost-border rounded-lg shadow-xl animate-fade-in"
+          className="ghost-floating-panel fixed z-[999] min-w-[190px] rounded-xl py-1 animate-fade-in"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {contextMenu.entry.isDirectory ? (
@@ -381,14 +431,14 @@ export function FileList({
                 shortcut=""
                 onClick={() => { onLaunchAgent?.(contextMenu.entry.path); closeMenu() }}
               />
-              <div className="h-px bg-ghost-border/50 mx-2 my-1" />
+              <div className="mx-2 my-1 h-px bg-ghost-border/50" />
               <ContextMenuItem
                 icon={<FolderOpen className="w-3.5 h-3.5" />}
                 label="Set as Project Root"
                 shortcut=""
                 onClick={() => { onSetAsProject?.(contextMenu.entry.path); closeMenu() }}
               />
-              <div className="h-px bg-ghost-border/50 mx-2 my-1" />
+              <div className="mx-2 my-1 h-px bg-ghost-border/50" />
             </>
           ) : null}
           <ContextMenuItem
@@ -411,7 +461,7 @@ export function FileList({
               onClick={() => handleCopyName(contextMenu.entry)}
             />
           )}
-          <div className="h-px bg-ghost-border/50 mx-2 my-1" />
+          <div className="mx-2 my-1 h-px bg-ghost-border/50" />
           <ContextMenuItem
             icon={<Trash2 className="w-3.5 h-3.5" />}
             label={confirmDelete === contextMenu.entry.path ? 'Confirm Delete' : 'Delete'}
@@ -441,10 +491,10 @@ function ContextMenuItem({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2.5 w-full px-3 py-1.5 text-xs transition-colors text-left ${
+          className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         variant === 'danger'
           ? 'text-red-400 hover:bg-red-500/10'
-          : 'text-ghost-text-dim hover:text-ghost-text hover:bg-slate-800/50'
+          : 'text-ghost-text-dim hover:bg-white/[0.06] hover:text-ghost-text'
       }`}
     >
       <span className="shrink-0 opacity-60">{icon}</span>

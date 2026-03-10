@@ -3,7 +3,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { useThreadStore } from '../stores/threadStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { AnimalAvatar, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../lib/types'
+import { AgentAvatarConfig, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../lib/types'
 import { buildClaudeCommand, buildLaunchCommand, resolveProvider } from '../lib/providers'
 
 // Re-export for backward compat
@@ -23,7 +23,7 @@ export function useAgent() {
   const createAgent = useCallback(
     (
       name: string,
-      avatar?: AnimalAvatar,
+      avatar?: AgentAvatarConfig,
       color?: string,
       claudeConfig?: ClaudeConfig,
       cwd?: string,
@@ -214,7 +214,7 @@ export function useAgent() {
     (
       agentConfigs: Array<{
         name: string
-        avatar?: AnimalAvatar
+        avatar?: AgentAvatarConfig
         color?: string
         claudeConfig?: ClaudeConfig
         cwd?: string

@@ -190,7 +190,7 @@ export function ActivityIcon({
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 ${config.bgColor} ${config.color} border ${config.borderColor} px-2.5 py-1 rounded-md ${textSize} font-medium shadow-sm shadow-black/20 transition-colors`}
+      className={`inline-flex items-center gap-1.5 ${config.bgColor} ${config.color} border ${config.borderColor} px-2.5 py-1 rounded-sm ${textSize} font-medium shadow-minimal transition-colors`}
       title={detail || config.label}
     >
       <Icon className={`${iconSize} shrink-0`} />

@@ -8,8 +8,8 @@ const api = {
   windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
 
   // PTY
-  ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number }) =>
-    ipcRenderer.invoke('pty:create', options),
+  ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number; provider?: 'claude' | 'gemini' | 'codex' }) =>
+    ipcRenderer.invoke('pty:create', options) as Promise<{ success: boolean; error?: string }>,
   ptyWrite: (id: string, data: string) => ipcRenderer.send('pty:write', id, data),
   ptyResize: (id: string, cols: number, rows: number) => ipcRenderer.send('pty:resize', id, cols, rows),
   ptyKill: (id: string) => ipcRenderer.send('pty:kill', id),
@@ -29,6 +29,7 @@ const api = {
   fsReadDir: (path: string) => ipcRenderer.invoke('fs:readDir', path),
   fsCreateFile: (filePath: string, content?: string) => ipcRenderer.invoke('fs:createFile', filePath, content),
   fsCreateDir: (dirPath: string) => ipcRenderer.invoke('fs:createDir', dirPath),
+  fsCopy: (sourcePath: string, destinationPath: string) => ipcRenderer.invoke('fs:copy', sourcePath, destinationPath),
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
   fsDelete: (targetPath: string) => ipcRenderer.invoke('fs:delete', targetPath),
   fsPreview: (filePath: string, maxLines?: number) => ipcRenderer.invoke('fs:preview', filePath, maxLines),
@@ -56,6 +57,12 @@ const api = {
   // Save clipboard image to temp file
   saveTempImage: (buffer: ArrayBuffer, mimeType: string) =>
     ipcRenderer.invoke('file:saveTempImage', buffer, mimeType) as Promise<string>,
+
+  // CLI model discovery
+  cliDiscoverModels: (provider: 'claude' | 'gemini' | 'codex', command?: string) =>
+    ipcRenderer.invoke('cli:discoverModels', provider, command) as Promise<{ success: boolean; output: string; error?: string }>,
+  cliGetVersion: (cli: string) =>
+    ipcRenderer.invoke('cli:getVersion', cli) as Promise<{ installed: boolean; version: string }>,
 
   // Updater
   updaterCheck: () => ipcRenderer.invoke('updater:check'),

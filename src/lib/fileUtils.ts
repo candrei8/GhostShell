@@ -79,14 +79,31 @@ const TEXT_EXTENSIONS = new Set([
   'makefile', 'cmake',
 ])
 
+const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx', 'markdown'])
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'])
+const JSON_EXTENSIONS = new Set(['json'])
+const YAML_EXTENSIONS = new Set(['yaml', 'yml'])
+
+function getExtension(filename: string): string | null {
+  const lower = filename.toLowerCase()
+  if (lower.startsWith('.')) {
+    const name = lower.slice(1)
+    if (TEXT_EXTENSIONS.has(name)) return name
+  }
+
+  const ext = lower.split('.').pop()
+  if (!ext || ext === lower) return null
+  return ext
+}
+
 export function getExtensionColor(filename: string): string | null {
-  const ext = filename.split('.').pop()?.toLowerCase()
+  const ext = getExtension(filename)
   if (!ext) return null
   return EXTENSION_COLORS[ext] || null
 }
 
 export function getExtensionLabel(filename: string): string | null {
-  const ext = filename.split('.').pop()?.toLowerCase()
+  const ext = getExtension(filename)
   if (!ext || ext === filename.toLowerCase()) return null
   return ext
 }
@@ -114,17 +131,41 @@ export function copyToClipboard(text: string): Promise<void> {
 
 export function isTextFile(filename: string): boolean {
   const lower = filename.toLowerCase()
-  // Handle dotfiles like .gitignore, .editorconfig
-  if (lower.startsWith('.')) {
-    const name = lower.slice(1)
-    if (TEXT_EXTENSIONS.has(name)) return true
-  }
-  // Handle known filenames without extensions
+  const ext = getExtension(filename)
   const knownTextFiles = ['makefile', 'dockerfile', 'rakefile', 'gemfile', 'procfile', 'license', 'readme']
   if (knownTextFiles.includes(lower)) return true
-  const ext = lower.split('.').pop()
-  if (!ext || ext === lower) return false
+  if (!ext) return false
   return TEXT_EXTENSIONS.has(ext)
+}
+
+export function isMarkdownFile(filename: string): boolean {
+  const ext = getExtension(filename)
+  return ext ? MARKDOWN_EXTENSIONS.has(ext) : false
+}
+
+export function isImageFile(filename: string): boolean {
+  const ext = getExtension(filename)
+  return ext ? IMAGE_EXTENSIONS.has(ext) : false
+}
+
+export function isJsonFile(filename: string): boolean {
+  const ext = getExtension(filename)
+  return ext ? JSON_EXTENSIONS.has(ext) : false
+}
+
+export function isYamlFile(filename: string): boolean {
+  const ext = getExtension(filename)
+  return ext ? YAML_EXTENSIONS.has(ext) : false
+}
+
+export function isStructuredDataFile(filename: string): boolean {
+  return isJsonFile(filename) || isYamlFile(filename)
+}
+
+export function toLocalFileUrl(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/')
+  const withDrivePrefix = /^[A-Za-z]:\//.test(normalized) ? `/${normalized}` : normalized
+  return encodeURI(`file://${withDrivePrefix}`)
 }
 
 export function getRelativeTime(timestamp: number): string {

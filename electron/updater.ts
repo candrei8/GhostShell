@@ -1,33 +1,59 @@
-import { autoUpdater } from 'electron-updater'
 import { app, BrowserWindow, ipcMain } from 'electron'
+import { autoUpdater } from 'electron-updater'
 
 let mainWindow: BrowserWindow | null = null
 let checkInterval: ReturnType<typeof setInterval> | null = null
+let initialCheckTimer: ReturnType<typeof setTimeout> | null = null
 let isDownloading = false
+let listenersRegistered = false
+let ipcRegistered = false
 
 function send(payload: Record<string, unknown>): void {
   mainWindow?.webContents.send('updater:status', payload)
 }
 
-function log(msg: string): void {
-  console.log(`[updater] ${msg}`)
+function log(message: string): void {
+  console.log(`[updater] ${message}`)
 }
 
-export function initUpdater(win: BrowserWindow): void {
-  mainWindow = win
+function scheduleAutoChecks(): void {
+  if (initialCheckTimer || checkInterval) return
 
-  // Skip auto-update in dev mode — no packaged app-update.yml
-  if (!app.isPackaged) {
-    log('Dev mode — skipping auto-update')
-    return
+  initialCheckTimer = setTimeout(() => {
+    initialCheckTimer = null
+    autoUpdater.checkForUpdates().catch((error) => {
+      log(`Auto-check failed: ${error?.message ?? error}`)
+    })
+  }, 10_000)
+
+  checkInterval = setInterval(() => {
+    autoUpdater.checkForUpdates().catch((error) => {
+      log(`Periodic check failed: ${error?.message ?? error}`)
+    })
+  }, 4 * 60 * 60 * 1000)
+}
+
+function clearAutoChecks(): void {
+  if (initialCheckTimer) {
+    clearTimeout(initialCheckTimer)
+    initialCheckTimer = null
   }
+
+  if (checkInterval) {
+    clearInterval(checkInterval)
+    checkInterval = null
+  }
+}
+
+function registerUpdaterListeners(): void {
+  if (listenersRegistered) return
+  listenersRegistered = true
 
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
 
-  // Events → renderer
   autoUpdater.on('checking-for-update', () => {
-    log('Checking for updates…')
+    log('Checking for updates...')
     send({ status: 'checking' })
   })
 
@@ -51,29 +77,32 @@ export function initUpdater(win: BrowserWindow): void {
     send({ status: 'downloaded', version: info.version })
   })
 
-  autoUpdater.on('error', (err) => {
-    const msg = err.message || String(err)
-    log(`Update error: ${msg}`)
+  autoUpdater.on('error', (error) => {
+    const message = error.message || String(error)
+    log(`Update error: ${message}`)
 
     if (isDownloading) {
-      // Download-phase error — the user explicitly started this, so show it
       isDownloading = false
-      send({ status: 'error', error: msg })
-    } else {
-      // Check-phase error (network, 404, rate-limit, DNS, etc.) — suppress silently
-      send({ status: 'not-available' })
+      send({ status: 'error', error: message })
+      return
     }
-  })
 
-  // IPC handlers
+    send({ status: 'not-available' })
+  })
+}
+
+function registerIpcHandlers(): void {
+  if (ipcRegistered) return
+  ipcRegistered = true
+
   ipcMain.handle('updater:check', async () => {
     try {
       const result = await autoUpdater.checkForUpdates()
       return { success: true, version: result?.updateInfo?.version }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      log(`Manual check failed: ${msg}`)
-      return { success: false, error: msg }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log(`Manual check failed: ${message}`)
+      return { success: false, error: message }
     }
   })
 
@@ -82,39 +111,38 @@ export function initUpdater(win: BrowserWindow): void {
       isDownloading = true
       await autoUpdater.downloadUpdate()
       return { success: true }
-    } catch (err) {
+    } catch (error) {
       isDownloading = false
-      const msg = err instanceof Error ? err.message : String(err)
-      log(`Download failed: ${msg}`)
-      return { success: false, error: msg }
+      const message = error instanceof Error ? error.message : String(error)
+      log(`Download failed: ${message}`)
+      return { success: false, error: message }
     }
   })
 
   ipcMain.handle('updater:install', () => {
     autoUpdater.quitAndInstall()
   })
+}
 
-  // Auto-check: 10 s after launch, then every 4 hours
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((err) => {
-      log(`Auto-check failed: ${err?.message ?? err}`)
-    })
-  }, 10_000)
+export function initUpdater(window: BrowserWindow): void {
+  mainWindow = window
 
-  checkInterval = setInterval(
-    () => {
-      autoUpdater.checkForUpdates().catch((err) => {
-        log(`Periodic check failed: ${err?.message ?? err}`)
-      })
-    },
-    4 * 60 * 60 * 1000
-  )
+  if (!app.isPackaged) {
+    log('Dev mode - skipping auto-update')
+    return
+  }
 
-  win.on('closed', () => {
-    if (checkInterval) {
-      clearInterval(checkInterval)
-      checkInterval = null
+  registerUpdaterListeners()
+  registerIpcHandlers()
+  scheduleAutoChecks()
+
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = null
     }
-    mainWindow = null
+
+    if (BrowserWindow.getAllWindows().length === 0) {
+      clearAutoChecks()
+    }
   })
 }

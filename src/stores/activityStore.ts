@@ -37,7 +37,7 @@ const MAX_OUTPUT_LINE_LENGTH = 500
 
 const defaultContextMetrics: ContextMetrics = {
   tokenEstimate: 0,
-  maxTokens: 200000,
+  maxTokens: 0,
   turnCount: 0,
   costEstimate: 0,
 }
@@ -291,7 +291,11 @@ export const useActivityStore = create<ActivityState>()((set, get) => ({
           ...state.activities,
           [agentId]: {
             ...existing,
-            contextMetrics: { ...existing.contextMetrics, ...metrics },
+            contextMetrics: {
+              ...existing.contextMetrics,
+              ...metrics,
+              lastUpdatedAt: Date.now(),
+            },
           },
         },
       }

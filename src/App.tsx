@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { AppLayout } from './components/layout/AppLayout'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { useSettingsStore } from './stores/settingsStore'
+import { useModelStore } from './stores/modelStore'
 import { buildSnapshot, saveTabSnapshot, clearTabSnapshot } from './lib/tabSnapshot'
 
 export default function App() {
@@ -14,7 +15,10 @@ export default function App() {
 
   // Save tab snapshot on app close
   useEffect(() => {
-    const cleanup = window.ghostshell.onBeforeClose(async () => {
+    const api = window.ghostshell
+    if (!api?.onBeforeClose) return
+
+    const cleanup = api.onBeforeClose(async () => {
       const restoreTabs = useSettingsStore.getState().restoreTabs
       if (restoreTabs) {
         const snapshot = buildSnapshot()
@@ -27,9 +31,26 @@ export default function App() {
       } else {
         await clearTabSnapshot()
       }
-      window.ghostshell.closeReady()
+      api.closeReady?.()
     })
     return cleanup
+  }, [])
+
+  // Start model auto-discovery (checks for new models every 30 min)
+  useEffect(() => {
+    try {
+      useModelStore.getState().startAutoRefresh()
+    } catch (error) {
+      console.error('[GhostShell] Failed to start model auto-refresh:', error)
+    }
+
+    return () => {
+      try {
+        useModelStore.getState().stopAutoRefresh()
+      } catch (error) {
+        console.error('[GhostShell] Failed to stop model auto-refresh:', error)
+      }
+    }
   }, [])
 
   // Prevent Electron's default file-navigation on drag-and-drop.
