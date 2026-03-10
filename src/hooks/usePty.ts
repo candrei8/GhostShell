@@ -11,6 +11,7 @@ import { useSettingsStore, type NotificationTimingMode } from '../stores/setting
 import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel, getKnownContextWindow } from '../lib/providers'
 import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
 import { enhanceTerminalOutput } from '../lib/terminalOutputEnhancer'
+import { SHORTCUT_EVENTS } from '../lib/shortcutEvents'
 import { Provider, SubAgentOutputLine } from '../lib/types'
 import { detectDomain } from '../lib/domain-detector'
 
@@ -181,6 +182,13 @@ function getAutoConfirmPatterns(provider: Provider): RegExp[] {
   if (provider === 'gemini') return GEMINI_AUTO_CONFIRM_PATTERNS
   if (provider === 'codex') return CODEX_AUTO_CONFIRM_PATTERNS
   return CLAUDE_AUTO_CONFIRM_PATTERNS
+}
+
+function getNativeMultilineSequence(provider: Provider): string {
+  // Claude Code documents "\" + Enter as the portable newline escape.
+  // Codex and Gemini expose Ctrl+J (LF) as the newline shortcut.
+  if (provider === 'claude') return '\\\r'
+  return '\n'
 }
 
 function getCommandCompletionPromptPatterns(provider: Provider): RegExp[] {
@@ -799,6 +807,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         })
         cleanups.push(removeDataListener)
 
+        let inputBuffer = ''
+
         // Clipboard: copy/paste support (Ctrl+C with selection, Ctrl+Shift+C/V, Ctrl+V, right-click paste)
         const writeToPty = (text: string) => {
           const { syncInputsMode, sessions } = useTerminalStore.getState()
@@ -810,12 +820,49 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             window.ghostshell.ptyWrite(sessionId, text)
           }
         }
+
+        const writeMultilineShortcutToSession = (targetSessionId: string): boolean => {
+          const targetSession = useTerminalStore.getState().getSession(targetSessionId)
+          const targetAgent = targetSession?.agentId
+            ? useAgentStore.getState().getAgent(targetSession.agentId)
+            : undefined
+          const targetProvider = targetAgent
+            ? resolveProvider(targetAgent)
+            : targetSession?.detectedProvider || null
+
+          if (!targetProvider) return false
+
+          try {
+            window.ghostshell.ptyWrite(targetSessionId, getNativeMultilineSequence(targetProvider))
+            if (targetSessionId === sessionId) {
+              inputBuffer += '\n'
+            }
+            return true
+          } catch {
+            return false
+          }
+        }
+
+        const writeMultilineShortcut = (): boolean => {
+          const { syncInputsMode, sessions } = useTerminalStore.getState()
+          if (syncInputsMode === 'all') {
+            let wroteAny = false
+            sessions.forEach((s) => {
+              wroteAny = writeMultilineShortcutToSession(s.id) || wroteAny
+            })
+            return wroteAny
+          }
+          return writeMultilineShortcutToSession(sessionId)
+        }
+
         terminal.attachCustomKeyEventHandler((e) => {
           if (e.type !== 'keydown') return true
 
-          // Shift+Enter: Open multi-line input overlay
+          // Shift+Enter: send the provider's native multiline shortcut when available.
           if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
-            window.dispatchEvent(new CustomEvent('ghostshell:shortcut-multiline-input'))
+            if (!writeMultilineShortcut()) {
+              window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.openMultiLineInput))
+            }
             return false
           }
 
@@ -998,7 +1045,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         }
 
         // Terminal -> PTY (with sync support + history tracking)
-        let inputBuffer = ''
         const onDataDisposable = terminal.onData((data) => {
           const { syncInputsMode, sessions } = useTerminalStore.getState()
 

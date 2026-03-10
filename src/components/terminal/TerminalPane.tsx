@@ -179,7 +179,7 @@ export function TerminalPane({
       )
   }, [handleToggleSearch, isActive])
 
-  // Shift+Enter: open multi-line input overlay
+  // Fallback multi-line overlay for terminals without native newline handling.
   useEffect(() => {
     if (!isActive) return
     const handleMultiLine = () => setMultiLineOpen(true)
