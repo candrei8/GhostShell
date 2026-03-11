@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { X, FolderOpen, Zap, Users, Minus, Plus } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { AgentAvatar } from './AgentAvatar'
@@ -10,8 +10,7 @@ import { useThreadStore } from '../../stores/threadStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { selectDirectorySafe } from '../../lib/ghostshell'
-import { getDefaultModel, getProviderColor, resolveModelsForProvider } from '../../lib/providers'
-import { useModelStore } from '../../stores/modelStore'
+import { getDefaultModel, getProviderColor } from '../../lib/providers'
 
 interface AgentCreatorProps {
   onClose: () => void
@@ -49,13 +48,6 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
     if (targetProvider === 'codex') return defaultCodexModel || getDefaultModel('codex')
     return defaultModel || getDefaultModel('claude')
   }
-  const [model, setModel] = useState(() => resolveConfiguredModel(safeDefaultProvider))
-  const discoveredModels = useModelStore((s) => s.discovered[provider])
-  const ensureFreshModels = useModelStore((s) => s.ensureFresh)
-  const models = useMemo(
-    () => resolveModelsForProvider(provider, discoveredModels, typeof model === 'string' ? model : ''),
-    [discoveredModels, model, provider],
-  )
   const [systemPrompt, setSystemPrompt] = useState('')
   const [skipPermissions, setSkipPermissions] = useState(false)
   const [yoloMode, setYoloMode] = useState(false)
@@ -67,22 +59,8 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
   const threads = useThreadStore((s) => s.threads)
   const setCurrentPath = useWorkspaceStore((s) => s.setCurrentPath)
 
-  useEffect(() => {
-    void ensureFreshModels(provider)
-  }, [ensureFreshModels, provider])
-
-  useEffect(() => {
-    if (models.some((entry) => entry.id === model)) return
-    const preferred = resolveConfiguredModel(provider)
-    const nextModel = models.find((entry) => entry.id === preferred)?.id || models[0]?.id || preferred
-    if (nextModel && nextModel !== model) {
-      setModel(nextModel)
-    }
-  }, [defaultCodexModel, defaultGeminiModel, defaultModel, model, models, provider])
-
   const handleProviderChange = (p: Provider) => {
     setProvider(p)
-    setModel(resolveConfiguredModel(p))
   }
 
   const selectProject = async () => {
@@ -107,14 +85,14 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
     if (projectPath) setLastAgentFolder(projectPath)
     const templateProvider = sanitizeProvider(template.provider || provider)
     if (templateProvider === 'gemini') {
-      const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
+      const geminiCfg: GeminiConfig = { model: resolveConfiguredModel(templateProvider), yolo: yoloMode, sandbox: sandboxMode }
       createAgent(
         template.name, template.avatar, template.avatar.color,
         {}, projectPath || undefined, template.id, selectedThread || undefined, true,
         'gemini', geminiCfg,
       )
     } else if (templateProvider === 'codex') {
-      const codexCfg: CodexConfig = { model, fullAuto: fullAutoMode, sandbox: codexSandbox }
+      const codexCfg: CodexConfig = { model: resolveConfiguredModel(templateProvider), fullAuto: fullAutoMode, sandbox: codexSandbox }
       createAgent(
         template.name, template.avatar, template.avatar.color,
         {}, projectPath || undefined, template.id, selectedThread || undefined, true,
@@ -122,7 +100,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
       )
     } else {
       const config: ClaudeConfig = {
-        model,
+        model: resolveConfiguredModel(templateProvider),
         dangerouslySkipPermissions: skipPermissions,
         systemPrompt: template.systemPrompt,
         allowedTools: extractAllowedTools(template.claudeFlags),
@@ -178,7 +156,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
             cwd: projectPath || undefined,
             templateId: template.id,
             provider: 'gemini' as Provider,
-            geminiConfig: { model, yolo: yoloMode, sandbox: sandboxMode } as GeminiConfig,
+            geminiConfig: { model: resolveConfiguredModel(templateProvider), yolo: yoloMode, sandbox: sandboxMode } as GeminiConfig,
           }
         }
         if (templateProvider === 'codex') {
@@ -190,7 +168,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
             cwd: projectPath || undefined,
             templateId: template.id,
             provider: 'codex' as Provider,
-            codexConfig: { model, fullAuto: fullAutoMode, sandbox: codexSandbox } as CodexConfig,
+            codexConfig: { model: resolveConfiguredModel(templateProvider), fullAuto: fullAutoMode, sandbox: codexSandbox } as CodexConfig,
           }
         }
         return {
@@ -198,7 +176,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           avatar: template.avatar,
           color: template.avatar.color,
           claudeConfig: {
-            model,
+            model: resolveConfiguredModel(templateProvider),
             dangerouslySkipPermissions: skipPermissions,
             systemPrompt: template.systemPrompt,
             allowedTools: extractAllowedTools(template.claudeFlags),
@@ -221,14 +199,14 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
     if (!name.trim()) return
     if (projectPath) setLastAgentFolder(projectPath)
     if (provider === 'gemini') {
-      const geminiCfg: GeminiConfig = { model, yolo: yoloMode, sandbox: sandboxMode }
+      const geminiCfg: GeminiConfig = { model: resolveConfiguredModel(provider), yolo: yoloMode, sandbox: sandboxMode }
       createAgent(
         name.trim(), selectedAvatar, selectedAvatar.color,
         {}, projectPath || undefined, undefined, selectedThread || undefined, true,
         'gemini', geminiCfg,
       )
     } else if (provider === 'codex') {
-      const codexCfg: CodexConfig = { model, fullAuto: fullAutoMode, sandbox: codexSandbox }
+      const codexCfg: CodexConfig = { model: resolveConfiguredModel(provider), fullAuto: fullAutoMode, sandbox: codexSandbox }
       createAgent(
         name.trim(), selectedAvatar, selectedAvatar.color,
         {}, projectPath || undefined, undefined, selectedThread || undefined, true,
@@ -236,7 +214,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
       )
     } else {
       const config: ClaudeConfig = {
-        model,
+        model: resolveConfiguredModel(provider),
         dangerouslySkipPermissions: skipPermissions,
         systemPrompt: systemPrompt.trim() || undefined,
       }
@@ -341,15 +319,6 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
               <FolderOpen className="w-3.5 h-3.5 text-ghost-text-dim shrink-0" />
               <span className="text-xs text-ghost-text truncate">{projectPath || 'Select project...'}</span>
             </button>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="h-11 px-2 bg-ghost-bg border border-ghost-border rounded-sm text-xs text-ghost-text focus:outline-none focus:border-ghost-accent"
-            >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
           </div>
 
           {/* Provider-specific options */}

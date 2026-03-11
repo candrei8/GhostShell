@@ -23,8 +23,7 @@ import { AgentAvatar } from '../agents/AgentAvatar'
 import { useAgent } from '../../hooks/useAgent'
 import { agentTemplates, type AgentTemplate, templateCategories, type TemplateCategory } from '../../lib/agent-templates'
 import { getGhostshellApi, selectDirectorySafe } from '../../lib/ghostshell'
-import { getDefaultModel, getProviderColor, getProviderLabel, resolveModelsForProvider } from '../../lib/providers'
-import { useModelStore } from '../../stores/modelStore'
+import { getDefaultModel, getProviderColor, getProviderLabel } from '../../lib/providers'
 import {
   type AgentAvatarConfig,
   type ClaudeConfig,
@@ -193,7 +192,6 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const [gridLayout, setGridLayout] = useState<GridLayout>('1x1')
   const [skipPermissions, setSkipPermissions] = useState(Boolean(defaultSkipPermissions))
   const [codexSandbox, setCodexSandbox] = useState<CodexConfig['sandbox']>('workspace-write')
-  const [model, setModel] = useState(() => resolveConfiguredModel(safeDefaultProvider))
   const [agentName, setAgentName] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [search, setSearch] = useState('')
@@ -204,13 +202,6 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const [projectPickerError, setProjectPickerError] = useState<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
 
-  const discoveredModels = useModelStore((s) => s.discovered[provider])
-  const ensureFreshModels = useModelStore((s) => s.ensureFresh)
-  const models = useMemo(
-    () => resolveModelsForProvider(provider, discoveredModels, typeof model === 'string' ? model : ''),
-    [discoveredModels, model, provider],
-  )
-  const selectedModel = useMemo(() => models.find((m) => m.id === model) || models[0], [models, model])
   const selectedLayout = useMemo(
     () => gridOptions.find((g) => g.layout === gridLayout) || gridOptions[0],
     [gridLayout],
@@ -280,22 +271,8 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
     return () => clearTimeout(timer)
   }, [])
 
-  useEffect(() => {
-    void ensureFreshModels(provider)
-  }, [ensureFreshModels, provider])
-
-  useEffect(() => {
-    if (models.some((entry) => entry.id === model)) return
-    const preferred = resolveConfiguredModel(provider)
-    const nextModel = models.find((entry) => entry.id === preferred)?.id || models[0]?.id || preferred
-    if (nextModel && nextModel !== model) {
-      setModel(nextModel)
-    }
-  }, [defaultCodexModel, defaultGeminiModel, defaultModel, model, models, provider])
-
   const handleProviderSwitch = (nextProvider: Provider) => {
     setProvider(nextProvider)
-    setModel(resolveConfiguredModel(nextProvider))
   }
 
   const selectProject = async () => {
@@ -444,7 +421,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         const name = launchCount === 1 ? baseName : `${baseName} ${i + 1}`
         sessionIds.push(
           spawnByProvider(provider, name, cwd, {
-            modelId: model,
+            modelId: resolveConfiguredModel(provider),
             skip: skipPermissions,
             claudePrompt: provider === 'claude' ? systemPrompt : undefined,
           }),
@@ -458,7 +435,6 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   const handleTemplateLaunch = (template: AgentTemplate) => {
     executeLaunch(() => {
       const templateProvider = template.provider || provider
-      const templateModel = templateProvider === provider ? model : getDefaultModel(templateProvider)
       const cwd = projectPath || currentPath || undefined
       if (cwd) setLastAgentFolder(cwd)
       const sessionIds: string[] = []
@@ -467,7 +443,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
         const name = launchCount === 1 ? template.name : `${template.name} ${i + 1}`
         sessionIds.push(
           spawnByProvider(templateProvider, name, cwd, {
-            modelId: templateModel,
+            modelId: resolveConfiguredModel(templateProvider),
             skip: skipPermissions,
             avatar: template.avatar,
             templateId: template.id,
@@ -489,7 +465,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
       name,
       avatar,
       provider,
-      model,
+      model: resolveConfiguredModel(provider),
       systemPrompt: provider === 'claude' ? (systemPrompt.trim() || undefined) : undefined,
       skipPermissions,
       cwd: projectPath || currentPath || undefined,
@@ -587,11 +563,6 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
                 <span className="text-[11px] font-medium text-white/40">Workspace</span>
                 <div className="h-3 w-px bg-white/[0.08]" />
                 <span className="max-w-[200px] truncate text-[12px] font-medium text-white/80">{selectedProjectName}</span>
-              </div>
-              <div className="flex items-center gap-2.5 rounded-[12px] border border-white/[0.04] bg-black/20 px-3.5 py-2 shadow-sm backdrop-blur-md">
-                <span className="text-[11px] font-medium text-white/40">Model</span>
-                <div className="h-3 w-px bg-white/[0.08]" />
-                <span className="text-[12px] font-medium text-white/80">{selectedModel?.name || model}</span>
               </div>
               <div className="flex items-center gap-2.5 rounded-[12px] border border-white/[0.04] bg-black/20 px-3.5 py-2 shadow-sm backdrop-blur-md">
                 <span className="text-[11px] font-medium text-white/40">Layout</span>
@@ -752,38 +723,10 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
               <div className="rounded-[20px] border border-white/[0.04] bg-black/20 p-4 shadow-sm backdrop-blur-md">
                 <div className="mb-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/34">Configuration</p>
-                  <p className="mt-2 text-[18px] font-semibold tracking-tight text-white/92">Identity, model, and layout</p>
+                  <p className="mt-2 text-[18px] font-semibold tracking-tight text-white/92">Identity and layout</p>
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex flex-col overflow-hidden rounded-[16px] border border-white/[0.04] bg-black/40 shadow-inner">
-                    {models.map((m, i) => {
-                      const active = model === m.id
-                      return (
-                        <button
-                          key={m.id}
-                          onClick={() => setModel(m.id)}
-                          className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-all ${
-                            i !== 0 ? 'border-t border-white/[0.04]' : ''
-                          } ${
-                            active
-                              ? 'bg-white/[0.08] text-white'
-                              : 'bg-transparent text-white/60 hover:bg-white/[0.04] hover:text-white/90'
-                          }`}
-                        >
-                          <div
-                            className={`h-2 w-2 shrink-0 rounded-full transition-shadow ${active ? 'shadow-[0_0_10px_currentColor]' : 'opacity-40'}`}
-                            style={{ backgroundColor: m.color }}
-                          />
-                          <div className="min-w-0 flex-1 flex items-center justify-between">
-                            <p className="truncate text-[13px] font-medium">{m.name}</p>
-                            <p className="truncate text-[11px] opacity-60">{m.badge || m.id}</p>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-
                   <div className="space-y-3">
                     <input
                       ref={nameInputRef}
