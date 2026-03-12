@@ -1,5 +1,6 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
+import { type MouseEvent, useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { X, Terminal as TerminalIcon } from 'lucide-react'
+import { shallow } from 'zustand/shallow'
 import { useTerminal } from '../../hooks/useTerminal'
 import { usePty } from '../../hooks/usePty'
 import { useTerminalStore } from '../../stores/terminalStore'
@@ -7,21 +8,18 @@ import { TerminalSearch } from './TerminalSearch'
 import { MultiLineInput } from './MultiLineInput'
 import { useAgentStore } from '../../stores/agentStore'
 import { useActivityStore } from '../../stores/activityStore'
-import { useCompanionStore } from '../../stores/companionStore'
-import { useCommandBlockStore } from '../../stores/commandBlockStore'
 import { ActivityIcon } from '../agents/ActivityIcon'
 import { TerminalSession } from '../../lib/types'
 import { resolveProvider, getProviderColor } from '../../lib/providers'
 import { ContextGauge } from '../agents/ContextGauge'
 import { TerminalContextPanel } from './TerminalContextPanel'
-import { hasContextMetrics } from '../../lib/contextMetrics'
 import { SHORTCUT_EVENTS } from '../../lib/shortcutEvents'
 
 interface TerminalPaneProps {
   session: TerminalSession
   isActive?: boolean
   onClose?: () => void
-  onClick?: () => void
+  onActivate?: () => void
   showPaneLabel?: boolean
   searchOpen?: boolean
   onSearchClose?: () => void
@@ -32,7 +30,7 @@ export function TerminalPane({
   session,
   isActive,
   onClose,
-  onClick,
+  onActivate,
   showPaneLabel = true,
   searchOpen: externalSearchOpen,
   onSearchClose,
@@ -40,18 +38,29 @@ export function TerminalPane({
 }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const agent = useAgentStore((s) =>
-    session.agentId ? s.agents.find((a) => a.id === session.agentId) : undefined,
-  )
+  const agent = useAgentStore((s) => {
+    if (!session.agentId) return null
+    const resolved = s.agents.find((a) => a.id === session.agentId)
+    if (!resolved) return null
+    return {
+      id: resolved.id,
+      status: resolved.status,
+      provider: resolveProvider(resolved),
+    }
+  }, shallow)
   const activityId = session.agentId || session.id
-  const activity = useActivityStore((s) => s.activities[activityId])
-  const companionSession = useCompanionStore((s) => s.sessions[session.id])
-  const blocksForSession = useCommandBlockStore((s) => s.blocksBySession[session.id])
-  const companionEntries = companionSession?.entries ?? []
-  const commandBlocks = blocksForSession ?? []
+  const activitySummary = useActivityStore((s) => {
+    const activity = s.activities[activityId]
+    return {
+      currentActivity: activity?.currentActivity || null,
+      currentDetail: activity?.currentDetail || null,
+      lastActivityTime: activity?.lastActivityTime || null,
+      contextMetrics: activity?.contextMetrics,
+    }
+  }, shallow)
 
   const sessionProvider = session.detectedProvider
-  const provider = agent ? resolveProvider(agent) : sessionProvider
+  const provider = agent?.provider || sessionProvider
   const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerRef, isActive, provider)
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const [labelHovered, setLabelHovered] = useState(false)
@@ -60,17 +69,9 @@ export function TerminalPane({
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
   const providerColor = provider ? getProviderColor(provider) : '#e4e4e7'
-  const activityName = activity?.currentActivity || null
-  const activityDetail = activity?.currentDetail || null
-  const activityStartedAt = activity?.lastActivityTime || null
-  const hasContextData = useMemo(
-    () =>
-      !!provider ||
-      hasContextMetrics(activity?.contextMetrics) ||
-      companionEntries.length > 0 ||
-      commandBlocks.length > 0,
-    [provider, activity?.contextMetrics, companionEntries.length, commandBlocks.length],
-  )
+  const activityName = activitySummary.currentActivity
+  const activityDetail = activitySummary.currentDetail
+  const activityStartedAt = activitySummary.lastActivityTime
 
   // Title and Description editing state
   const updateSession = useTerminalStore((s) => s.updateSession)
@@ -210,6 +211,14 @@ export function TerminalPane({
     [session.id, terminal],
   )
 
+  const handleActivate = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (!onActivate || isActive) return
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest('[data-terminal-control]')) return
+    onActivate()
+  }, [isActive, onActivate])
+
   const paneStyle = useMemo(() => {
     const tint = agent ? providerColor : 'rgba(255,255,255,0.15)'
     return {
@@ -226,7 +235,7 @@ export function TerminalPane({
       data-terminal-pane
       className="relative m-1 flex h-full flex-col overflow-hidden rounded-xl border transition duration-200"
       style={paneStyle}
-      onClick={onClick}
+      onMouseDown={handleActivate}
       onMouseEnter={() => setLabelHovered(true)}
       onMouseLeave={() => setLabelHovered(false)}
     >
@@ -269,6 +278,7 @@ export function TerminalPane({
               {/* Title */}
               {isEditingTitle ? (
                 <input
+                  data-terminal-control
                   ref={titleInputRef}
                   value={titleInput}
                   onChange={(e) => setTitleInput(e.target.value)}
@@ -338,6 +348,7 @@ export function TerminalPane({
 
               {isEditingDesc && (
                 <input
+                  data-terminal-control
                   ref={descInputRef}
                   value={descInput}
                   onChange={(e) => setDescInput(e.target.value)}
@@ -359,10 +370,10 @@ export function TerminalPane({
 
           {/* Right: Context gauge + close */}
           <div className="flex items-center gap-2 shrink-0 pl-2">
-            {provider && hasContextData && (
+            {provider && (
               <ContextGauge
                 provider={provider}
-                metrics={activity?.contextMetrics}
+                metrics={activitySummary.contextMetrics}
                 active={contextOpen}
                 onClick={() => setContextOpen((prev) => !prev)}
               />
@@ -370,6 +381,8 @@ export function TerminalPane({
 
             {onClose && (
               <button
+                type="button"
+                data-terminal-control
                 onClick={(e) => {
                   e.stopPropagation()
                   onClose()
@@ -419,9 +432,6 @@ export function TerminalPane({
             <TerminalContextPanel
               session={session}
               provider={provider}
-              activity={activity}
-              entries={companionEntries}
-              blocks={commandBlocks}
               onClose={() => setContextOpen(false)}
             />
           </div>

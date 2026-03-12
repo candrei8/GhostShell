@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { useSettingsStore } from '../stores/settingsStore'
 import { Provider, TerminalTheme } from '../lib/types'
 import { CliVisualProfile, getCliAppearancePreset, type SearchDecorations } from '../lib/terminalPresets'
+
+interface ViewportState {
+  initialized: boolean
+  viewportY: number
+  stickToBottom: boolean
+}
 
 function resolveAppearanceSafe(
   theme: TerminalTheme,
@@ -30,77 +36,141 @@ export function useTerminal(
 ) {
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  const termRef = useRef<Terminal | null>(null)
-  const webglAddonRef = useRef<WebglAddon | null>(null)
-  const webglAvailableRef = useRef(true)
   const searchAddonRef = useRef<SearchAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const mountedRef = useRef(false)
+  const webglAvailableRef = useRef(true)
+  const fitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fitRafRef = useRef<number | null>(null)
+  const activationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activationRafRef = useRef<number | null>(null)
+  const wasActiveRef = useRef(false)
+  const lastAppliedProviderRef = useRef<Provider | undefined>(provider)
   const searchDecorationsRef = useRef<SearchDecorations>({
     matchOverviewRuler: '#94a3b880',
     activeMatchColorOverviewRuler: '#e2e8f0',
     matchBackground: '#94a3b830',
     activeMatchBackground: '#94a3b860',
   })
-  const mounted = useRef(false)
-  const fitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const rafRef = useRef<number | null>(null)
+  const viewportStateRef = useRef<ViewportState>({
+    initialized: false,
+    viewportY: 0,
+    stickToBottom: true,
+  })
 
-  // Check if the terminal element is actually visible in the DOM
-  // visibility:hidden preserves layout dimensions but rendering is pointless
   const isElementVisible = useCallback((el: HTMLElement): boolean => {
     try {
-      return window.getComputedStyle(el).visibility !== 'hidden'
+      const style = window.getComputedStyle(el)
+      return style.visibility !== 'hidden' && style.display !== 'none'
     } catch {
-      return true // assume visible if check fails
+      return true
     }
   }, [])
 
-  // Scroll-safe fit: preserves scroll position so resize/animations don't yank the viewport
-  const safeFit = useCallback((force = false) => {
-    const addon = fitAddonRef.current
-    const term = termRef.current
-    if (!addon || !term) return
-
-    const el = term.element
-    if (!el) return
-
-    // Skip fit if container is too small (mid-collapse animation)
-    if (el.clientWidth < 10 || el.clientHeight < 10) return
-
-    // Skip fit if terminal is hidden (inactive tab) — unless forced (e.g., initial mount)
-    if (!force && !isElementVisible(el)) return
-
+  const syncViewportState = useCallback((term: Terminal) => {
     const buf = term.buffer.active
-    const wasAtBottom = buf.viewportY >= buf.baseY - 1
-    const savedViewportY = buf.viewportY
-
-    try { addon.fit() } catch {}
-
-    if (wasAtBottom) {
-      term.scrollToBottom()
-    } else if (buf.viewportY !== savedViewportY) {
-      // Restore scroll if user was reading history (not following output)
-      const maxScroll = term.buffer.active.baseY
-      term.scrollToLine(Math.min(savedViewportY, maxScroll))
+    viewportStateRef.current = {
+      initialized: true,
+      viewportY: buf.viewportY,
+      stickToBottom: buf.viewportY >= buf.baseY - 1,
     }
-  }, [isElementVisible])
+  }, [])
 
-  const fit = useCallback(() => {
-    safeFit()
-  }, [safeFit])
+  const restoreViewportState = useCallback((term: Terminal) => {
+    const saved = viewportStateRef.current
+    if (!saved.initialized) {
+      syncViewportState(term)
+      return
+    }
 
-  // Debounced fit: collapses rapid resize events (e.g. sidebar animation) into a single fit
+    if (saved.stickToBottom) {
+      term.scrollToBottom()
+    } else {
+      const maxScroll = term.buffer.active.baseY
+      term.scrollToLine(Math.min(saved.viewportY, maxScroll))
+    }
+
+    syncViewportState(term)
+  }, [syncViewportState])
+
+  const applyAppearance = useCallback((
+    term: Terminal,
+    appearance: ReturnType<typeof resolveAppearanceSafe>,
+    preserveGeometry = false,
+  ) => {
+    searchDecorationsRef.current = appearance.searchDecorations
+    term.options.theme = appearance.theme
+    term.options.cursorBlink = appearance.cursorBlink
+    term.options.cursorStyle = appearance.cursorStyle
+
+    if (!preserveGeometry) {
+      term.options.letterSpacing = appearance.letterSpacing
+      term.options.lineHeight = appearance.lineHeight
+    }
+  }, [])
+
+  const focusTerminalIfAppropriate = useCallback((term: Terminal) => {
+    const active = document.activeElement as HTMLElement | null
+    if (!active || active === document.body || active.closest('[data-terminal-pane]')) {
+      try { term.focus() } catch {}
+    }
+  }, [])
+
+  const safeFit = useCallback((force = false) => {
+    const term = termRef.current
+    const fitAddon = fitAddonRef.current
+    const container = containerRef.current
+    if (!term || !fitAddon || !container) return false
+
+    const visibleTarget = term.element || container
+    if (container.clientWidth < 10 || container.clientHeight < 10) return false
+    if (!force && !isElementVisible(visibleTarget)) return false
+
+    try {
+      fitAddon.fit()
+    } catch {
+      return false
+    }
+
+    restoreViewportState(term)
+    return true
+  }, [containerRef, isElementVisible, restoreViewportState])
+
   const debouncedFit = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    if (fitTimeoutRef.current) clearTimeout(fitTimeoutRef.current)
-    // Single fit after layout settles — 300ms covers sidebar animation (250ms) + flex reflow
-    fitTimeoutRef.current = setTimeout(() => {
-      rafRef.current = requestAnimationFrame(() => {
+    if (fitRafRef.current) cancelAnimationFrame(fitRafRef.current)
+    if (fitTimerRef.current) clearTimeout(fitTimerRef.current)
+
+    fitTimerRef.current = setTimeout(() => {
+      fitRafRef.current = requestAnimationFrame(() => {
+        fitRafRef.current = null
         safeFit()
-        rafRef.current = null
       })
-      fitTimeoutRef.current = null
-    }, 300)
+      fitTimerRef.current = null
+    }, 120)
   }, [safeFit])
+
+  const attachWebgl = useCallback((term: Terminal) => {
+    if (webglAddonRef.current || !webglAvailableRef.current) return
+
+    try {
+      const addon = new WebglAddon()
+      addon.onContextLoss(() => {
+        console.warn('[useTerminal] WebGL context lost, falling back to the default renderer')
+        if (webglAddonRef.current === addon) {
+          webglAddonRef.current = null
+        }
+        webglAvailableRef.current = false
+        try { addon.dispose() } catch {}
+        try { term.refresh(0, term.rows - 1) } catch {}
+      })
+      term.loadAddon(addon)
+      webglAddonRef.current = addon
+    } catch {
+      webglAvailableRef.current = false
+      console.warn('[useTerminal] WebGL addon failed to load, using the default renderer')
+    }
+  }, [])
 
   const detachWebgl = useCallback(() => {
     if (!webglAddonRef.current) return
@@ -108,34 +178,11 @@ export function useTerminal(
     webglAddonRef.current = null
   }, [])
 
-  const attachWebgl = useCallback((term: Terminal) => {
-    if (webglAddonRef.current || !webglAvailableRef.current) return
-
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        console.warn('WebGL context lost, falling back to the default renderer')
-        if (webglAddonRef.current === webglAddon) {
-          webglAddonRef.current = null
-        }
-        webglAvailableRef.current = false
-        try { webglAddon.dispose() } catch {}
-        try { term.refresh(0, term.rows - 1) } catch {}
-      })
-      term.loadAddon(webglAddon)
-      webglAddonRef.current = webglAddon
-    } catch {
-      webglAvailableRef.current = false
-      console.warn('WebGL addon failed to load, using the default renderer')
-    }
-  }, [])
-
-  // Create terminal instance
   useEffect(() => {
     const container = containerRef.current
-    if (!container || mounted.current) return
+    if (!container || mountedRef.current) return
 
-    mounted.current = true
+    mountedRef.current = true
 
     const settings = useSettingsStore.getState()
     const theme = settings.getTheme()
@@ -146,7 +193,6 @@ export function useTerminal(
       settings.cursorStyle,
       settings.cursorBlink,
     )
-    searchDecorationsRef.current = appearance.searchDecorations
 
     const term = new Terminal({
       fontSize: settings.terminalFontSize,
@@ -167,136 +213,123 @@ export function useTerminal(
       scrollOnUserInput: true,
     })
 
+    applyAppearance(term, appearance)
+
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
 
     term.open(container)
 
-    // Load Search addon
     const searchAddon = new SearchAddon()
     term.loadAddon(searchAddon)
     searchAddonRef.current = searchAddon
 
-    // Load Web Links addon (Ctrl+Click opens URLs in browser)
     const webLinksAddon = new WebLinksAddon((event, uri) => {
       if (event.ctrlKey || event.metaKey) {
         window.open(uri, '_blank', 'noopener,noreferrer')
       }
     })
     term.loadAddon(webLinksAddon)
+    attachWebgl(term)
 
-    // Delay fit to ensure container has dimensions (force=true to allow initial hidden mount)
-    requestAnimationFrame(() => {
-      try { fitAddon.fit() } catch {}
-      setTimeout(() => {
-        if (mounted.current) {
-          try { fitAddon.fit() } catch {}
-        }
-      }, 30)
+    const scrollDisposable = term.onScroll(() => {
+      syncViewportState(term)
     })
 
-    // ResizeObserver with debounced fit
     const resizeObserver = new ResizeObserver(() => {
       debouncedFit()
     })
     resizeObserver.observe(container)
 
-    // Listen for global refit event (fired when layout changes)
     const handleGlobalRefit = () => debouncedFit()
     window.addEventListener('ghostshell:refit', handleGlobalRefit)
 
     termRef.current = term
+    syncViewportState(term)
     setTerminal(term)
 
+    requestAnimationFrame(() => {
+      safeFit(true)
+      activationTimerRef.current = setTimeout(() => {
+        activationTimerRef.current = null
+        if (!mountedRef.current || termRef.current !== term) return
+        safeFit(true)
+        try { term.refresh(0, term.rows - 1) } catch {}
+        if (isActive) {
+          focusTerminalIfAppropriate(term)
+        }
+      }, 60)
+    })
+
     return () => {
-      mounted.current = false
-      if (fitTimeoutRef.current) clearTimeout(fitTimeoutRef.current)
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      mountedRef.current = false
+      if (fitTimerRef.current) clearTimeout(fitTimerRef.current)
+      if (fitRafRef.current) cancelAnimationFrame(fitRafRef.current)
+      if (activationTimerRef.current) clearTimeout(activationTimerRef.current)
+      if (activationRafRef.current) cancelAnimationFrame(activationRafRef.current)
       resizeObserver.disconnect()
+      scrollDisposable.dispose()
       window.removeEventListener('ghostshell:refit', handleGlobalRefit)
       detachWebgl()
-      termRef.current = null  // null ref BEFORE dispose so concurrent subscribers bail out
+      termRef.current = null
+      fitAddonRef.current = null
+      searchAddonRef.current = null
       term.dispose()
       setTerminal(null)
-      fitAddonRef.current = null
     }
-  }, [containerRef, debouncedFit, detachWebgl])
+  }, [
+    applyAppearance,
+    attachWebgl,
+    containerRef,
+    debouncedFit,
+    detachWebgl,
+    focusTerminalIfAppropriate,
+    isActive,
+    provider,
+    safeFit,
+    syncViewportState,
+  ])
 
   useEffect(() => {
-    const term = termRef.current
-    if (!term) return
+    const becameActive = !!isActive && !wasActiveRef.current
+    wasActiveRef.current = !!isActive
+    if (!becameActive || !terminal) return
 
-    if (isActive === false) {
-      detachWebgl()
-      return
-    }
+    if (activationTimerRef.current) clearTimeout(activationTimerRef.current)
+    if (activationRafRef.current) cancelAnimationFrame(activationRafRef.current)
 
-    let cancelled = false
-    const timer = setTimeout(() => {
-      if (cancelled || termRef.current !== term) return
-      attachWebgl(term)
-    }, 50)
-
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [attachWebgl, detachWebgl, isActive, terminal])
-
-  // Refit + focus + refresh when tab becomes active
-  // visibility:hidden → visible doesn't trigger ResizeObserver, so we force refit here.
-  // Three stagger timings cover: immediate paint (rAF), CSS transition mid (200ms), final settle (400ms).
-  // Also refreshes terminal content to fix WebGL blank-canvas after being hidden.
-  useEffect(() => {
-    if (!isActive || !terminal) return
-
-    const timers: ReturnType<typeof setTimeout>[] = []
-    const rafs: number[] = []
-
-    // Immediate fit via rAF
-    rafs.push(requestAnimationFrame(() => {
-      safeFit(true)
-    }))
-
-    // 200ms — covers most CSS transitions mid-point
-    timers.push(setTimeout(() => {
-      rafs.push(requestAnimationFrame(() => {
+    const runActivationPass = (focusTerminal: boolean) => {
+      activationRafRef.current = requestAnimationFrame(() => {
+        activationRafRef.current = null
         safeFit(true)
-      }))
-    }, 200))
-
-    // 400ms — final settle: refit + force full content re-render + focus
-    timers.push(setTimeout(() => {
-      rafs.push(requestAnimationFrame(() => {
-        safeFit(true)
-        // Force re-render all lines (fixes WebGL blank canvas after visibility change)
         try { terminal.refresh(0, terminal.rows - 1) } catch {}
-        // Focus terminal so keyboard input works immediately after tab switch
-        // Only steal focus if no input element is focused (respect search bar, rename input, etc.)
-        const active = document.activeElement
-        if (!active || active === document.body || active.closest('[data-terminal-pane]')) {
-          try { terminal.focus() } catch {}
+        if (focusTerminal) {
+          focusTerminalIfAppropriate(terminal)
         }
-      }))
-    }, 400))
+      })
+    }
+
+    runActivationPass(true)
+    activationTimerRef.current = setTimeout(() => {
+      activationTimerRef.current = null
+      runActivationPass(false)
+    }, 120)
 
     return () => {
-      rafs.forEach((r) => cancelAnimationFrame(r))
-      timers.forEach((t) => clearTimeout(t))
+      if (activationTimerRef.current) clearTimeout(activationTimerRef.current)
+      if (activationRafRef.current) cancelAnimationFrame(activationRafRef.current)
     }
-  }, [isActive, terminal, safeFit])
+  }, [focusTerminalIfAppropriate, isActive, safeFit, terminal])
 
-  // Live-sync settings changes to the terminal
   useEffect(() => {
     if (!terminal) return
 
-    const unsub = useSettingsStore.subscribe((state, prevState) => {
-      // Use ref (not closure) so guard and write are atomic — avoids race with dispose
+    const unsubscribe = useSettingsStore.subscribe((state, prevState) => {
       const term = termRef.current
       if (!term) return
 
-      const applyAppearance = () => {
+      const applyThemeAppearance = () => {
         const resolvedTheme = state.getTheme()
         const appearance = resolveAppearanceSafe(
           resolvedTheme.terminalColors,
@@ -305,12 +338,7 @@ export function useTerminal(
           state.cursorStyle,
           state.cursorBlink,
         )
-        searchDecorationsRef.current = appearance.searchDecorations
-        term.options.theme = appearance.theme
-        term.options.cursorBlink = appearance.cursorBlink
-        term.options.cursorStyle = appearance.cursorStyle
-        term.options.letterSpacing = appearance.letterSpacing
-        term.options.lineHeight = appearance.lineHeight
+        applyAppearance(term, appearance)
         debouncedFit()
         try { term.refresh(0, term.rows - 1) } catch {}
       }
@@ -330,14 +358,13 @@ export function useTerminal(
           state.cliVisualProfile !== prevState.cliVisualProfile ||
           state.themeId !== prevState.themeId
         ) {
-          applyAppearance()
+          applyThemeAppearance()
         }
       } catch (err) {
         console.warn('[useTerminal] settings sync error:', err)
       }
     })
 
-    // Ensure profile is reapplied when provider changes without requiring a settings mutation.
     const initialState = useSettingsStore.getState()
     const initialAppearance = resolveAppearanceSafe(
       initialState.getTheme().terminalColors,
@@ -346,17 +373,16 @@ export function useTerminal(
       initialState.cursorStyle,
       initialState.cursorBlink,
     )
-    searchDecorationsRef.current = initialAppearance.searchDecorations
-    terminal.options.theme = initialAppearance.theme
-    terminal.options.cursorBlink = initialAppearance.cursorBlink
-    terminal.options.cursorStyle = initialAppearance.cursorStyle
-    terminal.options.letterSpacing = initialAppearance.letterSpacing
-    terminal.options.lineHeight = initialAppearance.lineHeight
-    debouncedFit()
+    const providerChanged = lastAppliedProviderRef.current !== provider
+    lastAppliedProviderRef.current = provider
+    applyAppearance(terminal, initialAppearance, providerChanged)
+    if (!providerChanged) {
+      debouncedFit()
+    }
     try { terminal.refresh(0, terminal.rows - 1) } catch {}
 
-    return unsub
-  }, [terminal, debouncedFit, provider])
+    return unsubscribe
+  }, [applyAppearance, debouncedFit, provider, terminal])
 
   const searchNext = useCallback((query: string) => {
     const decorations = searchDecorationsRef.current
@@ -379,6 +405,10 @@ export function useTerminal(
   const clearSearch = useCallback(() => {
     searchAddonRef.current?.clearDecorations()
   }, [])
+
+  const fit = useCallback(() => {
+    safeFit()
+  }, [safeFit])
 
   return { terminal, fit, searchNext, searchPrev, clearSearch }
 }

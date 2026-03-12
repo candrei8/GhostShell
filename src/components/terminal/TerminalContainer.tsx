@@ -81,7 +81,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
     if (workspaceSessions.length === 0) return null
 
     const wrapperClassName = viewMode === 'tabs'
-      ? (isVisible ? 'absolute inset-0' : 'absolute inset-0 hidden')
+      ? (isVisible ? 'absolute inset-0' : 'absolute inset-0 invisible pointer-events-none')
       : 'absolute inset-0'
 
     if (workspaceSessions.length === 1 && viewMode === 'tabs') {
@@ -93,7 +93,11 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
               session={session}
               isActive={isVisible}
               onClose={() => removeSession(session.id)}
-              onClick={() => setActiveSession(session.id)}
+              onActivate={() => {
+                if (session.id !== activeSessionId) {
+                  setActiveSession(session.id)
+                }
+              }}
               showPaneLabel={true}
             />
           </div>
@@ -110,17 +114,16 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             <div
               key={session.id}
               className="w-full h-full relative p-1"
-              onMouseDownCapture={() => {
-                if (session.id !== activeSessionId) {
-                  setActiveSession(session.id)
-                }
-              }}
             >
               <TerminalPane
                 session={session}
                 isActive={isVisible && session.id === activeSessionId}
                 onClose={() => removeSession(session.id)}
-                onClick={() => setActiveSession(session.id)}
+                onActivate={() => {
+                  if (session.id !== activeSessionId) {
+                    setActiveSession(session.id)
+                  }
+                }}
                 showPaneLabel={true}
               />
             </div>

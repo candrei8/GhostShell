@@ -61,6 +61,8 @@ export function ContextGauge({ provider, metrics, active = false, onClick }: Con
 
   return (
     <button
+      type="button"
+      data-terminal-control
       onClick={(e) => {
         e.stopPropagation()
         onClick()

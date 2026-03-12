@@ -125,6 +125,14 @@ function getActiveGroupId(groups: SessionGroup[], activeWorkspaceId: string | nu
   return groups.some((g) => g.id === activeWorkspaceId) ? activeWorkspaceId : null
 }
 
+function isSessionPatchNoOp(
+  session: TerminalSession,
+  updates: Partial<TerminalSession>,
+): boolean {
+  const entries = Object.entries(updates) as Array<[keyof TerminalSession, TerminalSession[keyof TerminalSession]]>
+  return entries.every(([key, value]) => Object.is(session[key], value))
+}
+
 export const useTerminalStore = create<TerminalState>()((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -208,6 +216,13 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
   setActiveSession: (id) => {
     set((state) => {
       if (!id) {
+        if (
+          state.activeSessionId === null &&
+          state.activeWorkspaceId === null &&
+          state.activeGroupId === null
+        ) {
+          return state
+        }
         return {
           activeSessionId: null,
           activeWorkspaceId: null,
@@ -217,10 +232,18 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
 
       if (!state.sessions.some((s) => s.id === id)) return state
       const activeWorkspaceId = getWorkspaceIdForSession(state.groups, id)
+      const activeGroupId = getActiveGroupId(state.groups, activeWorkspaceId)
+      if (
+        state.activeSessionId === id &&
+        state.activeWorkspaceId === activeWorkspaceId &&
+        state.activeGroupId === activeGroupId
+      ) {
+        return state
+      }
       return {
         activeSessionId: id,
         activeWorkspaceId,
-        activeGroupId: getActiveGroupId(state.groups, activeWorkspaceId),
+        activeGroupId,
       }
     })
   },
@@ -228,6 +251,9 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
   setActiveWorkspace: (id) => {
     set((state) => {
       if (!id) {
+        if (state.activeWorkspaceId === null && state.activeGroupId === null) {
+          return state
+        }
         return {
           activeWorkspaceId: null,
           activeGroupId: null,
@@ -242,19 +268,38 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
         state.activeSessionId && workspace.sessionIds.includes(state.activeSessionId)
           ? state.activeSessionId
           : workspace.sessionIds[0] || null
+      const activeGroupId = getActiveGroupId(state.groups, workspace.id)
+
+      if (
+        state.activeWorkspaceId === workspace.id &&
+        state.activeGroupId === activeGroupId &&
+        state.activeSessionId === preferredActiveSession
+      ) {
+        return state
+      }
 
       return {
         activeWorkspaceId: workspace.id,
-        activeGroupId: getActiveGroupId(state.groups, workspace.id),
+        activeGroupId,
         activeSessionId: preferredActiveSession,
       }
     })
   },
 
   updateSession: (id, updates) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
-    }))
+    set((state) => {
+      const index = state.sessions.findIndex((s) => s.id === id)
+      if (index === -1) return state
+
+      const existing = state.sessions[index]
+      if (isSessionPatchNoOp(existing, updates)) {
+        return state
+      }
+
+      const sessions = [...state.sessions]
+      sessions[index] = { ...existing, ...updates }
+      return { sessions }
+    })
   },
 
   getSession: (id) => get().sessions.find((s) => s.id === id),

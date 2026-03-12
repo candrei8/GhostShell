@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { Bot, FolderTree, TerminalSquare, User, Wrench, X } from 'lucide-react'
-import { AgentActivity, FileTouch, Provider, TerminalSession } from '../../lib/types'
-import { CompanionEntry } from '../../stores/companionStore'
-import { CommandBlock } from '../../stores/commandBlockStore'
+import { FileTouch, Provider, TerminalSession } from '../../lib/types'
+import { useActivityStore } from '../../stores/activityStore'
+import { useCompanionStore, type CompanionEntry } from '../../stores/companionStore'
+import { useCommandBlockStore, type CommandBlock } from '../../stores/commandBlockStore'
 import { formatClockTime, formatCost, formatDuration, formatTokens, smartTruncatePath } from '../../lib/formatUtils'
 import { getContextUsagePercentage, hasContextMetrics } from '../../lib/contextMetrics'
 import { getProviderColor, getProviderLabel } from '../../lib/providers'
@@ -10,9 +11,6 @@ import { getProviderColor, getProviderLabel } from '../../lib/providers'
 interface TerminalContextPanelProps {
   session: TerminalSession
   provider?: Provider
-  activity?: AgentActivity
-  entries: CompanionEntry[]
-  blocks: CommandBlock[]
   onClose: () => void
 }
 
@@ -40,11 +38,12 @@ function getBlockStatusTone(status: CommandBlock['status']): string {
 export function TerminalContextPanel({
   session,
   provider,
-  activity,
-  entries,
-  blocks,
   onClose,
 }: TerminalContextPanelProps) {
+  const activityId = session.agentId || session.id
+  const activity = useActivityStore((s) => s.activities[activityId])
+  const entries = useCompanionStore((s) => s.sessions[session.id]?.entries ?? [])
+  const blocks = useCommandBlockStore((s) => s.blocksBySession[session.id] ?? [])
   const metrics = activity?.contextMetrics
   const usagePercentage = getContextUsagePercentage(metrics)
   const recentEntries = useMemo(() => entries.slice(-18).reverse(), [entries])
