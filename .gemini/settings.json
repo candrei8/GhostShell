@@ -1,0 +1,11 @@
+{
+  "experimental": {
+    "plan": true,
+    "enableAgents": true,
+    "extensionManagement": true,
+    "toolOutputMasking.enabled": true
+  },
+  "model": {
+    "name": "gemini-3.1-flash-preview"
+  }
+}
