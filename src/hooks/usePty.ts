@@ -184,10 +184,9 @@ function getAutoConfirmPatterns(provider: Provider): RegExp[] {
   return CLAUDE_AUTO_CONFIRM_PATTERNS
 }
 
-function getNativeMultilineSequence(provider: Provider): string {
-  // Claude Code documents "\" + Enter as the portable newline escape.
-  // Codex and Gemini expose Ctrl+J (LF) as the newline shortcut.
-  if (provider === 'claude') return '\\\r'
+function getNativeMultilineSequence(_provider: Provider): string {
+  // LF (0x0A / Ctrl+J) creates a newline in CLI TUI inputs (Ink, etc.)
+  // without triggering "submit" (which is CR / 0x0D).
   return '\n'
 }
 

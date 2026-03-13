@@ -31,6 +31,7 @@ interface SettingsState {
   notificationVolume: number
   notificationTimingMode: NotificationTimingMode
   savedAgents: SavedAgentConfig[]
+  dockPosition: { x: number; y: number } | null
 
   setRestoreTabs: (restore: boolean) => void
   addSavedAgent: (config: SavedAgentConfig) => void
@@ -55,6 +56,7 @@ interface SettingsState {
   setMuteNotifications: (mute: boolean) => void
   setNotificationVolume: (volume: number) => void
   setNotificationTimingMode: (mode: NotificationTimingMode) => void
+  setDockPosition: (pos: { x: number; y: number } | null) => void
   getTheme: () => Theme
   getAvailableThemes: () => Theme[]
   initTheme: () => void
@@ -222,6 +224,13 @@ function normalizePersistedSettings(persistedState: unknown) {
       ? raw.notificationTimingMode
       : 'balanced',
     savedAgents: sanitizeSavedAgents(raw.savedAgents),
+    dockPosition:
+      raw.dockPosition && typeof raw.dockPosition === 'object'
+        ? {
+            x: pickNumber((raw.dockPosition as Record<string, unknown>).x, 0, -9999, 9999),
+            y: pickNumber((raw.dockPosition as Record<string, unknown>).y, 0, -9999, 9999),
+          }
+        : null,
   }
 }
 
@@ -250,6 +259,7 @@ export const useSettingsStore = create<SettingsState>()(
       notificationVolume: 50,
       notificationTimingMode: 'balanced',
       savedAgents: [],
+      dockPosition: null,
 
       setRestoreTabs: (restore) => set({ restoreTabs: restore }),
       addSavedAgent: (config) =>
@@ -282,6 +292,7 @@ export const useSettingsStore = create<SettingsState>()(
       setMuteNotifications: (mute) => set({ muteNotifications: mute }),
       setNotificationVolume: (volume) => set({ notificationVolume: volume }),
       setNotificationTimingMode: (mode) => set({ notificationTimingMode: mode }),
+      setDockPosition: (pos) => set({ dockPosition: pos }),
       getTheme: () => getTheme(get().themeId),
       getAvailableThemes: () => themes,
       initTheme: () => applyTheme(getTheme(get().themeId)),
@@ -313,6 +324,7 @@ export const useSettingsStore = create<SettingsState>()(
         notificationVolume: state.notificationVolume,
         notificationTimingMode: state.notificationTimingMode,
         savedAgents: state.savedAgents,
+        dockPosition: state.dockPosition,
       }),
       migrate: (persistedState) => normalizePersistedSettings(persistedState),
       merge: (persistedState, currentState) => ({

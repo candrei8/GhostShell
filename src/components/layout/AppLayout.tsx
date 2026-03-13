@@ -212,17 +212,19 @@ export function AppLayout() {
 
   return (
     <div className="ghost-app-shell h-screen w-screen overflow-hidden flex flex-col font-sans text-ghost-text">
-      <div className="shrink-0 px-3 pt-3">
-        <GlobalDock
-          activeView={activeView}
-          onViewChange={setSidebarView}
-          onOpenSettings={openSettings}
-          onQuickLaunch={handleQuickLaunch}
-          onSpawnTerminal={handleSpawnTerminal}
-        />
-      </div>
+      {/* Floating dock — fixed position, overlays content */}
+      <GlobalDock
+        activeView={activeView}
+        onViewChange={setSidebarView}
+        onOpenSettings={openSettings}
+        onQuickLaunch={handleQuickLaunch}
+        onSpawnTerminal={handleSpawnTerminal}
+      />
 
-      <div className="relative flex min-h-0 flex-1 px-3 pb-3 pt-2">
+      {/* Spacer for default dock position */}
+      <div className="shrink-0" style={{ height: 80 }} />
+
+      <div className="relative flex min-h-0 flex-1 px-3 pb-3">
         {/* Terminals Area */}
         <div className="flex-1 min-w-0 relative">
           <TerminalContainer

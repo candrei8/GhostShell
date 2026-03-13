@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type MouseEvent as ReactMouseEvent } from 'react'
+import { useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { motion } from 'framer-motion'
 import {
   Bell,
@@ -7,6 +7,7 @@ import {
   Clock3,
   FolderOpen,
   GitBranch,
+  GripVertical,
   Minus,
   Network,
   Plus,
@@ -61,6 +62,110 @@ export function GlobalDock({
   const sessionCount = useTerminalStore((s) => s.sessions.length)
   const hasSessions = sessionCount > 0
   const addNotification = useNotificationStore((s) => s.addNotification)
+
+  // ── Floating dock position ─────────────────────────────
+  const dockPosition = useSettingsStore((s) => s.dockPosition)
+  const setDockPosition = useSettingsStore((s) => s.setDockPosition)
+  const dockRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{
+    startX: number
+    startY: number
+    startLeft: number
+    startTop: number
+  } | null>(null)
+
+  useEffect(() => {
+    return () => {
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+  }, [])
+
+  const handleGripMouseDown = useCallback(
+    (e: ReactMouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const dock = dockRef.current
+      if (!dock) return
+
+      const rect = dock.getBoundingClientRect()
+      dragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startLeft: rect.left,
+        startTop: rect.top,
+      }
+
+      // Lock width during drag to prevent reflow
+      dock.style.width = `${rect.width}px`
+      document.body.style.userSelect = 'none'
+      document.body.style.cursor = 'grabbing'
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current || !dock) return
+        const newLeft = Math.max(
+          0,
+          Math.min(
+            dragRef.current.startLeft + ev.clientX - dragRef.current.startX,
+            window.innerWidth - 200,
+          ),
+        )
+        const newTop = Math.max(
+          0,
+          Math.min(
+            dragRef.current.startTop + ev.clientY - dragRef.current.startY,
+            window.innerHeight - 60,
+          ),
+        )
+        dock.style.left = `${newLeft}px`
+        dock.style.top = `${newTop}px`
+        dock.style.right = 'auto'
+      }
+
+      const onUp = (ev: MouseEvent) => {
+        document.body.style.userSelect = ''
+        document.body.style.cursor = ''
+        if (dragRef.current && dock) {
+          const finalLeft = Math.max(
+            0,
+            Math.min(
+              dragRef.current.startLeft + ev.clientX - dragRef.current.startX,
+              window.innerWidth - 200,
+            ),
+          )
+          const finalTop = Math.max(
+            0,
+            Math.min(
+              dragRef.current.startTop + ev.clientY - dragRef.current.startY,
+              window.innerHeight - 60,
+            ),
+          )
+          dock.style.width = ''
+          setDockPosition({ x: finalLeft, y: finalTop })
+        }
+        dragRef.current = null
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    },
+    [setDockPosition],
+  )
+
+  const handleGripDoubleClick = useCallback(
+    (e: ReactMouseEvent) => {
+      e.stopPropagation()
+      const dock = dockRef.current
+      if (dock) {
+        dock.style.width = ''
+        dock.style.right = ''
+      }
+      setDockPosition(null)
+    },
+    [setDockPosition],
+  )
 
   useEffect(() => {
     let mounted = true
@@ -220,19 +325,34 @@ export function GlobalDock({
   const hasChanges = gitDirtyCount > 0
   const branchLabel = gitStatus?.isRepo ? gitStatus.branch : null
 
-  return (
-    <div className="mx-auto w-full max-w-[1680px]">
-      <motion.div
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        onDoubleClick={handleDockDoubleClick}
-        className="titlebar-drag dock-bar relative overflow-hidden rounded-[26px]"
-      >
-        <div className="relative flex items-center gap-3 px-4 py-3">
+  const dockStyle: React.CSSProperties = dockPosition
+    ? { position: 'fixed', top: dockPosition.y, left: dockPosition.x, zIndex: 9999 }
+    : { position: 'fixed', top: 12, left: 12, right: 12, zIndex: 9999 }
 
-          {/* ── Left: Identity ────────────────────────────── */}
-          <div className="flex min-w-0 items-center gap-3">
+  return (
+    <div ref={dockRef} style={dockStyle}>
+      <div className={dockPosition ? '' : 'mx-auto max-w-[1680px]'}>
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          onDoubleClick={handleDockDoubleClick}
+          className="titlebar-drag dock-bar relative overflow-hidden rounded-[26px]"
+        >
+          <div className="relative flex items-center gap-3 px-4 py-3">
+
+            {/* ── Grip: drag to reposition ─────────────────── */}
+            <div
+              className="titlebar-no-drag flex shrink-0 cursor-grab items-center justify-center rounded-lg text-white/20 transition-colors hover:text-white/50 active:cursor-grabbing"
+              onMouseDown={handleGripMouseDown}
+              onDoubleClick={handleGripDoubleClick}
+              title="Drag to move • Double-click to reset"
+            >
+              <GripVertical className="h-4 w-4" />
+            </div>
+
+            {/* ── Left: Identity ────────────────────────────── */}
+            <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.12] text-white/76">
               <Terminal className="h-4 w-4" />
             </div>
@@ -349,8 +469,9 @@ export function GlobalDock({
             </div>
           </div>
 
-        </div>
-      </motion.div>
+          </div>
+        </motion.div>
+      </div>
     </div>
   )
 }
