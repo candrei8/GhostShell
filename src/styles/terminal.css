@@ -21,7 +21,7 @@
 }
 
 .xterm-viewport::-webkit-scrollbar {
-  width: 8px;
+  width: 14px;
 }
 
 .xterm-viewport::-webkit-scrollbar-track {

@@ -53,15 +53,22 @@ function sendCommand(argv) {
   const to = args.to || '';
   const body = args.body || '';
   const msgType = args.type || 'message';
+  const metaRaw = args.meta || '';
 
   if (!to || !body) {
-    console.error('Usage: bs-mail send --to <agent|@all|@operator> [--type message|status|escalation|worker_done] --body "message"');
+    console.error('Usage: bs-mail send --to <agent|@all|@operator> [--type message|status|escalation|worker_done|assignment|review_request|review_complete|review_feedback|heartbeat] --body "message" [--meta \'{"key":"val"}\']');
     process.exit(1);
   }
 
-  if (!['message', 'status', 'escalation', 'worker_done'].includes(msgType)) {
-    console.error('Invalid message type: ' + msgType);
+  const validTypes = ['message', 'status', 'escalation', 'worker_done', 'assignment', 'review_request', 'review_complete', 'review_feedback', 'heartbeat'];
+  if (!validTypes.includes(msgType)) {
+    console.error('Invalid message type: ' + msgType + '. Valid: ' + validTypes.join(', '));
     process.exit(1);
+  }
+
+  let meta = undefined;
+  if (metaRaw) {
+    try { meta = JSON.parse(metaRaw); } catch { console.error('Invalid --meta JSON: ' + metaRaw); process.exit(1); }
   }
 
   const msgId = genId();
@@ -74,14 +81,17 @@ function sendCommand(argv) {
     fs.mkdirSync(targetInbox, { recursive: true });
     fs.mkdirSync(NUDGE_DIR, { recursive: true });
 
-    writeJson(path.join(targetInbox, msgId + '.json'), {
+    const payload = {
       id: msgId,
       from,
       to: payloadTo,
       body,
       type: msgType,
       timestamp,
-    });
+    };
+    if (meta) payload.meta = meta;
+
+    writeJson(path.join(targetInbox, msgId + '.json'), payload);
 
     fs.writeFileSync(path.join(NUDGE_DIR, target + '.txt'), 'Message from ' + from + '\\n', 'utf8');
   };

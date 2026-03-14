@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Bot, FolderTree, TerminalSquare, User, Wrench, X } from 'lucide-react'
-import { AgentActivity, FileTouch, Provider, TerminalSession } from '../../lib/types'
+import { FileTouch, Provider, TerminalSession } from '../../lib/types'
+import { useActivityStore } from '../../stores/activityStore'
 import { CompanionEntry } from '../../stores/companionStore'
 import { CommandBlock } from '../../stores/commandBlockStore'
 import { formatClockTime, formatCost, formatDuration, formatTokens, smartTruncatePath } from '../../lib/formatUtils'
@@ -10,7 +11,7 @@ import { getProviderColor, getProviderLabel } from '../../lib/providers'
 interface TerminalContextPanelProps {
   session: TerminalSession
   provider?: Provider
-  activity?: AgentActivity
+  activityId: string
   entries: CompanionEntry[]
   blocks: CommandBlock[]
   onClose: () => void
@@ -40,11 +41,13 @@ function getBlockStatusTone(status: CommandBlock['status']): string {
 export function TerminalContextPanel({
   session,
   provider,
-  activity,
+  activityId,
   entries,
   blocks,
   onClose,
 }: TerminalContextPanelProps) {
+  // Fetch full activity here so TerminalPane doesn't re-render from activityLog changes
+  const activity = useActivityStore((s) => s.activities[activityId])
   const metrics = activity?.contextMetrics
   const usagePercentage = getContextUsagePercentage(metrics)
   const recentEntries = useMemo(() => entries.slice(-18).reverse(), [entries])

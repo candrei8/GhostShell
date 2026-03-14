@@ -60,6 +60,8 @@ export interface Thread {
   isExpanded: boolean
 }
 
+export type SessionType = 'ghostcode' | 'ghostswarm'
+
 export interface TerminalSession {
   id: string
   agentId?: string
@@ -73,6 +75,12 @@ export interface TerminalSession {
   detectedProvider?: Provider
   /** Skip auto-launching Claude in usePty (e.g. restartAgent handles launch with --continue) */
   skipAutoLaunch?: boolean
+  /** Pre-built launch command for swarm agents (usePty uses this instead of building from agent config) */
+  launchCommand?: string
+  /** Show QuickLaunch UI in this tab instead of terminal */
+  showQuickLaunch?: boolean
+  /** Session type: ghostcode (terminal+agent) or ghostswarm (swarm panel) */
+  sessionType?: SessionType
 }
 
 export interface Workspace {
@@ -310,6 +318,7 @@ declare global {
       workspaceLoad: (name: string) => Promise<unknown | null>
       workspaceList: () => Promise<string[]>
       fsPreview: (filePath: string, maxLines?: number) => Promise<{ success: boolean; content: string; totalLines: number; error?: string }>
+      fsReadFile: (filePath: string) => Promise<{ success: boolean; content: string; error?: string }>
       fsIsDirectory: (dirPath: string) => Promise<boolean>
       saveTempImage: (buffer: ArrayBuffer, mimeType: string) => Promise<string>
       showNotification: (title: string, body?: string) => void

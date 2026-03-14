@@ -17,6 +17,20 @@ import {
   Bell,
   BellOff,
   Blocks,
+  Eraser,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  TextSelect,
+  ArrowLeftRight,
+  Undo2,
+  Skull,
+  ClipboardCopy,
+  Maximize,
+  Focus,
+  SquarePlus,
 } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -205,6 +219,212 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onToggleMonitor, o
           window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.toggleTerminalSearch))
         },
         category: 'Terminal',
+      },
+      // --- Warp-style terminal commands ---
+      {
+        id: 'clear-terminal',
+        label: 'Clear Terminal',
+        description: 'Clear the terminal screen (keeps scrollback)',
+        icon: <Eraser className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.clear'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.clearTerminal))
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'clear-scrollback',
+        label: 'Clear Scrollback',
+        description: 'Clear entire scrollback buffer',
+        icon: <Eraser className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.clearScrollback'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.clearScrollback))
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'scroll-to-top',
+        label: 'Scroll to Top',
+        description: 'Scroll terminal to the top',
+        icon: <ArrowUpToLine className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.scrollToTop'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.scrollToTop))
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'scroll-to-bottom',
+        label: 'Scroll to Bottom',
+        description: 'Scroll terminal to latest output',
+        icon: <ArrowDownToLine className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.scrollToBottom'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.scrollToBottom))
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'zoom-in',
+        label: 'Zoom In',
+        description: 'Increase terminal font size',
+        icon: <ZoomIn className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.zoomIn'),
+        action: () => {
+          const settings = useSettingsStore.getState()
+          const current = settings.terminalFontSize
+          if (current < 24) settings.setTerminalFontSize(current + 1)
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'zoom-out',
+        label: 'Zoom Out',
+        description: 'Decrease terminal font size',
+        icon: <ZoomOut className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.zoomOut'),
+        action: () => {
+          const settings = useSettingsStore.getState()
+          const current = settings.terminalFontSize
+          if (current > 10) settings.setTerminalFontSize(current - 1)
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'zoom-reset',
+        label: 'Reset Zoom',
+        description: 'Reset terminal font size to default (14px)',
+        icon: <RotateCcw className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.zoomReset'),
+        action: () => {
+          useSettingsStore.getState().setTerminalFontSize(14)
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'select-all',
+        label: 'Select All Output',
+        description: 'Select all text in terminal buffer',
+        icon: <TextSelect className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.selectAll'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.selectAll))
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'move-tab-left',
+        label: 'Move Tab Left',
+        description: 'Reorder active tab one position left',
+        icon: <ArrowLeftRight className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.moveTabLeft'),
+        action: () => {
+          const state = useTerminalStore.getState()
+          if (!state.activeSessionId) { onClose(); return }
+          const idx = state.sessions.findIndex((s) => s.id === state.activeSessionId)
+          if (idx > 0) state.moveSession(idx, idx - 1)
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'move-tab-right',
+        label: 'Move Tab Right',
+        description: 'Reorder active tab one position right',
+        icon: <ArrowLeftRight className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.moveTabRight'),
+        action: () => {
+          const state = useTerminalStore.getState()
+          if (!state.activeSessionId) { onClose(); return }
+          const idx = state.sessions.findIndex((s) => s.id === state.activeSessionId)
+          if (idx >= 0 && idx < state.sessions.length - 1) state.moveSession(idx, idx + 1)
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'reopen-closed',
+        label: 'Reopen Closed Tab',
+        description: 'Restore the last closed terminal tab',
+        icon: <Undo2 className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.reopenClosed'),
+        action: () => {
+          // Triggered via keyboard shortcut handler (closedTabStack is in hook)
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'kill-process',
+        label: 'Kill Process',
+        description: 'Force kill the active terminal process',
+        icon: <Skull className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.killProcess'),
+        action: () => {
+          const state = useTerminalStore.getState()
+          if (state.activeSessionId) {
+            try { window.ghostshell.ptyKill(state.activeSessionId) } catch {}
+          }
+          onClose()
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'copy-path',
+        label: 'Copy Working Directory',
+        description: 'Copy the current terminal path to clipboard',
+        icon: <ClipboardCopy className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.copyPath'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.copyPath))
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'new-session-profile',
+        label: 'New Session (Quick Launch)',
+        description: 'Open Quick Launch for a new agent session',
+        icon: <SquarePlus className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('terminal.newWithProfile'),
+        action: () => {
+          onClose()
+          // Quick Launch handled via keyboard shortcut
+        },
+        category: 'Terminal',
+      },
+      {
+        id: 'toggle-fullscreen',
+        label: 'Toggle Fullscreen',
+        description: 'Toggle fullscreen mode',
+        icon: <Maximize className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('nav.toggleFullscreen'),
+        action: () => {
+          try { (window as any).ghostshell?.toggleFullscreen?.() } catch {}
+          onClose()
+        },
+        category: 'Navigation',
+      },
+      {
+        id: 'focus-terminal',
+        label: 'Focus Terminal',
+        description: 'Move focus to the active terminal pane',
+        icon: <Focus className="w-4 h-4" />,
+        shortcut: getShortcutDisplay('nav.focusTerminal'),
+        action: () => {
+          onClose()
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.focusTerminal))
+        },
+        category: 'Navigation',
       },
       // --- Absorbed actions from removed UI elements ---
       {

@@ -431,24 +431,52 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
   duplicateSession: (id) => {
     const session = get().getSession(id)
     if (!session) return null
-    const newId = `term-dup-${Date.now()}`
+    const newId = `term-split-${Date.now()}`
     const newSession: TerminalSession = {
       ...session,
       id: newId,
-      title: `${session.title} (copy)`,
+      title: session.title,
       agentId: undefined,
       isActive: true,
     }
     set((state) => {
       const sessions = [...state.sessions, newSession]
-      const groups = normalizeGroups(sessions, state.groups)
+      const existingGroup = findGroupForSession(state.groups, id)
+
+      if (existingGroup) {
+        // Add new session to existing group
+        const groups = normalizeGroups(
+          sessions,
+          state.groups.map((g) =>
+            g.id === existingGroup.id
+              ? { ...g, sessionIds: [...g.sessionIds, newId] }
+              : g,
+          ),
+        )
+        return {
+          sessions,
+          groups,
+          activeSessionId: newId,
+          activeWorkspaceId: existingGroup.id,
+          activeGroupId: existingGroup.id,
+        }
+      }
+
+      // Create a new group containing original + split
+      const groupId = `group-${Date.now()}`
+      const newGroup: SessionGroup = {
+        id: groupId,
+        name: session.title,
+        sessionIds: [id, newId],
+        createdAt: Date.now(),
+      }
+      const groups = normalizeGroups(sessions, [...state.groups, newGroup])
       return {
         sessions,
         groups,
         activeSessionId: newId,
-        activeWorkspaceId: newId,
-        activeGroupId: null,
-        viewMode: 'tabs',
+        activeWorkspaceId: groupId,
+        activeGroupId: groupId,
       }
     })
     return newId

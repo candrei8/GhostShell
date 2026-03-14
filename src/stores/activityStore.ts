@@ -122,7 +122,7 @@ export const useActivityStore = create<ActivityState>()((set, get) => ({
       return {
         activities: {
           ...state.activities,
-          [agentId]: { ...existing, activityLog, lastActivityTime: Date.now() },
+          [agentId]: { ...existing, activityLog },
         },
       }
     })

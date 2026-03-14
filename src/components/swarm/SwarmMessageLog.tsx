@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { MessageSquare, ArrowRight, AlertTriangle, CheckCircle2, Radio } from 'lucide-react'
+import { MessageSquare, ArrowRight, AlertTriangle, CheckCircle2, Radio, FileCheck, ClipboardCheck, MessageCircle, Heart } from 'lucide-react'
 import type { SwarmMessage } from '../../lib/swarm-types'
 
 // ─── Message Type Colors ─────────────────────────────────────
@@ -15,6 +15,11 @@ const MSG_TYPE_MAP: Record<SwarmMessage['type'], TypeMeta> = {
   status: { color: 'text-blue-400/70', icon: Radio },
   escalation: { color: 'text-amber-400', icon: AlertTriangle },
   worker_done: { color: 'text-emerald-400', icon: CheckCircle2 },
+  assignment: { color: 'text-blue-400', icon: FileCheck },
+  review_request: { color: 'text-violet-400', icon: ClipboardCheck },
+  review_complete: { color: 'text-emerald-400', icon: CheckCircle2 },
+  review_feedback: { color: 'text-rose-400', icon: MessageCircle },
+  heartbeat: { color: 'text-gray-400/40', icon: Heart },
 }
 
 // ─── Format Timestamp ────────────────────────────────────────

@@ -1,18 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Terminal as TerminalIcon } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { useSwarmStore } from '../../stores/swarmStore'
 import { TerminalPane } from './TerminalPane'
-import { QuickLaunch } from './QuickLaunch'
 import { AgentHUD } from '../agents/AgentHUD'
 import { BentoLayout } from './BentoLayout'
+import { SessionTypeSelector } from './SessionTypeSelector'
 import { SHORTCUT_EVENTS } from '../../lib/shortcutEvents'
+import { type SessionType } from '../../lib/types'
 
-interface TerminalContainerProps {
-  showQuickLaunch: boolean
-  onShowQuickLaunch: (show: boolean) => void
-}
-
-export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: TerminalContainerProps) {
+export function TerminalContainer() {
   const sessions = useTerminalStore((s) => s.sessions)
   const activeSessionId = useTerminalStore((s) => s.activeSessionId)
   const activeWorkspaceId = useTerminalStore((s) => s.activeWorkspaceId)
@@ -25,6 +23,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
   const removeSession = useTerminalStore((s) => s.removeSession)
 
   const [hudOpen, setHudOpen] = useState(false)
+  const [showTypeSelector, setShowTypeSelector] = useState(false)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -73,6 +72,23 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
       setActiveWorkspace(resolvedActiveWorkspaceId)
     }
   }, [resolvedActiveWorkspaceId, activeWorkspaceId, setActiveWorkspace])
+
+  const handleTypeSelected = useCallback((type: SessionType) => {
+    setShowTypeSelector(false)
+
+    if (type === 'ghostswarm') {
+      useSwarmStore.getState().openWizard()
+    } else {
+      const cwd = useWorkspaceStore.getState().currentPath
+      useTerminalStore.getState().addSession({
+        id: `term-quicklaunch-${Date.now()}`,
+        title: 'New Session',
+        cwd,
+        showQuickLaunch: true,
+        sessionType: 'ghostcode',
+      })
+    }
+  }, [])
 
   const renderWorkspace = useCallback((workspaceSessions: typeof sessions, workspaceId: string, isVisible: boolean) => {
     if (workspaceSessions.length === 0) return null
@@ -141,13 +157,7 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
           : renderWorkspace(sessions, 'grid-view', true)}
       </div>
 
-      {showQuickLaunch && (
-        <div className="absolute inset-0 z-30 flex flex-col bg-ghost-bg overflow-hidden">
-          <QuickLaunch onLaunched={() => onShowQuickLaunch(false)} />
-        </div>
-      )}
-
-      {hasNoSessions && !showQuickLaunch && (
+      {hasNoSessions && !showTypeSelector && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-ghost-bg">
           <div className="text-center space-y-6">
             <div className="relative mx-auto w-14 h-14">
@@ -156,9 +166,9 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
                 <TerminalIcon className="w-6 h-6 text-white/25" />
               </div>
             </div>
-            
+
             <button
-              onClick={() => onShowQuickLaunch(true)}
+              onClick={() => setShowTypeSelector(true)}
               className="group relative inline-flex h-11 items-center justify-center gap-2 overflow-hidden rounded-xl bg-[#38bdf8] px-6 text-[13px] font-semibold text-[#050812] transition-all hover:bg-[#38bdf8]/90 hover:scale-[1.02] active:scale-[0.98]"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -173,6 +183,13 @@ export function TerminalContainer({ showQuickLaunch, onShowQuickLaunch }: Termin
             </div>
           </div>
         </div>
+      )}
+
+      {showTypeSelector && (
+        <SessionTypeSelector
+          onSelect={handleTypeSelected}
+          onClose={() => setShowTypeSelector(false)}
+        />
       )}
 
       {hudOpen && (

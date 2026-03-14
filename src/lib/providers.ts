@@ -108,10 +108,6 @@ export function buildClaudeCommand(config: ClaudeConfig, resume?: boolean): stri
     parts.push('--dangerously-skip-permissions')
   }
 
-  if (config.model) {
-    parts.push('--model', config.model)
-  }
-
   if (config.systemPrompt && !resume) {
     const escaped = config.systemPrompt.replace(/"/g, '\\"')
     parts.push('--system-prompt', `"${escaped}"`)

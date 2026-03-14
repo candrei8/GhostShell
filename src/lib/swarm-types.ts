@@ -19,7 +19,7 @@ export const SWARM_ROLES: SwarmAgentRoleDef[] = [
     id: 'coordinator',
     label: 'Coordinator',
     description: 'Orchestrates tasks, assigns work, resolves conflicts',
-    icon: 'Crown',
+    icon: 'Terminal',
     color: '#f59e0b',
     defaultCount: 1,
   },
@@ -27,7 +27,7 @@ export const SWARM_ROLES: SwarmAgentRoleDef[] = [
     id: 'builder',
     label: 'Builder',
     description: 'Writes production code, implements features',
-    icon: 'Hammer',
+    icon: 'Code2',
     color: '#3b82f6',
     defaultCount: 2,
   },
@@ -35,7 +35,7 @@ export const SWARM_ROLES: SwarmAgentRoleDef[] = [
     id: 'scout',
     label: 'Scout',
     description: 'Explores codebase, gathers intelligence, researches',
-    icon: 'Search',
+    icon: 'Radar',
     color: '#10b981',
     defaultCount: 1,
   },
@@ -43,7 +43,7 @@ export const SWARM_ROLES: SwarmAgentRoleDef[] = [
     id: 'reviewer',
     label: 'Reviewer',
     description: 'Reviews code quality, catches bugs, suggests improvements',
-    icon: 'Eye',
+    icon: 'ShieldCheck',
     color: '#8b5cf6',
     defaultCount: 1,
   },
@@ -51,7 +51,7 @@ export const SWARM_ROLES: SwarmAgentRoleDef[] = [
     id: 'custom',
     label: 'Custom',
     description: 'Custom role with user-defined behavior',
-    icon: 'Wrench',
+    icon: 'Hexagon',
     color: '#6b7280',
     defaultCount: 0,
   },
@@ -68,38 +68,63 @@ export interface RosterPreset {
   label: string
   total: number
   composition: Record<SwarmAgentRole, number>
+  /** Estimated RAM per agent in MB (CLI + PTY + xterm) */
+  ramPerAgent: number
+  /** Description shown on hover */
+  description: string
 }
 
+// ─── Scaling Constants ──────────────────────────────────────
+
+/** Estimated RAM per agent: CLI ~300MB + PTY ~15MB + xterm ~8MB */
+export const RAM_PER_AGENT_MB = 320
+/** Max builders per coordinator before context exhaustion */
+export const MAX_BUILDERS_PER_COORDINATOR = 5
+/** Soft cap: warn above this count */
+export const AGENT_SOFT_CAP = 8
+/** Hard cap: refuse above this count */
+export const AGENT_HARD_CAP = 15
+
+/**
+ * Realistic presets based on industry benchmarks:
+ * - Anthropic recommends 3-5 agents
+ * - Cursor caps at 8 parallel agents
+ * - incident.io runs 4-5 in production
+ * - Above 8: coordination overhead > parallelism gains
+ * - Above 15: memory + renderer + API limits become critical
+ */
 export const ROSTER_PRESETS: RosterPreset[] = [
+  {
+    id: 'duo',
+    label: 'DUO',
+    total: 3,
+    composition: { coordinator: 1, builder: 1, scout: 1, reviewer: 0, custom: 0 },
+    ramPerAgent: RAM_PER_AGENT_MB,
+    description: 'Minimum viable swarm — fast, low overhead',
+  },
   {
     id: 'squad',
     label: 'SQUAD',
     total: 5,
     composition: { coordinator: 1, builder: 2, scout: 1, reviewer: 1, custom: 0 },
+    ramPerAgent: RAM_PER_AGENT_MB,
+    description: 'Sweet spot — Anthropic recommended team size',
   },
   {
     id: 'team',
     label: 'TEAM',
-    total: 10,
-    composition: { coordinator: 1, builder: 5, scout: 2, reviewer: 2, custom: 0 },
+    total: 8,
+    composition: { coordinator: 1, builder: 4, scout: 2, reviewer: 1, custom: 0 },
+    ramPerAgent: RAM_PER_AGENT_MB,
+    description: 'Max for most machines — Cursor\'s cap',
   },
   {
     id: 'platoon',
     label: 'PLATOON',
-    total: 15,
-    composition: { coordinator: 2, builder: 8, scout: 3, reviewer: 2, custom: 0 },
-  },
-  {
-    id: 'battalion',
-    label: 'BATTALION',
-    total: 20,
-    composition: { coordinator: 2, builder: 10, scout: 4, reviewer: 4, custom: 0 },
-  },
-  {
-    id: 'legion',
-    label: 'LEGION',
-    total: 50,
-    composition: { coordinator: 3, builder: 28, scout: 10, reviewer: 9, custom: 0 },
+    total: 12,
+    composition: { coordinator: 2, builder: 5, scout: 3, reviewer: 2, custom: 0 },
+    ramPerAgent: RAM_PER_AGENT_MB,
+    description: 'Power users — requires 32GB+ RAM, split coordinators',
   },
 ]
 
@@ -117,13 +142,13 @@ export interface SwarmCliProviderDef {
 }
 
 export const SWARM_CLI_PROVIDERS: SwarmCliProviderDef[] = [
-  { id: 'claude', label: 'Claude', icon: 'Ghost', color: '#a855f7', coreProvider: 'claude' },
-  { id: 'codex', label: 'Codex', icon: 'Bot', color: '#10b981', coreProvider: 'codex' },
-  { id: 'gemini', label: 'Gemini', icon: 'Sparkles', color: '#3b82f6', coreProvider: 'gemini' },
-  { id: 'opencode', label: 'OpenCode', icon: 'Code', color: '#6366f1' },
-  { id: 'cursor', label: 'Cursor', icon: 'MousePointer', color: '#f97316' },
+  { id: 'claude', label: 'Claude', icon: 'BrainCircuit', color: '#a855f7', coreProvider: 'claude' },
+  { id: 'codex', label: 'Codex', icon: 'Binary', color: '#10b981', coreProvider: 'codex' },
+  { id: 'gemini', label: 'Gemini', icon: 'Aperture', color: '#3b82f6', coreProvider: 'gemini' },
+  { id: 'opencode', label: 'OpenCode', icon: 'Braces', color: '#6366f1' },
+  { id: 'cursor', label: 'Cursor', icon: 'TerminalSquare', color: '#f97316' },
   { id: 'droid', label: 'Droid', icon: 'Cpu', color: '#ef4444' },
-  { id: 'copilot', label: 'Copilot', icon: 'Zap', color: '#06b6d4' },
+  { id: 'copilot', label: 'Copilot', icon: 'Rocket', color: '#06b6d4' },
 ]
 
 // ─── Swarm Agent (roster member) ──────────────────────────────
@@ -206,6 +231,8 @@ export interface SwarmMessage {
   to: string
   body: string
   type: 'message' | 'status' | 'escalation' | 'worker_done'
+      | 'assignment' | 'review_request' | 'review_complete' | 'review_feedback' | 'heartbeat'
+  meta?: Record<string, unknown>
   timestamp: number
 }
 
@@ -216,6 +243,10 @@ export interface SwarmTaskItem {
   ownedFiles: string[]
   dependsOn: string[]   // other task IDs
   status: 'open' | 'assigned' | 'planning' | 'building' | 'review' | 'done'
+  reviewer?: string
+  verdict?: 'approved' | 'changes_requested' | 'approved_with_notes'
+  acceptanceCriteria?: string[]
+  description?: string
 }
 
 export interface Swarm {
@@ -227,4 +258,5 @@ export interface Swarm {
   messages: SwarmMessage[]
   startedAt?: number
   completedAt?: number
+  swarmRoot?: string
 }

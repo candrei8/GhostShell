@@ -14,6 +14,7 @@ import { enhanceTerminalOutput } from '../lib/terminalOutputEnhancer'
 import { SHORTCUT_EVENTS } from '../lib/shortcutEvents'
 import { Provider, SubAgentOutputLine } from '../lib/types'
 import { detectDomain } from '../lib/domain-detector'
+import { reportAgentOutput } from '../lib/swarm-message-injector'
 
 interface UsePtyOptions {
   sessionId: string
@@ -56,7 +57,7 @@ const CLAUDE_WORKING_PATTERNS = [
   /\u2834/,
   /\u2826/,
   /\u2807/,
-  /Ã¢Â â€¹|Ã¢Â â„¢|Ã¢Â Â¹|Ã¢Â Â¸|Ã¢Â Â¼|Ã¢Â Â´|Ã¢Â Â¦|Ã¢Â Â§|Ã¢Â â€¡|Ã¢Â Â/,
+  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
   /Thinking/,
   /Reading/,
   /Writing/,
@@ -66,7 +67,7 @@ const CLAUDE_WORKING_PATTERNS = [
 ]
 
 // --- Gemini CLI patterns ---
-// Note: Gemini's banner and UI uses decorative Ã¢Å“Â¦ and > characters liberally.
+// Note: Gemini's banner and UI uses decorative sparkle and > characters liberally.
 // Patterns must be specific enough to avoid matching static UI elements.
 const GEMINI_IDLE_PATTERNS = [
   /gemini>\s*$/,              // Gemini's actual input prompt
@@ -81,7 +82,7 @@ const GEMINI_AUTO_CONFIRM_PATTERNS = [
 ]
 
 const GEMINI_WORKING_PATTERNS = [
-  /Ã¢Â â€¹|Ã¢Â â„¢|Ã¢Â Â¹|Ã¢Â Â¸|Ã¢Â Â¼|Ã¢Â Â´|Ã¢Â Â¦|Ã¢Â Â§|Ã¢Â â€¡|Ã¢Â Â/,  // Braille spinner characters (reliable)
+  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,  // Braille spinner characters (reliable)
   /\u280B|\u2819|\u2838|\u2834|\u2826|\u2807/, // More braille spinners
   /Generating\.\.\./,        // "Generating..." with ellipsis
   /Thinking\.\.\./,          // "Thinking..." with ellipsis
@@ -106,7 +107,7 @@ const CODEX_AUTO_CONFIRM_PATTERNS = [
 ]
 
 const CODEX_WORKING_PATTERNS = [
-  /Ã¢Â â€¹|Ã¢Â â„¢|Ã¢Â Â¹|Ã¢Â Â¸|Ã¢Â Â¼|Ã¢Â Â´|Ã¢Â Â¦|Ã¢Â Â§|Ã¢Â â€¡|Ã¢Â Â/,  // Braille spinner characters
+  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,  // Braille spinner characters
   /\u280B|\u2819|\u2838|\u2834|\u2826|\u2807/, // More braille spinners
   /Thinking/,
   /Reading/,
@@ -125,7 +126,7 @@ const NAMED_CLI_COMMAND_PROMPT = /(?:^|\n)(?:codex|gemini|claude)>\s*$/i
 const PLAIN_CLI_COMMAND_PROMPT = /(?:^|\n)>\s*$/
 const CONFIRMATION_CONTEXT_PATTERN = /\b(?:allow|deny|approve|permission|continue|proceed|confirm|bypass|fixed)\b/i
 
-// Detect "command not found" errors Ã¢â‚¬â€ returns the binary name if matched, null otherwise
+// Detect "command not found" errors -- returns the binary name if matched, null otherwise
 function detectCliNotFound(data: string): 'gemini' | 'claude' | 'codex' | null {
   // PowerShell patterns: "'gemini' is not recognized" / "'gemini' no se reconoce"
   const psMatch = data.match(/['"]?(gemini|claude|codex)['"]?\s*:\s*(?:.*(?:is not recognized|no se reconoce|CommandNotFoundException))/i)
@@ -184,12 +185,14 @@ function getAutoConfirmPatterns(provider: Provider): RegExp[] {
   return CLAUDE_AUTO_CONFIRM_PATTERNS
 }
 
-function getNativeMultilineChunks(provider: Provider): string[] {
-  // Claude Code documents "\" + Enter as the portable newline escape.
-  // We send them as separate writes so the CLI processes them individually.
-  // Codex and Gemini expose Ctrl+J (LF) as the newline shortcut.
-  if (provider === 'claude') return ['\\', '\r']
-  return ['\n']
+function getNativeMultilineSequence(provider: Provider): string {
+  // Claude Code: ESC + CR (Alt/Option+Enter) inserts a newline without submit.
+  // The old approach (\\ + CR) showed a visible backslash and caused double
+  // newlines on Windows because the PTY CR echo stacked with the CLI's own
+  // continuation newline.
+  // Codex / Gemini: raw LF (Ctrl+J) inserts a newline without submit.
+  if (provider === 'claude') return '\x1b\r'
+  return '\n'
 }
 
 function getCommandCompletionPromptPatterns(provider: Provider): RegExp[] {
@@ -235,6 +238,11 @@ let idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 // Track last time a working pattern was seen per tracked activity source.
 const lastWorkingPatternTime = new Map<string, number>()
 
+// Track when an agent's current work session started.
+// Only fire "finished" notification if the agent worked for a meaningful duration.
+const workSessionStartedAt = new Map<string, number>()
+const MINIMUM_WORK_DURATION_MS = 3000
+
 // Timing constants for idle/completion detection
 const IDLE_DELAY_MS = 8000
 const IDLE_GRACE_MS = 5000
@@ -272,7 +280,7 @@ function getCompletionTimingProfile(): CompletionTimingProfile {
   return COMPLETION_TIMING_PROFILES[mode] || COMPLETION_TIMING_PROFILES.balanced
 }
 
-function scheduleIdleCheck(activityId: string, sessionId: string, delayMs: number, agentId?: string) {
+function scheduleIdleCheck(activityId: string, sessionId: string, delayMs: number, agentId?: string, agentLabel?: string) {
   const existing = idleTimers.get(activityId)
   if (existing) clearTimeout(existing)
 
@@ -285,17 +293,40 @@ function scheduleIdleCheck(activityId: string, sessionId: string, delayMs: numbe
     const lastWorking = lastWorkingPatternTime.get(activityId) || 0
     const elapsed = Date.now() - lastWorking
     if (elapsed < delayMs) {
-      scheduleIdleCheck(activityId, sessionId, delayMs - elapsed + 1000, agentId)
+      scheduleIdleCheck(activityId, sessionId, delayMs - elapsed + 1000, agentId, agentLabel)
       return
     }
 
     if (useCommandBlockStore.getState().activeBlockBySession[sessionId]) {
-      scheduleIdleCheck(activityId, sessionId, delayMs, agentId)
+      scheduleIdleCheck(activityId, sessionId, delayMs, agentId, agentLabel)
       return
     }
 
-    if (agentId && agent?.status === 'working') {
+    const wasWorking = agentId && agent?.status === 'working'
+
+    if (wasWorking) {
       useAgentStore.getState().setAgentStatus(agentId, 'idle')
+
+      // Only notify if agent worked for a meaningful duration (not just startup)
+      const workStart = workSessionStartedAt.get(activityId)
+      const workDuration = workStart ? Date.now() - workStart : 0
+      workSessionStartedAt.delete(activityId)
+
+      if (workDuration >= MINIMUM_WORK_DURATION_MS) {
+        const name = agentLabel || agent?.name || 'Agent'
+        const appFocused = typeof document !== 'undefined' ? document.hasFocus() : false
+        const tier = appFocused ? 'toast' : 'full'
+        useNotificationStore.getState().addNotification({
+          type: 'success',
+          title: `${name} finished`,
+          message: 'Task completed.',
+          source: name,
+          duration: 5000,
+          tier,
+          dedupeKey: `agent-idle:${agentId}`,
+          dedupeWindowMs: 15000,
+        })
+      }
     }
 
     const activityStore = useActivityStore.getState()
@@ -385,31 +416,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       completionCandidateTail = ''
     }
 
-    function notifyCommandCompletion(block: CommandBlock) {
-      if (!agentId) return
-      if (block.status === 'interrupted') return
-
-      const profile = getCompletionTimingProfile()
-      const durationMs = block.durationMs ?? Math.max(0, Date.now() - block.startedAt)
-      if (block.status !== 'error' && durationMs < profile.minCommandRuntimeMs) return
-
-      const title = block.status === 'error'
-        ? `${agentName} command failed`
-        : `${agentName} finished`
-
-      const appFocused = typeof document !== 'undefined' ? document.hasFocus() : false
-      const tier = appFocused ? 'toast' : 'full'
-
-      useNotificationStore.getState().addNotification({
-        type: block.status === 'error' ? 'error' : 'success',
-        title,
-        message: shortenCommand(block.command),
-        source: agentName,
-        duration: block.status === 'error' ? 6000 : 4000,
-        tier,
-        dedupeKey: `command-complete:${block.id}`,
-        dedupeWindowMs: 60000,
-      })
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    function notifyCommandCompletion(_block: CommandBlock) {
+      // Notification is handled by idle detection in scheduleIdleCheck.
+      // Individual command-block completions no longer fire notifications.
     }
 
     function finalizeActiveBlock(
@@ -529,11 +539,14 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           if (agentId && currentAgent && currentAgent.status !== 'working' && now - lastWorkingSet > WORKING_COOLDOWN_MS) {
             setAgentStatus(agentId, 'working')
             lastWorkingSet = now
+            if (!workSessionStartedAt.has(activityId)) {
+              workSessionStartedAt.set(activityId, now)
+            }
           }
           if (agentId && currentAgent && !currentAgent.hasConversation) {
             updateAgent(agentId, { hasConversation: true })
           }
-          scheduleIdleCheck(activityId, sessionId, IDLE_DELAY_MS, agentId)
+          scheduleIdleCheck(activityId, sessionId, IDLE_DELAY_MS, agentId, agentName)
         }
 
         store.setActivity(activityId, result.activity, result.detail)
@@ -657,6 +670,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         // PTY -> Terminal
         const removeDataListener = window.ghostshell.ptyOnData(sessionId, (data) => {
           clearCompletionCheck()
+          // Report output for swarm heartbeat tracking
+          reportAgentOutput(sessionId)
           const outputEmphasis = useSettingsStore.getState().terminalOutputEmphasis
           const hasResolvedProvider = !!agentId || !!useTerminalStore.getState().getSession(sessionId)?.detectedProvider
           const displayData =
@@ -754,16 +769,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               )
               if (agentId) {
                 setAgentStatus(agentId, 'error')
-                useNotificationStore.getState().addNotification({
-                  type: 'error',
-                  title: `${label} CLI not found`,
-                  message: `Run: ${installCmd} - or go to Settings > AI Providers > Install`,
-                  source: `${label} CLI`,
-                  tier: 'full',
-                  persistent: true,
-                  dedupeKey: `cli-missing:${agentId}:${detectedProvider}`,
-                  dedupeWindowMs: 30000,
-                })
                 terminal.writeln('')
                 terminal.writeln(`\x1b[33m[GhostShell] ${label} CLI not found.\x1b[0m`)
                 terminal.writeln(`\x1b[33mRun this to install:\x1b[0m \x1b[36m${installCmd}\x1b[0m`)
@@ -784,11 +789,14 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             if (agentId && currentAgent && currentAgent.status !== 'working') {
               setAgentStatus(agentId, 'working')
               lastWorkingSet = now
+              if (!workSessionStartedAt.has(activityId)) {
+                workSessionStartedAt.set(activityId, now)
+              }
             }
             if (agentId && currentAgent && !currentAgent.hasConversation) {
               updateAgent(agentId, { hasConversation: true })
             }
-            scheduleIdleCheck(activityId, sessionId, IDLE_DELAY_MS, agentId)
+            scheduleIdleCheck(activityId, sessionId, IDLE_DELAY_MS, agentId, agentName)
           }
 
           const isPrompt = getIdlePatterns(currentProvider).some((p) => p.test(data))
@@ -797,7 +805,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             if (now - lastWorking > IDLE_GRACE_MS) {
               const currentAgent = agentId ? getAgent(agentId) : undefined
               if (!agentId || currentAgent?.status === 'working') {
-                scheduleIdleCheck(activityId, sessionId, IDLE_DELAY_MS, agentId)
+                scheduleIdleCheck(activityId, sessionId, IDLE_DELAY_MS, agentId, agentName)
               }
             }
           }
@@ -832,12 +840,14 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             : targetSession?.detectedProvider || currentProvider || 'claude'
 
           try {
-            const chunks = getNativeMultilineChunks(targetProvider)
-            for (const chunk of chunks) {
-              window.ghostshell.ptyWrite(targetSessionId, chunk)
-            }
+            const seq = getNativeMultilineSequence(targetProvider)
+            window.ghostshell.ptyWrite(targetSessionId, seq)
             if (targetSessionId === sessionId) {
               inputBuffer += '\n'
+              // Refresh terminal after TUI redraws to clear rendering artifacts
+              if (terminal) {
+                setTimeout(() => terminal.refresh(0, terminal.rows - 1), 80)
+              }
             }
           } catch {
             // PTY not ready yet
@@ -856,13 +866,14 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         }
 
         terminal.attachCustomKeyEventHandler((e) => {
-          if (e.type !== 'keydown') return true
-
           // Shift+Enter: insert a new line via the provider's native multiline shortcut.
+          // Must block BOTH keydown AND keypress to prevent xterm from sending \r to the PTY.
           if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
-            writeMultilineShortcut()
+            if (e.type === 'keydown') writeMultilineShortcut()
             return false
           }
+
+          if (e.type !== 'keydown') return true
 
           // Ctrl+Shift+C: Copy selection
           if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
@@ -879,7 +890,12 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               terminal.clearSelection()
               return false
             }
-            return true // No selection Ã¢â€ â€™ normal SIGINT
+            return true // No selection -> normal SIGINT
+          }
+
+          // Alt+Tab: block so xterm doesn't send \t to the PTY during OS window switch
+          if (e.altKey && e.key === 'Tab') {
+            return false
           }
 
           // Ctrl+T: New terminal tab (intercept so xterm doesn't send \x14 to PTY)
@@ -905,7 +921,13 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             navigator.clipboard.writeText(sel)
           } else {
             navigator.clipboard.readText().then((text) => {
-              if (text) writeToPty(text)
+              if (text) {
+                if (terminal.modes.bracketedPasteMode) {
+                  writeToPty(`\x1b[200~${text}\x1b[201~`)
+                } else {
+                  writeToPty(text)
+                }
+              }
             }).catch(() => {})
           }
         }
@@ -936,14 +958,27 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                       terminal.writeln(`\r\n\x1b[36m[Image saved: ${filePath}]\x1b[0m`)
                     }
                   } catch {
-                    // Silently fail Ã¢â‚¬â€ clipboard permission may be denied
+                    // Silently fail -- clipboard permission may be denied
                   }
                 })()
                 return
               }
             }
-            // Text paste: do nothing Ã¢â‚¬â€ xterm handles it natively via its textarea.
-            // The onData handler will pick it up and route through sync mode if active.
+            // Text paste: write to PTY manually and block xterm native handler.
+            // Wrap with bracketed paste sequences when the application has enabled
+            // bracketed paste mode — this lets TUI apps (Claude CLI, Gemini CLI)
+            // know the input is a paste so they batch-process it instead of
+            // re-rendering character by character.
+            const text = e.clipboardData.getData('text/plain')
+            if (text) {
+              e.preventDefault()
+              e.stopPropagation()
+              if (terminal.modes.bracketedPasteMode) {
+                writeToPty(`\x1b[200~${text}\x1b[201~`)
+              } else {
+                writeToPty(text)
+              }
+            }
           }
           termEl.addEventListener('paste', handlePaste, true)
           cleanups.push(() => termEl.removeEventListener('paste', handlePaste, true))
@@ -984,10 +1019,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               for (let i = 0; i < files.length; i++) {
                 const file = files[i] as File & { path?: string }
                 if (file.path) {
-                  // Electron file from OS Ã¢â‚¬â€ has full system path
+                  // Electron file from OS -- has full system path
                   paths.push(file.path)
                 } else if (file.type.startsWith('image/')) {
-                  // Web-dragged image (no OS path) Ã¢â‚¬â€ save to temp
+                  // Web-dragged image (no OS path) -- save to temp
                   try {
                     const buffer = await file.arrayBuffer()
                     const savedPath = await window.ghostshell.saveTempImage(buffer, file.type)
@@ -1024,7 +1059,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                 // Show feedback for saved images
                 const imageCount = paths.filter((p) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)).length
                 if (imageCount > 0) {
-                  terminal.writeln(`\r\n\x1b[36m[${imageCount} image${imageCount > 1 ? 's' : ''} dropped Ã¢â€ â€™ path${imageCount > 1 ? 's' : ''} sent to terminal]\x1b[0m`)
+                  terminal.writeln(`\r\n\x1b[36m[${imageCount} image${imageCount > 1 ? 's' : ''} dropped -> path${imageCount > 1 ? 's' : ''} sent to terminal]\x1b[0m`)
                 }
               }
             })()
@@ -1115,16 +1150,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           if (agentId) {
             setAgentStatus(agentId, 'offline')
             updateAgent(agentId, { terminalId: undefined })
-            useNotificationStore.getState().addNotification({
-              type: 'warning',
-              title: `${agentName} disconnected`,
-              message: 'Process exited unexpectedly',
-              source: agentName,
-              duration: 5000,
-              tier: 'full',
-              dedupeKey: `agent-disconnected:${agentId}`,
-              dedupeWindowMs: 10000,
-            })
           }
         })
         cleanups.push(removeExitListener)
@@ -1133,10 +1158,15 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         if (autoLaunch && agentId) {
           const launchAgent = getAgent(agentId)
           if (launchAgent) {
-            const launchProvider = resolveProvider(launchAgent)
-            const hasConfig = launchProvider === 'gemini' ? !!launchAgent.geminiConfig : launchProvider === 'codex' ? !!launchAgent.codexConfig : !!launchAgent.claudeConfig
-            if (hasConfig || launchProvider === 'gemini' || launchProvider === 'codex') {
-              const cmd = buildLaunchCommand(launchAgent)
+            // Check for pre-built launch command (swarm agents) or build from config
+            const launchSession = useTerminalStore.getState().getSession(sessionId)
+            const cmd = launchSession?.launchCommand || (() => {
+              const launchProvider = resolveProvider(launchAgent)
+              const hasConfig = launchProvider === 'gemini' ? !!launchAgent.geminiConfig : launchProvider === 'codex' ? !!launchAgent.codexConfig : !!launchAgent.claudeConfig
+              if (hasConfig || launchProvider === 'gemini' || launchProvider === 'codex') return buildLaunchCommand(launchAgent)
+              return null
+            })()
+            if (cmd) {
               const delays = [500, 1500, 3000]
               let attempt = 0
               const tryWrite = () => {
@@ -1150,7 +1180,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                     setTimeout(tryWrite, delays[attempt] - delays[attempt - 1])
                   } else {
                     console.error('Auto-launch failed after retries:', err)
-                    terminal.writeln(`\r\n\x1b[33m[Auto-launch failed Ã¢â‚¬â€ type the command manually: ${cmd}]\x1b[0m`)
+                    terminal.writeln(`\r\n\x1b[33m[Auto-launch failed -- type the command manually: ${cmd}]\x1b[0m`)
                   }
                 }
               }
@@ -1176,7 +1206,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     })
 
     // Defer PTY init to avoid double PTY creation in React StrictMode (dev mode).
-    // StrictMode unmounts immediately after first mount Ã¢â‚¬â€ the cleanup cancels
+    // StrictMode unmounts immediately after first mount -- the cleanup cancels
     // the timer before the PTY is ever created, so only the second mount wins.
     let cancelled = false
     const initTimer = setTimeout(() => {

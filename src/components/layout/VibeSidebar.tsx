@@ -2,21 +2,11 @@ import { SidebarView } from '../../lib/types'
 import { FileExplorer } from '../files/FileExplorer'
 import { HistoryPanel } from '../common/HistoryPanel'
 import { CommandBlocksPanel } from '../blocks/CommandBlocksPanel'
-import { GlobalSwarmPanel } from '../agents/GlobalSwarmPanel'
-import { SwarmDashboard } from '../swarm/SwarmDashboard'
-import { useSwarmStore } from '../../stores/swarmStore'
+import SwarmCoordinationBoard from '../swarm/SwarmCoordinationBoard'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface VibeSidebarProps {
   activeView: SidebarView | null
-}
-
-function SwarmView() {
-  const hasActiveSwarm = useSwarmStore((s) => s.activeSwarmId !== null)
-  if (hasActiveSwarm) {
-    return <SwarmDashboard />
-  }
-  return <GlobalSwarmPanel />
 }
 
 export function VibeSidebar({ activeView }: VibeSidebarProps) {
@@ -34,7 +24,7 @@ export function VibeSidebar({ activeView }: VibeSidebarProps) {
             {activeView === 'files' && <FileExplorer />}
             {activeView === 'history' && <HistoryPanel />}
             {activeView === 'blocks' && <CommandBlocksPanel />}
-            {activeView === 'swarm' && <SwarmView />}
+            {activeView === 'swarm' && <SwarmCoordinationBoard />}
           </div>
         </motion.div>
       )}

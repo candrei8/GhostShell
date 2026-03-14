@@ -23,11 +23,11 @@ export function AppLayout() {
   const sessions = useTerminalStore((s) => s.sessions)
   const [activeView, setActiveView] = useState<SidebarView | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
-  const [showQuickLaunch, setShowQuickLaunch] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
   const [monitorOpen, setMonitorOpen] = useState(false)
   const wizardOpen = useSwarmStore((s) => s.wizard.isOpen)
+  const activeSwarmId = useSwarmStore((s) => s.activeSwarmId)
   const openWizard = useSwarmStore((s) => s.openWizard)
   const closeWizard = useSwarmStore((s) => s.closeWizard)
   const setActiveSwarm = useSwarmStore((s) => s.setActiveSwarm)
@@ -35,9 +35,6 @@ export function AppLayout() {
   const setSidebarView = useCallback((view: SidebarView | null) => {
     setSettingsOpen(false)
     setActiveView(view)
-    if (view) {
-      setShowQuickLaunch(false)
-    }
   }, [])
 
   const closeSettings = useCallback(() => {
@@ -79,14 +76,17 @@ export function AppLayout() {
     setSidebarView(view as SidebarView)
   }, [openSettings, openWizard, setSidebarView])
 
-  const handleShowQuickLaunch = useCallback((show: boolean) => {
-    setShowQuickLaunch(show)
-  }, [])
-
   const handleQuickLaunch = useCallback(() => {
     setSettingsOpen(false)
-    setShowQuickLaunch(true)
     setActiveView(null)
+    const cwd = useWorkspaceStore.getState().currentPath
+    useTerminalStore.getState().addSession({
+      id: `term-quicklaunch-${Date.now()}`,
+      title: 'New Session',
+      cwd,
+      showQuickLaunch: true,
+      sessionType: 'ghostcode',
+    })
   }, [])
 
   const handleSpawnTerminal = useCallback(() => {
@@ -97,7 +97,6 @@ export function AppLayout() {
       cwd,
     })
     setSettingsOpen(false)
-    setShowQuickLaunch(false)
   }, [])
 
   const toggleCommandPalette = useCallback(() => {
@@ -222,6 +221,10 @@ export function AppLayout() {
     restore()
   }, [])
 
+  const handleToggleSidebar = useCallback(() => {
+    setActiveView((prev) => (prev ? null : 'swarm'))
+  }, [])
+
   useKeyboardShortcuts({
     onToggleCommandPalette: toggleCommandPalette,
     onNavigate: handleNavigate,
@@ -229,9 +232,17 @@ export function AppLayout() {
     onToggleQuickLaunch: handleQuickLaunch,
     onOpenSettingsTab: (tab: SettingsTab) => openSettings(tab),
     onToggleMonitor: handleToggleMonitor,
+    onToggleSidebar: handleToggleSidebar,
     isSettingsOpen: settingsOpen,
     isCommandPaletteOpen: commandPaletteOpen,
   })
+
+  // Close swarm sidebar when swarm is stopped/completed
+  useEffect(() => {
+    if (!activeSwarmId && activeView === 'swarm') {
+      setActiveView(null)
+    }
+  }, [activeSwarmId, activeView])
 
   // Refit on activeView change so terminal resizes if panel covers it
   useEffect(() => {
@@ -248,17 +259,13 @@ export function AppLayout() {
     <div className="ghost-app-shell h-screen w-screen overflow-hidden flex flex-col font-sans text-ghost-text">
       <GlobalDock
         onOpenSettings={openSettings}
-        onQuickLaunch={handleQuickLaunch}
         onSpawnTerminal={handleSpawnTerminal}
       />
 
       <div className="relative flex min-h-0 flex-1 px-3 pb-3">
         {/* Terminals Area */}
         <div className="flex-1 min-w-0 relative">
-          <TerminalContainer
-            showQuickLaunch={showQuickLaunch}
-            onShowQuickLaunch={handleShowQuickLaunch}
-          />
+          <TerminalContainer />
         </div>
 
         {/* Sidebar Context */}

@@ -11,13 +11,16 @@ import {
 } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useAgentStore } from '../../stores/agentStore'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { useSwarmStore } from '../../stores/swarmStore'
 import { ContextMenu } from '../common/ContextMenu'
+import { SessionTypeSelector } from '../terminal/SessionTypeSelector'
+import { type SessionType } from '../../lib/types'
 
 // ─── Types ───────────────────────────────────────────────
 
 interface GlobalDockProps {
   onOpenSettings: (tab?: 'appearance' | 'providers' | 'terminal') => void
-  onQuickLaunch: () => void
   onSpawnTerminal: () => void
 }
 
@@ -65,7 +68,6 @@ const Logo = () => (
 
 export function GlobalDock({
   onOpenSettings,
-  onQuickLaunch,
   onSpawnTerminal,
 }: GlobalDockProps) {
   // ── Stores ──
@@ -85,6 +87,7 @@ export function GlobalDock({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [showTypeSelector, setShowTypeSelector] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const workspaces = useMemo(() => getWorkspaces(), [getWorkspaces, sessions, groups])
@@ -148,8 +151,25 @@ export function GlobalDock({
       onSpawnTerminal()
       return
     }
-    onQuickLaunch()
-  }, [onQuickLaunch, onSpawnTerminal])
+    setShowTypeSelector(true)
+  }, [onSpawnTerminal])
+
+  const handleTypeSelected = useCallback((type: SessionType) => {
+    setShowTypeSelector(false)
+
+    if (type === 'ghostswarm') {
+      useSwarmStore.getState().openWizard()
+    } else {
+      const cwd = useWorkspaceStore.getState().currentPath
+      useTerminalStore.getState().addSession({
+        id: `term-quicklaunch-${Date.now()}`,
+        title: 'New Session',
+        cwd,
+        showQuickLaunch: true,
+        sessionType: 'ghostcode',
+      })
+    }
+  }, [])
 
   const handleNewTabContext = useCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -213,14 +233,15 @@ export function GlobalDock({
       </div>
 
       {/* ── Center: Tabs + New ─────────────────────── */}
-      <div className="titlebar-no-drag flex h-full flex-1 items-center overflow-x-auto no-scrollbar">
+      <div className="flex h-full flex-1 items-center overflow-x-auto no-scrollbar">
         {showTabs && workspaces.map((ws) => {
           const isActive = ws.id === resolvedActiveWorkspaceId
           const agent = ws.agentId ? agents.find((a) => a.id === ws.agentId) : null
           let tabColor = ws.color
           if (!tabColor) tabColor = agent?.color || getAutoColor(ws.id)
           else if (tabColor === 'default') tabColor = undefined
-          const isSwarm = ws.title.toLowerCase().includes('swarm')
+          const wsSession = sessions.find((s) => ws.sessionIds.includes(s.id))
+          const isSwarm = wsSession?.sessionType === 'ghostswarm' || ws.title.toLowerCase().includes('swarm')
           const TabIcon = isSwarm ? Network : TerminalIcon
           const isEditing = editingId === ws.id
 
@@ -230,7 +251,7 @@ export function GlobalDock({
               onClick={() => { if (!isEditing) setActiveWorkspace(ws.id) }}
               onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(ws.title); setEditingId(ws.id) }}
               onContextMenu={(e) => { e.preventDefault(); setContextMenu({ id: ws.id, x: e.clientX, y: e.clientY }) }}
-              className={`group relative flex h-full min-w-[120px] max-w-[200px] shrink-0 cursor-pointer items-center justify-between px-3 transition-all duration-150 border-r border-white/5 ${
+              className={`titlebar-no-drag group relative flex h-full min-w-[120px] max-w-[200px] shrink-0 cursor-pointer items-center justify-between px-3 transition-all duration-150 border-r border-white/5 ${
                 isActive ? 'text-white' : 'text-white/70 hover:text-white/90 hover:bg-white/[0.04]'
               }`}
               style={{
@@ -279,7 +300,7 @@ export function GlobalDock({
           onClick={handleNewTab}
           onContextMenu={handleNewTabContext}
           title="New session (Shift+click for plain terminal)"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md ml-1 transition-all text-white/30 hover:bg-white/[0.06] hover:text-white/60 active:scale-[0.95]"
+          className="titlebar-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded-md ml-1 transition-all text-white/30 hover:bg-white/[0.06] hover:text-white/60 active:scale-[0.95]"
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
@@ -328,6 +349,13 @@ export function GlobalDock({
           <X className="h-[18px] w-[18px]" />
         </button>
       </div>
+
+      {showTypeSelector && (
+        <SessionTypeSelector
+          onSelect={handleTypeSelected}
+          onClose={() => setShowTypeSelector(false)}
+        />
+      )}
     </div>
   )
 }

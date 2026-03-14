@@ -5,6 +5,11 @@ import { useAgent } from './useAgent'
 import { useShortcutStore } from '../stores/shortcutStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useSettingsStore } from '../stores/settingsStore'
+
+// Stack of recently closed sessions for reopen (module-level, survives re-renders)
+const closedTabStack: Array<{ title: string; cwd?: string; shell?: string }> = []
+const MAX_CLOSED_TABS = 20
 
 interface KeyboardShortcutsOptions {
   onToggleCommandPalette: () => void
@@ -13,6 +18,7 @@ interface KeyboardShortcutsOptions {
   onToggleQuickLaunch?: () => void
   onOpenSettingsTab?: (tab: 'appearance' | 'providers' | 'terminal' | 'shortcuts') => void
   onToggleMonitor?: () => void
+  onToggleSidebar?: () => void
   isSettingsOpen?: boolean
   isCommandPaletteOpen?: boolean
 }
@@ -42,6 +48,7 @@ export function useKeyboardShortcuts({
   onToggleQuickLaunch,
   onOpenSettingsTab,
   onToggleMonitor,
+  onToggleSidebar,
   isSettingsOpen = false,
   isCommandPaletteOpen = false,
 }: KeyboardShortcutsOptions) {
@@ -95,6 +102,7 @@ export function useKeyboardShortcuts({
         return
       }
 
+      // Close tab — push to closedTabStack before removing
       if (
         run('terminal.close', () => {
           const state = useTerminalStore.getState()
@@ -104,6 +112,12 @@ export function useKeyboardShortcuts({
           if (session?.agentId) {
             stopAgent(session.agentId)
             return
+          }
+
+          // Remember closed tab for reopen
+          if (session) {
+            closedTabStack.push({ title: session.title, cwd: session.cwd, shell: session.shell })
+            if (closedTabStack.length > MAX_CLOSED_TABS) closedTabStack.shift()
           }
 
           state.removeSession(state.activeSessionId)
@@ -137,6 +151,182 @@ export function useKeyboardShortcuts({
       ) {
         return
       }
+
+      // ── New Warp-style terminal shortcuts ──────────────────────────────
+
+      if (
+        run('terminal.clear', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.clearTerminal))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.clearScrollback', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.clearScrollback))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.scrollToTop', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.scrollToTop))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.scrollToBottom', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.scrollToBottom))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.zoomIn', () => {
+          const settings = useSettingsStore.getState()
+          const current = settings.terminalFontSize
+          if (current < 24) settings.setTerminalFontSize(current + 1)
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.zoomOut', () => {
+          const settings = useSettingsStore.getState()
+          const current = settings.terminalFontSize
+          if (current > 10) settings.setTerminalFontSize(current - 1)
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.zoomReset', () => {
+          useSettingsStore.getState().setTerminalFontSize(14)
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.selectAll', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.selectAll))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.moveTabLeft', () => {
+          const state = useTerminalStore.getState()
+          if (!state.activeSessionId) return
+          const idx = state.sessions.findIndex((s) => s.id === state.activeSessionId)
+          if (idx > 0) state.moveSession(idx, idx - 1)
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.moveTabRight', () => {
+          const state = useTerminalStore.getState()
+          if (!state.activeSessionId) return
+          const idx = state.sessions.findIndex((s) => s.id === state.activeSessionId)
+          if (idx >= 0 && idx < state.sessions.length - 1) state.moveSession(idx, idx + 1)
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.reopenClosed', () => {
+          const entry = closedTabStack.pop()
+          if (!entry) return
+          const cwd = entry.cwd || useWorkspaceStore.getState().currentPath
+          useTerminalStore.getState().addSession({
+            id: `term-reopen-${Date.now()}`,
+            title: entry.title,
+            cwd,
+            shell: entry.shell,
+          })
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.killProcess', () => {
+          const state = useTerminalStore.getState()
+          if (!state.activeSessionId) return
+          try {
+            window.ghostshell.ptyKill(state.activeSessionId)
+          } catch {}
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.copyPath', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.copyPath))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('terminal.newWithProfile', () => {
+          onToggleQuickLaunch?.()
+        })
+      ) {
+        return
+      }
+
+      // ── Navigation shortcuts ──────────────────────────────────────────
+
+      if (run('nav.toggleSidebar', () => onToggleSidebar?.())) return
+
+      if (
+        run('nav.toggleFullscreen', () => {
+          // Electron fullscreen toggle
+          try {
+            ;(window as any).ghostshell?.toggleFullscreen?.()
+          } catch {}
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('nav.focusTerminal', () => {
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.focusTerminal))
+        })
+      ) {
+        return
+      }
+
+      if (
+        run('nav.lastTab', () => {
+          const { sessions, setActiveSession, viewMode, getWorkspaces, setActiveWorkspace } =
+            useTerminalStore.getState()
+          if (viewMode === 'tabs') {
+            const workspaces = getWorkspaces()
+            if (workspaces.length > 0) setActiveWorkspace(workspaces[workspaces.length - 1].id)
+          } else if (sessions.length > 0) {
+            setActiveSession(sessions[sessions.length - 1].id)
+          }
+        })
+      ) {
+        return
+      }
+
+      // ── Pane navigation ───────────────────────────────────────────────
 
       if (matches('pane.prev') || matches('pane.next')) {
         event.preventDefault()
@@ -246,6 +436,8 @@ export function useKeyboardShortcuts({
         return
       }
 
+      // ── Settings shortcuts ────────────────────────────────────────────
+
       if (
         run('nav.settings', () => {
           onOpenSettingsTab?.('appearance') ?? onNavigate?.('settings')
@@ -297,6 +489,7 @@ export function useKeyboardShortcuts({
       onToggleCommandPalette,
       onToggleMonitor,
       onToggleQuickLaunch,
+      onToggleSidebar,
       stopAgent,
     ],
   )

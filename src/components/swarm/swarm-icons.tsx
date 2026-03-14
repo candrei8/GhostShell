@@ -1,36 +1,36 @@
 import {
-  Crown,
-  Hammer,
-  Search,
-  Eye,
-  Wrench,
-  Ghost,
-  Bot,
-  Sparkles,
-  Code,
-  MousePointer,
+  Terminal,
+  Code2,
+  Radar,
+  ShieldCheck,
+  Hexagon,
+  BrainCircuit,
+  Binary,
+  Aperture,
+  Braces,
+  TerminalSquare,
   Cpu,
-  Zap,
+  Rocket,
 } from 'lucide-react'
 
 // ─── Shared icon maps (single source of truth) ──────────────
 
 export const ROLE_ICONS: Record<string, React.FC<{ className?: string }>> = {
-  Crown,
-  Hammer,
-  Search,
-  Eye,
-  Wrench,
+  Terminal,
+  Code2,
+  Radar,
+  ShieldCheck,
+  Hexagon,
 }
 
 export const CLI_ICONS: Record<string, React.FC<{ className?: string }>> = {
-  Ghost,
-  Bot,
-  Sparkles,
-  Code,
-  MousePointer,
+  BrainCircuit,
+  Binary,
+  Aperture,
+  Braces,
+  TerminalSquare,
   Cpu,
-  Zap,
+  Rocket,
 }
 
 // ─── Helper components ──────────────────────────────────────

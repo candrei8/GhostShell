@@ -112,7 +112,10 @@ function enhanceInlineTokens(line: string, provider: Provider, mode: TerminalOut
 
 function enhanceLine(line: string, provider: Provider, mode: TerminalOutputEnhancementMode): string {
   if (!line.trim()) return line
-  if (ANSI_PATTERN.test(line)) return line
+  // Skip ANY line containing escape sequences — covers CSI (\x1b[...), DEC private
+  // modes (\x1b[?...), charset switches (\x1b(...), and all other ESC-based sequences.
+  // The old ANSI_PATTERN only matched CSI, missing \x1b[?25l, \x1b[?1049h, etc.
+  if (line.includes('\x1b')) return line
 
   const trimmed = line.trim()
 

@@ -195,10 +195,33 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
     })
     dedupeLastSeenAt.set(dedupeKey, now)
 
-    // Tier "full": OS notification + custom sound.
+    // Always play sound on new notifications
+    playNotificationSound(type)
+
+    // Tier "full": show native OS notification + flash taskbar
     if (tier === 'full') {
+      // Use Web Notification API (works reliably in Electron dev & prod)
+      if (typeof globalThis.Notification !== 'undefined') {
+        if (globalThis.Notification.permission === 'granted') {
+          const n = new globalThis.Notification(title, {
+            body: message || '',
+            silent: true, // we play our own sound
+          })
+          n.onclick = () => window.focus()
+        } else if (globalThis.Notification.permission !== 'denied') {
+          globalThis.Notification.requestPermission().then((perm) => {
+            if (perm === 'granted') {
+              const n = new globalThis.Notification(title, {
+                body: message || '',
+                silent: true,
+              })
+              n.onclick = () => window.focus()
+            }
+          })
+        }
+      }
+      // Flash taskbar (via IPC to main process)
       window.ghostshell?.showNotification(title, message)
-      playNotificationSound(type)
     }
 
     if (isAutoDismissible(notification)) {

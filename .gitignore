@@ -42,6 +42,12 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
+# GhostSwarm runtime data
+.bridgespace/
+
+# Screenshots
+screenshot_*.png
+
 # Electron
 electron-builder-dist/
 release/

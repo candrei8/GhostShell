@@ -151,11 +151,12 @@ function SettingsModalContent({ initialTab, onClose }: { initialTab: SettingsTab
 
   const handlePreviewNotification = useCallback(() => {
     useNotificationStore.getState().addNotification({
-      type: 'info',
-      title: 'Notification preview',
-      message: `Timing mode: ${notificationTimingMode}. Hover should pause dismissal.`,
+      type: 'success',
+      title: 'Agent finished',
+      message: `Task completed successfully. Timing: ${notificationTimingMode}.`,
       source: 'Settings',
       tier: 'toast',
+      allowWhileMuted: true,
     })
   }, [notificationTimingMode])
 

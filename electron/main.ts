@@ -1,12 +1,13 @@
 import { randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { isAbsolute, join, normalize, resolve as pathResolve } from 'path'
 import { PtyManager } from './pty-manager'
 import { isSafeExternalUrl, readFilePreview, runCommand, sanitizeFileBasename } from './runtime-utils'
 import { initUpdater } from './updater'
 import { WorkspaceManager } from './workspace-manager'
+import * as swarmFileLock from './swarm-file-lock-manager'
 
 type Provider = 'claude' | 'gemini' | 'codex'
 
@@ -33,11 +34,18 @@ let closeForceTimer: ReturnType<typeof setTimeout> | null = null
 const ptyManager = new PtyManager()
 const workspaceManager = new WorkspaceManager()
 
+// Set app name early to ensure consistent userData path for cache dirs below
+app.setName('GhostShell')
+
 // Enable hardware acceleration for crisp WebGL terminal rendering
 app.commandLine.appendSwitch('enable-gpu-rasterization')
 app.commandLine.appendSwitch('enable-zero-copy')
 app.commandLine.appendSwitch('high-dpi-support', '1')
 app.commandLine.appendSwitch('force-device-scale-factor', '1')
+
+// Fix GPU disk cache "Access denied" errors on Windows by setting explicit cache paths
+app.commandLine.appendSwitch('disk-cache-dir', join(app.getPath('userData'), 'Cache'))
+app.commandLine.appendSwitch('gpu-disk-cache-dir', join(app.getPath('userData'), 'GPUCache'))
 
 function isProvider(value: string): value is Provider {
   return value === 'claude' || value === 'gemini' || value === 'codex'
@@ -207,6 +215,11 @@ function setupIPC(): void {
   })
   ipcMain.on('window:close', () => mainWindow?.close())
   ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized())
+  ipcMain.on('window:toggleFullscreen', () => {
+    if (mainWindow) {
+      mainWindow.setFullScreen(!mainWindow.isFullScreen())
+    }
+  })
 
   // PTY handlers
   ipcMain.handle(
@@ -441,13 +454,25 @@ function setupIPC(): void {
     }
   })
 
-  // Native OS notifications
-  ipcMain.on('notify:show', (_event, options: { title: string; body?: string }) => {
-    if (Notification.isSupported()) {
-      new Notification({
-        title: options.title,
-        body: options.body || '',
-      }).show()
+  ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8')
+      return { success: true, content }
+    } catch (error) {
+      return { success: false, content: '', error: String(error) }
+    }
+  })
+
+  // Notification support: flash taskbar when app is unfocused
+  // (Native OS notification is handled via Web Notification API in renderer)
+  ipcMain.on('notify:show', () => {
+    if (mainWindow && !mainWindow.isFocused()) {
+      mainWindow.flashFrame(true)
+      const stopFlash = () => {
+        mainWindow?.flashFrame(false)
+        mainWindow?.removeListener('focus', stopFlash)
+      }
+      mainWindow.once('focus', stopFlash)
     }
   })
 
@@ -489,6 +514,48 @@ function setupIPC(): void {
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }
+    }
+  })
+
+  // Swarm file lock handlers
+  ipcMain.handle('swarm:acquireLocks', async (
+    _event,
+    swarmRoot: string,
+    taskId: string,
+    agentName: string,
+    files: string[]
+  ) => {
+    try {
+      const binDir = join(swarmRoot, 'bin')
+      try { await fs.access(binDir) } catch { return { success: false, error: 'Swarm directory not found' } }
+      return await swarmFileLock.acquireLocks(swarmRoot, taskId, agentName, files)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('swarm:releaseLocks', async (_event, swarmRoot: string, taskId: string) => {
+    try {
+      await swarmFileLock.releaseLocks(swarmRoot, taskId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('swarm:checkLock', async (_event, swarmRoot: string, filePath: string) => {
+    try {
+      return await swarmFileLock.checkLock(swarmRoot, filePath)
+    } catch (error) {
+      return null
+    }
+  })
+
+  ipcMain.handle('swarm:getAllLocks', async (_event, swarmRoot: string) => {
+    try {
+      return await swarmFileLock.getAllLocks(swarmRoot)
+    } catch (error) {
+      return {}
     }
   })
 
@@ -623,9 +690,6 @@ function setupIPC(): void {
   })
 }
 
-// Set app name to ensure consistent userData path across dev/prod.
-// Without this, dev mode can share the generic "Electron" directory.
-app.setName('GhostShell')
 app.setAppUserModelId('com.ghostshell.app')
 
 app.whenReady().then(() => {

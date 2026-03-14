@@ -323,7 +323,6 @@ export function FileExplorer() {
     }
 
     const claudeConfig: ClaudeConfig = {
-      model: defaultModel || getDefaultModel('claude'),
       dangerouslySkipPermissions: defaultSkipPermissions,
     }
     createAgent(

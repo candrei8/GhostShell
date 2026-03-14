@@ -176,7 +176,6 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
           avatar: template.avatar,
           color: template.avatar.color,
           claudeConfig: {
-            model: resolveConfiguredModel(templateProvider),
             dangerouslySkipPermissions: skipPermissions,
             systemPrompt: template.systemPrompt,
             allowedTools: extractAllowedTools(template.claudeFlags),

@@ -5,6 +5,7 @@ import { usePty } from '../../hooks/usePty'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { TerminalSearch } from './TerminalSearch'
 import { MultiLineInput } from './MultiLineInput'
+import { QuickLaunch } from './QuickLaunch'
 import { useAgentStore } from '../../stores/agentStore'
 import { useActivityStore } from '../../stores/activityStore'
 import { useCompanionStore } from '../../stores/companionStore'
@@ -44,7 +45,12 @@ export function TerminalPane({
     session.agentId ? s.agents.find((a) => a.id === session.agentId) : undefined,
   )
   const activityId = session.agentId || session.id
-  const activity = useActivityStore((s) => s.activities[activityId])
+  // Select only the fields TerminalPane actually renders to avoid re-renders
+  // from high-frequency activityLog/subAgents changes (e.g. spinner frames).
+  const activityName = useActivityStore((s) => s.activities[activityId]?.currentActivity || null)
+  const activityDetail = useActivityStore((s) => s.activities[activityId]?.currentDetail || null)
+  const activityStartedAt = useActivityStore((s) => s.activities[activityId]?.lastActivityTime || null)
+  const activityContextMetrics = useActivityStore((s) => s.activities[activityId]?.contextMetrics)
   const companionSession = useCompanionStore((s) => s.sessions[session.id])
   const blocksForSession = useCommandBlockStore((s) => s.blocksBySession[session.id])
   const companionEntries = companionSession?.entries ?? []
@@ -60,16 +66,13 @@ export function TerminalPane({
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
   const providerColor = provider ? getProviderColor(provider) : '#e4e4e7'
-  const activityName = activity?.currentActivity || null
-  const activityDetail = activity?.currentDetail || null
-  const activityStartedAt = activity?.lastActivityTime || null
   const hasContextData = useMemo(
     () =>
       !!provider ||
-      hasContextMetrics(activity?.contextMetrics) ||
+      hasContextMetrics(activityContextMetrics) ||
       companionEntries.length > 0 ||
       commandBlocks.length > 0,
-    [provider, activity?.contextMetrics, companionEntries.length, commandBlocks.length],
+    [provider, activityContextMetrics, companionEntries.length, commandBlocks.length],
   )
 
   // Title and Description editing state
@@ -188,6 +191,61 @@ export function TerminalPane({
       window.removeEventListener(SHORTCUT_EVENTS.openMultiLineInput, handleMultiLine as EventListener)
   }, [isActive])
 
+  // ── Warp-style terminal event handlers ─────────────────────────────
+  useEffect(() => {
+    if (!isActive || !terminal) return
+
+    const handleClear = () => {
+      terminal.clear()
+    }
+
+    const handleClearScrollback = () => {
+      terminal.clear()
+      terminal.reset()
+    }
+
+    const handleScrollToTop = () => {
+      terminal.scrollToTop()
+    }
+
+    const handleScrollToBottom = () => {
+      terminal.scrollToBottom()
+    }
+
+    const handleSelectAll = () => {
+      terminal.selectAll()
+    }
+
+    const handleCopyPath = () => {
+      const path = session.cwd
+      if (path) {
+        navigator.clipboard.writeText(path).catch(() => {})
+      }
+    }
+
+    const handleFocusTerminal = () => {
+      terminal.focus()
+    }
+
+    window.addEventListener(SHORTCUT_EVENTS.clearTerminal, handleClear as EventListener)
+    window.addEventListener(SHORTCUT_EVENTS.clearScrollback, handleClearScrollback as EventListener)
+    window.addEventListener(SHORTCUT_EVENTS.scrollToTop, handleScrollToTop as EventListener)
+    window.addEventListener(SHORTCUT_EVENTS.scrollToBottom, handleScrollToBottom as EventListener)
+    window.addEventListener(SHORTCUT_EVENTS.selectAll, handleSelectAll as EventListener)
+    window.addEventListener(SHORTCUT_EVENTS.copyPath, handleCopyPath as EventListener)
+    window.addEventListener(SHORTCUT_EVENTS.focusTerminal, handleFocusTerminal as EventListener)
+
+    return () => {
+      window.removeEventListener(SHORTCUT_EVENTS.clearTerminal, handleClear as EventListener)
+      window.removeEventListener(SHORTCUT_EVENTS.clearScrollback, handleClearScrollback as EventListener)
+      window.removeEventListener(SHORTCUT_EVENTS.scrollToTop, handleScrollToTop as EventListener)
+      window.removeEventListener(SHORTCUT_EVENTS.scrollToBottom, handleScrollToBottom as EventListener)
+      window.removeEventListener(SHORTCUT_EVENTS.selectAll, handleSelectAll as EventListener)
+      window.removeEventListener(SHORTCUT_EVENTS.copyPath, handleCopyPath as EventListener)
+      window.removeEventListener(SHORTCUT_EVENTS.focusTerminal, handleFocusTerminal as EventListener)
+    }
+  }, [isActive, terminal, session.cwd])
+
   const handleMultiLineSubmit = useCallback(
     (text: string) => {
       if (!session.id) return
@@ -224,6 +282,23 @@ export function TerminalPane({
   const paneStyle = useMemo(() => ({
     background: '#0a0e18',
   }), [])
+
+  const handleQuickLaunchComplete = useCallback(() => {
+    updateSession(session.id, { showQuickLaunch: false })
+  }, [session.id, updateSession])
+
+  // If this session should show QuickLaunch, render it instead of terminal
+  if (session.showQuickLaunch) {
+    return (
+      <div
+        data-terminal-pane
+        className="relative flex h-full flex-col overflow-hidden bg-ghost-bg"
+        onClick={onClick}
+      >
+        <QuickLaunch sessionId={session.id} onLaunched={handleQuickLaunchComplete} />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -360,7 +435,7 @@ export function TerminalPane({
             {provider && hasContextData && (
               <ContextGauge
                 provider={provider}
-                metrics={activity?.contextMetrics}
+                metrics={activityContextMetrics}
                 active={contextOpen}
                 onClick={() => setContextOpen((prev) => !prev)}
               />
@@ -417,7 +492,7 @@ export function TerminalPane({
             <TerminalContextPanel
               session={session}
               provider={provider}
-              activity={activity}
+              activityId={activityId}
               entries={companionEntries}
               blocks={commandBlocks}
               onClose={() => setContextOpen(false)}

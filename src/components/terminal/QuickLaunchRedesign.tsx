@@ -28,6 +28,7 @@ import {
   type LaunchPreset,
   type Provider,
 } from '../../lib/types'
+import { useAgentStore } from '../../stores/agentStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -38,6 +39,7 @@ const ACCENT = '#38bdf8' // sky-400
 
 interface QuickLaunchProps {
   onLaunched: () => void
+  sessionId?: string // If provided, update this session instead of creating new ones
 }
 
 const LAYOUTS: { layout: GridLayout; count: number; cols: number; rows: number }[] = [
@@ -199,7 +201,7 @@ function StepBar({ step }: { step: 1 | 2 }) {
 
 // ─── Main Component ──────────────────────────────────────────
 
-export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
+export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
   const defaultModel = useSettingsStore((s) => s.defaultModel)
   const defaultGeminiModel = useSettingsStore((s) => s.defaultGeminiModel)
   const defaultCodexModel = useSettingsStore((s) => s.defaultCodexModel)
@@ -483,11 +485,21 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
   }
 
   const handleLaunchTerminal = () => {
-    useTerminalStore.getState().addSession({
-      id: `term-standalone-${Date.now()}`,
-      title: 'Terminal',
-      cwd: resolvedPath,
-    })
+    if (sessionId) {
+      // Update existing session to be a plain terminal
+      useTerminalStore.getState().updateSession(sessionId, {
+        title: 'Terminal',
+        cwd: resolvedPath,
+        showQuickLaunch: false,
+      })
+    } else {
+      // Create new terminal session
+      useTerminalStore.getState().addSession({
+        id: `term-standalone-${Date.now()}`,
+        title: 'Terminal',
+        cwd: resolvedPath,
+      })
+    }
     onLaunched()
   }
 
@@ -518,6 +530,7 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
       const cwd = resolvedPath || undefined
       if (cwd) setLastAgentFolder(cwd)
       const sessionIds: string[] = []
+      let firstAgentId: string | undefined
 
       for (const { id: p } of PROVIDERS) {
         const count = providerCounts[p]
@@ -527,26 +540,58 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
           const avatar = getAvatar(p)
           const model = resolveModel(p)
 
+          let result: ReturnType<typeof createAgent>
           if (p === 'gemini') {
             const geminiConfig: GeminiConfig = { model, yolo }
-            sessionIds.push(
-              createAgent(name, avatar, avatar.color, {}, cwd, undefined, undefined, true, 'gemini', geminiConfig).sessionId,
-            )
+            result = createAgent(name, avatar, avatar.color, {}, cwd, undefined, undefined, true, 'gemini', geminiConfig)
           } else if (p === 'codex') {
             const codexConfig: CodexConfig = { model, fullAuto: yolo, sandbox: 'workspace-write' }
-            sessionIds.push(
-              createAgent(name, avatar, avatar.color, {}, cwd, undefined, undefined, true, 'codex', undefined, codexConfig).sessionId,
-            )
+            result = createAgent(name, avatar, avatar.color, {}, cwd, undefined, undefined, true, 'codex', undefined, codexConfig)
           } else {
-            const claudeConfig: ClaudeConfig = { model, dangerouslySkipPermissions: yolo }
-            sessionIds.push(
-              createAgent(name, avatar, avatar.color, claudeConfig, cwd, undefined, undefined, true, 'claude').sessionId,
-            )
+            const claudeConfig: ClaudeConfig = { dangerouslySkipPermissions: yolo }
+            result = createAgent(name, avatar, avatar.color, claudeConfig, cwd, undefined, undefined, true, 'claude')
           }
+
+          if (!firstAgentId) firstAgentId = result.agent.id
+          sessionIds.push(result.sessionId)
         }
       }
 
-      if (sessionIds.length > 1) {
+      // If sessionId provided, replace it with the first agent's session
+      if (sessionId && sessionIds.length > 0) {
+        const firstSessionId = sessionIds[0]
+        const firstSession = useTerminalStore.getState().getSession(firstSessionId)
+
+        if (firstSession) {
+          // Update the existing session with the new agent
+          useTerminalStore.getState().updateSession(sessionId, {
+            agentId: firstSession.agentId,
+            title: firstSession.title,
+            cwd: firstSession.cwd,
+            showQuickLaunch: false,
+          })
+
+          // Remove the newly created session as we're reusing the existing one
+          useTerminalStore.getState().removeSession(firstSessionId)
+
+          // Update the agent's terminalId to point to the existing session
+          if (firstSession.agentId) {
+            useAgentStore.getState().updateAgent(firstSession.agentId, { terminalId: sessionId })
+          }
+
+          // If there are more sessions, keep them as-is (multi-agent group)
+          if (sessionIds.length > 1) {
+            const remainingSessionIds = sessionIds.slice(1)
+            useTerminalStore.getState().addGroup({
+              id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: `Session (${remainingSessionIds.length + 1})`,
+              sessionIds: [sessionId, ...remainingSessionIds],
+              createdAt: Date.now(),
+            })
+          }
+        }
+      } else if (sessionIds.length > 1) {
+        // Normal behavior: create group for multiple sessions
         useTerminalStore.getState().addGroup({
           id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           name: `Session (${sessionIds.length})`,
@@ -573,7 +618,13 @@ export function QuickLaunch({ onLaunched }: QuickLaunchProps) {
       <StepBar step={step} />
 
       <button
-        onClick={onLaunched}
+        onClick={() => {
+          if (sessionId) {
+            // Inside a tab: remove the empty session
+            useTerminalStore.getState().removeSession(sessionId)
+          }
+          onLaunched()
+        }}
         className="absolute top-10 right-10 flex h-9 w-9 items-center justify-center rounded-xl text-white/40 transition-all hover:bg-white/[0.06] hover:text-white"
         aria-label="Close"
       >

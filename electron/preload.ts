@@ -6,6 +6,7 @@ const api = {
   windowMaximize: () => ipcRenderer.send('window:maximize'),
   windowClose: () => ipcRenderer.send('window:close'),
   windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  toggleFullscreen: () => ipcRenderer.send('window:toggleFullscreen'),
 
   // PTY
   ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number; provider?: 'claude' | 'gemini' | 'codex'; env?: Record<string, string> }) =>
@@ -33,6 +34,8 @@ const api = {
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
   fsDelete: (targetPath: string) => ipcRenderer.invoke('fs:delete', targetPath),
   fsPreview: (filePath: string, maxLines?: number) => ipcRenderer.invoke('fs:preview', filePath, maxLines),
+  fsReadFile: (filePath: string) =>
+    ipcRenderer.invoke('fs:readFile', filePath) as Promise<{ success: boolean; content: string; error?: string }>,
   fsIsDirectory: (dirPath: string) => ipcRenderer.invoke('fs:isDirectory', dirPath) as Promise<boolean>,
 
   // Git
@@ -54,6 +57,16 @@ const api = {
   storageGet: (key: string) => ipcRenderer.invoke('storage:get', key),
   storageSet: (key: string, value: unknown) => ipcRenderer.invoke('storage:set', key, value),
   storageRemove: (key: string) => ipcRenderer.invoke('storage:remove', key),
+
+  // Swarm file locks
+  swarmAcquireLocks: (swarmRoot: string, taskId: string, agentName: string, files: string[]) =>
+    ipcRenderer.invoke('swarm:acquireLocks', swarmRoot, taskId, agentName, files) as Promise<{ success: boolean; conflict?: string }>,
+  swarmReleaseLocks: (swarmRoot: string, taskId: string) =>
+    ipcRenderer.invoke('swarm:releaseLocks', swarmRoot, taskId) as Promise<{ success: boolean }>,
+  swarmCheckLock: (swarmRoot: string, filePath: string) =>
+    ipcRenderer.invoke('swarm:checkLock', swarmRoot, filePath) as Promise<{ taskId: string; agentName: string; acquiredAt: number; exclusive: boolean } | null>,
+  swarmGetAllLocks: (swarmRoot: string) =>
+    ipcRenderer.invoke('swarm:getAllLocks', swarmRoot) as Promise<Record<string, { taskId: string; agentName: string; acquiredAt: number; exclusive: boolean }>>,
 
   // Save clipboard image to temp file
   saveTempImage: (buffer: ArrayBuffer, mimeType: string) =>
