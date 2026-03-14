@@ -1,13 +1,18 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import { AppLayout } from './components/layout/AppLayout'
+import { LaunchScreen } from './components/layout/LaunchScreen'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { useSettingsStore } from './stores/settingsStore'
 import { useModelStore } from './stores/modelStore'
 import { buildSnapshot, saveTabSnapshot, clearTabSnapshot } from './lib/tabSnapshot'
 
+export type LaunchMode = 'terminal' | 'swarm'
+
 export default function App() {
   const initTheme = useSettingsStore((s) => s.initTheme)
   const fontSize = useSettingsStore((s) => s.fontSize)
+  const [launchMode, setLaunchMode] = useState<LaunchMode | null>(null)
 
   useEffect(() => {
     initTheme()

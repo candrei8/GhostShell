@@ -25,6 +25,8 @@ export interface ShortcutBindingDescriptor {
   readonly: boolean
 }
 
+const IS_MAC = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta'])
 
 const SPECIAL_KEY_LABELS: Record<string, string> = {
@@ -74,9 +76,9 @@ export function getKeyComboParts(combo: KeyCombo): string[] {
   const normalized = normalizeKeyCombo(combo)
   const parts: string[] = []
 
-  if (normalized.ctrl) parts.push('Ctrl')
+  if (normalized.ctrl) parts.push(IS_MAC ? '⌘' : 'Ctrl')
   if (normalized.shift) parts.push('Shift')
-  if (normalized.alt) parts.push('Alt')
+  if (normalized.alt) parts.push(IS_MAC ? '⌥' : 'Alt')
 
   const label =
     normalized.key.length === 1
@@ -107,19 +109,24 @@ export function parseKeyCombo(display: string): KeyCombo {
   const resolvedKey = SPECIAL_KEY_VALUES[rawKey] || rawKey
 
   return normalizeKeyCombo({
-    ctrl: parts.includes('Ctrl'),
+    ctrl: parts.includes('Ctrl') || parts.includes('⌘'),
     shift: parts.includes('Shift'),
-    alt: parts.includes('Alt'),
+    alt: parts.includes('Alt') || parts.includes('⌥'),
     key: resolvedKey,
   })
 }
 
 export function matchesKeyCombo(e: KeyboardEvent, combo: KeyCombo): boolean {
   const normalized = normalizeKeyCombo(combo)
-  if (!!e.ctrlKey !== normalized.ctrl) return false
+
+  // On Mac, Cmd (metaKey) is treated as the primary modifier (equivalent to Ctrl)
+  const ctrlSatisfied = IS_MAC ? (e.metaKey || e.ctrlKey) : e.ctrlKey
+  if (ctrlSatisfied !== normalized.ctrl) return false
   if (!!e.shiftKey !== normalized.shift) return false
   if (!!e.altKey !== normalized.alt) return false
-  if (e.metaKey) return false
+  // On non-Mac, reject metaKey since it's not part of our shortcut system
+  if (!IS_MAC && e.metaKey) return false
+
   return normalizeKey(e) === normalized.key
 }
 
