@@ -32,6 +32,52 @@ const STEP_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Users, MessageSquare, FolderOpen, BookOpen, Type,
 }
 
+// ─── Preset Role Breakdown (who does what per layout) ─────
+
+interface PresetRoleInfo {
+  role: SwarmAgentRole
+  count: number
+  duty: string
+}
+
+const PRESET_ROLE_BREAKDOWN: Record<string, { summary: string; roles: PresetRoleInfo[] }> = {
+  duo: {
+    summary: 'Minimal viable swarm — Coordinator drives, Builder implements, Scout reconnoiters.',
+    roles: [
+      { role: 'coordinator', count: 1, duty: 'Decomposes tasks, self-reviews, manages single builder directly' },
+      { role: 'builder', count: 1, duty: 'Full-stack implementation with broad scope and high autonomy' },
+      { role: 'scout', count: 1, duty: 'Quick codebase recon, then available as Builder support' },
+    ],
+  },
+  squad: {
+    summary: 'Sweet spot — full review loop, 2 builders work in parallel.',
+    roles: [
+      { role: 'coordinator', count: 1, duty: 'Standard decomposition, routes reviews, resolves conflicts' },
+      { role: 'builder', count: 2, duty: 'Task-scoped implementation, per-task branches' },
+      { role: 'scout', count: 1, duty: 'Full codebase recon, standby for questions' },
+      { role: 'reviewer', count: 1, duty: 'Sequential code review queue, catches bugs' },
+    ],
+  },
+  team: {
+    summary: 'High parallelism — domain-split scouts, 4 builders, dedicated reviewer.',
+    roles: [
+      { role: 'coordinator', count: 1, duty: 'Fine-grained task decomposition (8-12 tasks), domain grouping' },
+      { role: 'builder', count: 4, duty: 'Domain-scoped work, Builder 1 leads, per-domain branches' },
+      { role: 'scout', count: 2, duty: 'Split recon: Scout 1 = frontend/UI, Scout 2 = backend/infra' },
+      { role: 'reviewer', count: 1, duty: 'Priority review queue, blocking tasks first' },
+    ],
+  },
+  platoon: {
+    summary: 'Full scale — 2 coordinators split domains, deep specialization.',
+    roles: [
+      { role: 'coordinator', count: 2, duty: 'Domain ownership split, inter-coordinator sync protocol' },
+      { role: 'builder', count: 5, duty: 'Layer-scoped, strictly scoped tasks, lead builder per domain' },
+      { role: 'scout', count: 3, duty: 'Deep-dive: frontend / backend / testing+infra specialization' },
+      { role: 'reviewer', count: 2, duty: 'Domain-split reviews, round-robin within domain' },
+    ],
+  },
+}
+
 // ─── 3D Hardware Frame Wrapper (Pure Glass UI) ────────────────
 
 function HardwareFrame({ children, className = "", containerClassName = "", depth = 10, hover = false }: { children: React.ReactNode, className?: string, containerClassName?: string, depth?: number, hover?: boolean }) {
@@ -69,65 +115,136 @@ function HardwareFrame({ children, className = "", containerClassName = "", dept
   )
 }
 
-// ─── Live Topology Tree Preview ─────────────────────────────────
+// ─── Live Topology SVG Preview ──────────────────────────────────
+
+const TOPO_W = 360
+const TOPO_H = 200
+const TOPO_NODE_R = 16
+const TOPO_COORD_Y = 45
+const TOPO_WORKER_Y = 145
+const TOPO_CX = TOPO_W / 2
 
 function TopologyTreePreview({ composition, total }: { composition: Record<SwarmAgentRole, number>, total: number }) {
-  const nodes = useMemo(() => {
-    const list: { id: string, role: SwarmAgentRole }[] = []
-    for (let i = 0; i < (composition.coordinator || 0); i++) list.push({ id: `c-${i}`, role: 'coordinator' })
-    for (let i = 0; i < (composition.builder || 0); i++) list.push({ id: `b-${i}`, role: 'builder' })
-    for (let i = 0; i < (composition.scout || 0); i++) list.push({ id: `s-${i}`, role: 'scout' })
-    for (let i = 0; i < (composition.reviewer || 0); i++) list.push({ id: `r-${i}`, role: 'reviewer' })
-    return list
+  const { coordNodes, workerNodes } = useMemo(() => {
+    const coords: { id: string; role: SwarmAgentRole; x: number; y: number }[] = []
+    const workers: { id: string; role: SwarmAgentRole; x: number; y: number }[] = []
+
+    const coordCount = composition.coordinator || 0
+    const coordSpacing = Math.min(70, TOPO_W / (coordCount + 1))
+    const coordStartX = TOPO_CX - ((coordCount - 1) * coordSpacing) / 2
+    for (let i = 0; i < coordCount; i++) {
+      coords.push({ id: `c-${i}`, role: 'coordinator', x: coordStartX + i * coordSpacing, y: TOPO_COORD_Y })
+    }
+
+    // Workers: scouts → builders → reviewers (sorted)
+    const roleOrder: SwarmAgentRole[] = ['scout', 'builder', 'reviewer', 'custom']
+    const workerList: { id: string; role: SwarmAgentRole }[] = []
+    for (const role of roleOrder) {
+      for (let i = 0; i < (composition[role] || 0); i++) {
+        workerList.push({ id: `${role[0]}-${i}`, role })
+      }
+    }
+
+    const wCount = workerList.length
+    const wSpacing = Math.min(55, (TOPO_W - 40) / Math.max(wCount, 1))
+    const wStartX = TOPO_CX - ((wCount - 1) * wSpacing) / 2
+    for (let i = 0; i < wCount; i++) {
+      workers.push({ ...workerList[i], x: wStartX + i * wSpacing, y: TOPO_WORKER_Y })
+    }
+
+    return { coordNodes: coords, workerNodes: workers }
   }, [composition])
 
-  const coordCount = composition.coordinator || 0
-  const workers = nodes.filter(n => n.role !== 'coordinator')
-  
+  if (total === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center bg-white/[0.015] border border-white/[0.04] rounded-lg w-full h-full relative overflow-hidden">
+        <Network className="w-8 h-8 text-white/[0.06] mb-2" />
+        <span className="text-[10px] text-white/15 font-mono uppercase tracking-widest">Select a preset</span>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center p-4 bg-white/[0.02] border border-white/5 rounded-lg w-full h-full relative overflow-hidden">
-       {total === 0 ? (
-         <span className="text-[10px] text-white/20 font-mono uppercase tracking-widest">Awaiting architecture...</span>
-       ) : (
-         <div className="flex flex-col items-center relative w-full">
-           
-           {/* Top Layer: Coordinators */}
-           {coordCount > 0 && (
-             <div className="flex items-center gap-4 mb-6 relative z-10">
-               {nodes.filter(n => n.role === 'coordinator').map(n => (
-                 <div key={n.id} className="w-8 h-8 rounded border border-[#f59e0b] bg-black flex items-center justify-center relative">
-                   <Terminal className="w-4 h-4 text-[#f59e0b]" />
-                   <div className="absolute top-full left-1/2 w-px h-6 bg-white/20" />
-                 </div>
-               ))}
-             </div>
-           )}
+    <div className="bg-white/[0.015] border border-white/[0.04] rounded-lg w-full h-full relative overflow-hidden">
+      <svg viewBox={`0 0 ${TOPO_W} ${TOPO_H}`} className="w-full h-full">
+        <defs>
+          <style>{`
+            @keyframes topo-dash { to { stroke-dashoffset: -12; } }
+            .topo-edge { animation: topo-dash 1.5s linear infinite; }
+          `}</style>
+        </defs>
 
-           {/* Connection Hub (if coordinators exist) */}
-           {coordCount > 0 && workers.length > 0 && (
-             <div className="absolute top-8 left-4 right-4 h-px bg-white/20 z-0" />
-           )}
+        {/* Tier labels */}
+        <text x={8} y={TOPO_COORD_Y + 3} fontSize={7} fill="rgba(255,255,255,0.08)" fontWeight={700} fontFamily="ui-monospace, monospace">COORD</text>
+        <text x={8} y={TOPO_WORKER_Y + 3} fontSize={7} fill="rgba(255,255,255,0.08)" fontWeight={700} fontFamily="ui-monospace, monospace">WORKERS</text>
 
-           {/* Bottom Layer: Workers (grouped and truncated if too many) */}
-           <div className="flex flex-wrap items-center justify-center gap-2 px-4 relative z-10 max-w-[90%]">
-              {workers.slice(0, 16).map((n) => {
-                const def = getRoleDef(n.role)
-                return (
-                  <div key={n.id} className="w-6 h-6 rounded border border-white/10 bg-black flex items-center justify-center relative">
-                    {coordCount === 0 && <div className="absolute bottom-full left-1/2 w-px h-4 bg-white/10" />}
-                    <RoleIcon iconName={def.icon} className="w-3 h-3" color={def.color} />
-                  </div>
-                )
-              })}
-              {workers.length > 16 && (
-                <div className="w-6 h-6 rounded border border-white/10 bg-white/5 flex items-center justify-center">
-                  <span className="text-[8px] font-mono text-white/40">+{workers.length - 16}</span>
+        {/* Separator */}
+        <line x1={0} y1={(TOPO_COORD_Y + TOPO_WORKER_Y) / 2} x2={TOPO_W} y2={(TOPO_COORD_Y + TOPO_WORKER_Y) / 2} stroke="rgba(255,255,255,0.03)" strokeWidth={0.5} />
+
+        {/* Edges: coord → worker */}
+        {coordNodes.map((c) =>
+          workerNodes.map((w, wi) => (
+            <line
+              key={`e-${c.id}-${w.id}`}
+              x1={c.x} y1={c.y + TOPO_NODE_R}
+              x2={w.x} y2={w.y - TOPO_NODE_R}
+              stroke={getRoleDef(w.role).color}
+              strokeWidth={0.8}
+              strokeOpacity={0.15}
+              strokeDasharray="3 3"
+              className="topo-edge"
+            />
+          ))
+        )}
+
+        {/* Coordinator nodes */}
+        {coordNodes.map((n, i) => {
+          const def = getRoleDef(n.role)
+          return (
+            <g key={n.id}>
+              {/* Pulse */}
+              <circle cx={n.x} cy={n.y} r={TOPO_NODE_R + 4} fill="none" stroke={def.color} strokeWidth={0.8} opacity={0.15}>
+                <animate attributeName="r" from={TOPO_NODE_R + 2} to={TOPO_NODE_R + 14} dur="2.5s" repeatCount="indefinite" />
+                <animate attributeName="opacity" from="0.2" to="0" dur="2.5s" repeatCount="indefinite" />
+              </circle>
+              {/* Node */}
+              <circle cx={n.x} cy={n.y} r={TOPO_NODE_R} fill="#0a0f1a" stroke={def.color} strokeWidth={1.8} strokeOpacity={0.7} />
+              <foreignObject x={n.x - 6} y={n.y - 6} width={12} height={12}>
+                <div style={{ color: def.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Terminal className="w-3 h-3" />
                 </div>
-              )}
-           </div>
+              </foreignObject>
+              <text x={n.x} y={n.y + TOPO_NODE_R + 10} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize={7} fontWeight={700} fontFamily="ui-monospace, monospace">
+                COORD {coordNodes.length > 1 ? i + 1 : ''}
+              </text>
+            </g>
+          )
+        })}
 
-         </div>
-       )}
+        {/* Worker nodes */}
+        {workerNodes.map((n) => {
+          const def = getRoleDef(n.role)
+          return (
+            <g key={n.id}>
+              <circle cx={n.x} cy={n.y} r={TOPO_NODE_R - 2} fill="#0a0f1a" stroke={def.color} strokeWidth={1.2} strokeOpacity={0.5} />
+              <foreignObject x={n.x - 5} y={n.y - 5} width={10} height={10}>
+                <div style={{ color: def.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <RoleIcon iconName={def.icon} className="w-2.5 h-2.5" color={def.color} />
+                </div>
+              </foreignObject>
+              <text x={n.x} y={n.y + TOPO_NODE_R + 6} textAnchor="middle" fill={def.color} fillOpacity={0.4} fontSize={6} fontWeight={600} fontFamily="ui-monospace, monospace">
+                {def.label.slice(0, 3).toUpperCase()}
+              </text>
+            </g>
+          )
+        })}
+
+        {/* Total badge */}
+        <rect x={TOPO_W - 42} y={4} width={36} height={16} rx={4} fill="rgba(56,189,248,0.1)" stroke="rgba(56,189,248,0.2)" strokeWidth={0.5} />
+        <text x={TOPO_W - 24} y={15} textAnchor="middle" fill="#38bdf8" fontSize={8} fontWeight={800} fontFamily="ui-monospace, monospace">
+          {total}
+        </text>
+      </svg>
     </div>
   )
 }
@@ -148,9 +265,14 @@ function RosterTableRow({
   const roleDef = getRoleDef(agent.role)
 
   return (
-    <div className="group flex items-center gap-3 px-3 py-1.5 border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-      <div className="w-6 text-[10px] text-white/30 font-mono text-right shrink-0">{(index + 1).toString().padStart(2, '0')}</div>
-      
+    <div className="group flex items-center gap-3 px-3 py-1.5 border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors relative">
+      {/* Role color accent bar */}
+      <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: roleDef.color }} />
+
+      <div className="w-6 flex items-center justify-center shrink-0">
+        <RoleIcon iconName={roleDef.icon} className="w-3 h-3 opacity-30 group-hover:opacity-70 transition-opacity" color={roleDef.color} />
+      </div>
+
       {/* Name Input */}
       <div className="flex-1 min-w-0">
         <input
@@ -230,84 +352,163 @@ function StepRoster({
     return comp as Record<SwarmAgentRole, number>
   }, [roster])
 
+  // When global engine changes, update all existing roster agents
+  const handleProviderChange = useCallback((provider: SwarmCliProvider) => {
+    setSelectedProvider(provider)
+    for (const agent of roster) {
+      updateRosterAgent(agent.id, { cliProvider: provider })
+    }
+  }, [roster, setSelectedProvider, updateRosterAgent])
+
   const handlePreset = useCallback((presetId: string) => {
     const preset = ROSTER_PRESETS.find((p) => p.id === presetId)
     if (preset) {
       setActivePreset(presetId)
       setRosterFromPreset(preset.composition, selectedProvider)
+      // Prevent auto-scroll jump when roster rows appear
+      requestAnimationFrame(() => {
+        const el = document.getElementById('wizard-step-content')
+        if (el) el.scrollTop = 0
+      })
     }
   }, [selectedProvider, setRosterFromPreset])
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      
+    <div className="flex flex-col gap-5">
+
       {/* Top Split: Controls & Topology Preview */}
-      <div className="flex gap-6 shrink-0 mb-6 h-[220px]">
+      <div className="flex gap-5 shrink-0 h-[250px]">
         {/* Left: Global Controls */}
-        <div className="flex-1 flex flex-col gap-6">
-           {/* Global Engine Segmented Control */}
+        <div className="flex-1 flex flex-col gap-5">
+           {/* Global Engine Selector */}
            <div className="flex flex-col gap-2.5">
-             <span className="text-[10px] text-white/50 font-mono uppercase tracking-widest">Base Intelligence Engine</span>
-             <div className="flex p-1 bg-black/40 border border-white/10 rounded-lg">
-               {FUNCTIONAL_PROVIDERS.slice(0, 4).map(p => (
-                 <button
-                   key={p.id}
-                   onClick={() => setSelectedProvider(p.id)}
-                   className={`flex-1 py-2 text-[10px] font-bold font-mono tracking-widest uppercase rounded transition-all ${
-                     selectedProvider === p.id ? 'bg-white/[0.08] text-[#38bdf8] border border-white/10' : 'text-white/40 hover:text-white/80 border border-transparent'
-                   }`}
-                 >
-                   {p.label}
-                 </button>
-               ))}
+             <span className="text-[10px] text-white/50 font-mono uppercase tracking-widest">Intelligence Engine</span>
+             <div className="flex gap-2">
+               {FUNCTIONAL_PROVIDERS.slice(0, 3).map(p => {
+                 const isSelected = selectedProvider === p.id
+                 return (
+                   <button
+                     key={p.id}
+                     onClick={() => handleProviderChange(p.id)}
+                     className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg transition-all ${
+                       isSelected
+                         ? 'bg-white/[0.06] border-2 border-[#38bdf8]/40'
+                         : 'bg-black/30 border border-white/[0.06] hover:border-white/15'
+                     }`}
+                   >
+                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color, opacity: isSelected ? 1 : 0.3 }} />
+                     <span className={`text-[10px] font-bold font-mono tracking-widest uppercase ${isSelected ? 'text-white' : 'text-white/35'}`}>
+                       {p.label}
+                     </span>
+                   </button>
+                 )
+               })}
              </div>
            </div>
 
-           {/* Topology Presets Segmented Control */}
+           {/* Topology Presets */}
            <div className="flex flex-col gap-2.5">
              <span className="text-[10px] text-white/50 font-mono uppercase tracking-widest">Architecture Presets</span>
-             <div className="flex p-1 bg-black/40 border border-white/10 rounded-lg">
-               {ROSTER_PRESETS.slice(0, 4).map(p => (
-                 <button
-                   key={p.id}
-                   onClick={() => handlePreset(p.id)}
-                   className={`flex-1 py-2 text-[10px] font-bold font-mono tracking-widest uppercase rounded transition-all flex items-center justify-center gap-2 ${
-                     activePreset === p.id ? 'bg-white/[0.08] text-white border border-white/10' : 'text-white/30 hover:text-white/60 border border-transparent'
-                   }`}
-                 >
-                   <span className="text-[#38bdf8]">{p.total}</span>
-                   <span className="opacity-30">|</span>
-                   <span>{p.label}</span>
-                 </button>
-               ))}
+             <div className="grid grid-cols-4 gap-2">
+               {ROSTER_PRESETS.slice(0, 4).map(p => {
+                 const isActive = activePreset === p.id
+                 // Build composition dots
+                 const dots: { color: string; count: number }[] = []
+                 for (const role of SWARM_ROLES) {
+                   const c = (p.composition as Record<string, number>)[role.id] || 0
+                   if (c > 0) dots.push({ color: role.color, count: c })
+                 }
+                 return (
+                   <button
+                     key={p.id}
+                     onClick={() => handlePreset(p.id)}
+                     className={`flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-lg transition-all ${
+                       isActive
+                         ? 'bg-[#38bdf8]/10 border border-[#38bdf8]/30'
+                         : 'bg-black/30 border border-white/[0.06] hover:border-white/15'
+                     }`}
+                   >
+                     <span className={`text-[11px] font-black font-mono tracking-widest ${isActive ? 'text-[#38bdf8]' : 'text-white/40'}`}>
+                       {p.label}
+                     </span>
+                     {/* Composition dots */}
+                     <div className="flex items-center gap-0.5">
+                       {dots.map((d, di) =>
+                         Array.from({ length: d.count }).map((_, ci) => (
+                           <div key={`${di}-${ci}`} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: d.color, opacity: isActive ? 0.9 : 0.35 }} />
+                         ))
+                       )}
+                     </div>
+                     <span className={`text-[9px] font-mono ${isActive ? 'text-white/50' : 'text-white/20'}`}>{p.total} agents</span>
+                   </button>
+                 )
+               })}
              </div>
            </div>
         </div>
 
         {/* Right: Live Topology Preview */}
-        <div className="w-[400px] shrink-0 flex flex-col">
-           <span className="text-[10px] text-white/30 font-mono uppercase tracking-widest mb-2.5 pl-1">Live Topology</span>
+        <div className="w-[380px] shrink-0 flex flex-col">
+           <span className="text-[10px] text-white/25 font-mono uppercase tracking-widest mb-2 pl-1">Live Topology</span>
            <TopologyTreePreview composition={currentComposition} total={roster.length} />
         </div>
       </div>
 
+      {/* Role Breakdown Panel (shows when a preset is selected) */}
+      {activePreset && PRESET_ROLE_BREAKDOWN[activePreset] && (
+        <div className="flex flex-col gap-2 border border-white/[0.06] bg-white/[0.015] rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Network className="w-3.5 h-3.5 text-[#38bdf8]/60" />
+            <span className="text-[10px] text-white/50 font-mono uppercase tracking-widest">Delegation Structure</span>
+          </div>
+          <p className="text-[11px] text-white/40 font-mono leading-relaxed mb-2">
+            {PRESET_ROLE_BREAKDOWN[activePreset].summary}
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {PRESET_ROLE_BREAKDOWN[activePreset].roles.map((info) => {
+              const roleDef = getRoleDef(info.role)
+              return (
+                <div key={info.role} className="flex items-start gap-2.5 px-3 py-2 rounded bg-black/30 border border-white/[0.04]">
+                  <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: roleDef.color }} />
+                    <span className="text-[10px] font-bold text-white/60 font-mono uppercase tracking-widest w-[90px]">
+                      {info.count > 1 ? `${info.count}x ` : ''}{roleDef.label}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-white/35 font-mono leading-relaxed">{info.duty}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Bottom: Roster Data Table */}
-      <div className="flex-1 flex flex-col min-h-0 border border-white/10 bg-black/40 rounded-lg overflow-hidden">
+      <div className="flex flex-col border border-white/10 bg-black/40 rounded-lg overflow-hidden">
          {/* Table Header */}
-         <div className="flex items-center gap-3 px-3 py-2.5 bg-white/[0.02] border-b border-white/10 shrink-0">
-            <div className="w-6 text-[9px] text-white/30 font-mono text-right">ID</div>
-            <div className="flex-1 text-[9px] text-white/50 font-mono uppercase tracking-widest">Designation</div>
-            <div className="w-[120px] text-[9px] text-white/50 font-mono uppercase tracking-widest">Role</div>
-            <div className="w-[100px] text-[9px] text-white/50 font-mono uppercase tracking-widest">Engine</div>
-            <div className="w-14 text-[9px] text-white/50 font-mono uppercase tracking-widest text-center">Exec</div>
-            <div className="w-8"></div>
+         <div className="flex items-center gap-3 px-3 py-2 bg-white/[0.02] border-b border-white/[0.06] shrink-0">
+            <div className="w-6" />
+            <div className="flex-1 text-[9px] text-white/40 font-mono uppercase tracking-widest">Designation</div>
+            <div className="w-[120px] text-[9px] text-white/40 font-mono uppercase tracking-widest">Role</div>
+            <div className="w-[100px] text-[9px] text-white/40 font-mono uppercase tracking-widest">Engine</div>
+            <div className="w-14 text-[9px] text-white/40 font-mono uppercase tracking-widest text-center">Auto</div>
+            <div className="w-8" />
          </div>
 
          {/* Table Body */}
-         <div className="flex-1 overflow-y-auto custom-scrollbar">
+         <div className="max-h-[280px] overflow-y-auto custom-scrollbar">
            {roster.length === 0 ? (
-             <div className="w-full h-full flex items-center justify-center text-[11px] text-white/20 font-mono uppercase tracking-widest">
-               No processes mounted. Select a preset or add manually.
+             <div className="w-full h-full flex flex-col items-center justify-center gap-3 py-8">
+               <div className="flex gap-1.5">
+                 {SWARM_ROLES.slice(0, 4).map(r => (
+                   <div key={r.id} className="w-5 h-5 rounded border border-white/[0.06] flex items-center justify-center opacity-20">
+                     <RoleIcon iconName={r.icon} className="w-2.5 h-2.5" color={r.color} />
+                   </div>
+                 ))}
+               </div>
+               <span className="text-[10px] text-white/15 font-mono uppercase tracking-widest">
+                 Select a preset above to populate
+               </span>
              </div>
            ) : (
              roster.map((agent, i) => (
@@ -323,12 +524,13 @@ function StepRoster({
          </div>
 
          {/* Table Footer Actions */}
-         <div className="p-2 border-t border-white/5 bg-black/40 shrink-0">
+         <div className="p-2 border-t border-white/[0.04] bg-black/30 shrink-0">
            <button
              onClick={() => addRosterAgent('builder', selectedProvider)}
-             className="w-full py-2 rounded border border-dashed border-white/10 text-[10px] font-bold font-mono text-white/40 uppercase tracking-widest hover:border-[#38bdf8]/50 hover:text-[#38bdf8] hover:bg-[#38bdf8]/5 transition-colors flex items-center justify-center gap-2"
+             className="w-full py-2.5 rounded-md border border-dashed border-white/[0.08] text-[10px] font-bold font-mono text-white/30 uppercase tracking-widest hover:border-[#38bdf8]/40 hover:text-[#38bdf8] hover:bg-[#38bdf8]/5 transition-all flex items-center justify-center gap-2 group"
            >
-             <span className="text-sm leading-none">+</span> MOUNT NEW PROCESS
+             <span className="text-[14px] leading-none group-hover:scale-110 transition-transform">+</span>
+             Add Agent
            </button>
          </div>
       </div>
@@ -341,7 +543,7 @@ function StepMission() {
   const setMission = useSwarmStore((s) => s.setMission)
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto w-full">
+    <div className="flex flex-col min-h-full max-w-4xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8 border-b border-white/5 pb-4">
         <MessageSquare className="w-5 h-5 text-[#38bdf8]" />
         <h3 className="text-[18px] font-bold text-white tracking-widest uppercase font-mono">MISSION DIRECTIVE</h3>
@@ -386,13 +588,13 @@ function StepDirectory() {
   }, [setDirectory])
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto w-full">
+    <div className="flex flex-col min-h-full max-w-4xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8 border-b border-white/5 pb-4">
         <FolderOpen className="w-5 h-5 text-[#38bdf8]" />
         <h3 className="text-[18px] font-bold text-white tracking-widest uppercase font-mono">WORKSPACE ROOT</h3>
       </div>
       
-      <div className="w-full max-w-2xl flex flex-col gap-3 mt-10">
+      <div className="w-full flex flex-col gap-3 mt-10">
         <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">Target Path</span>
         <div className="flex border border-white/10 rounded-lg overflow-hidden bg-black/40 focus-within:border-[#38bdf8]/50 transition-colors h-14">
           <input
@@ -401,11 +603,11 @@ function StepDirectory() {
             onChange={(e) => setDirectory(e.target.value)}
             placeholder="/path/to/project"
             autoFocus
-            className="flex-1 px-5 bg-transparent text-[13px] text-white font-mono placeholder:text-white/20 focus:outline-none"
+            className="flex-1 min-w-0 px-5 bg-transparent text-[13px] text-white font-mono placeholder:text-white/20 focus:outline-none"
           />
           <button
             onClick={handleBrowse}
-            className="px-8 flex items-center justify-center text-[11px] font-bold font-mono tracking-widest uppercase text-white/60 bg-white/[0.02] border-l border-white/10 hover:text-[#38bdf8] hover:bg-white/[0.05] transition-colors"
+            className="shrink-0 px-6 flex items-center justify-center text-[11px] font-bold font-mono tracking-widest uppercase text-white/60 bg-white/[0.02] border-l border-white/10 hover:text-[#38bdf8] hover:bg-white/[0.05] transition-colors"
           >
             BROWSE
           </button>
@@ -445,17 +647,17 @@ function StepContext() {
   const toggleCategory = useCallback((catId: string) => setExpandedCategories(p => ({ ...p, [catId]: !p[catId] })), [])
 
   return (
-    <div className="flex flex-col h-full max-w-5xl mx-auto w-full">
+    <div className="flex flex-col max-w-5xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8 border-b border-white/5 pb-4 shrink-0">
         <HardDrive className="w-5 h-5 text-[#38bdf8]" />
         <h3 className="text-[18px] font-bold text-white tracking-widest uppercase font-mono">CONTEXT & SKILLS</h3>
       </div>
 
-      <div className="flex gap-10 flex-1 min-h-0">
+      <div className="flex gap-10">
         {/* Left: Memory Banks */}
         <div className="flex-1 flex flex-col gap-3 min-w-0">
           <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">Memory Banks ({contextFiles.length})</span>
-          
+
           <div
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -467,7 +669,7 @@ function StepContext() {
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto border border-white/10 rounded-lg bg-black/40 p-2 custom-scrollbar mt-2">
+          <div className="max-h-[200px] overflow-y-auto border border-white/10 rounded-lg bg-black/40 p-2 custom-scrollbar mt-2">
              {contextFiles.length === 0 ? (
                <div className="w-full h-full flex items-center justify-center text-[11px] text-white/20 font-mono uppercase tracking-widest">No files mounted</div>
              ) : (
@@ -489,7 +691,7 @@ function StepContext() {
         {/* Right: Operational Modules */}
         <div className="flex-1 flex flex-col gap-3 min-w-0">
           <span className="text-[10px] text-white/40 font-mono uppercase tracking-widest">Operational Modules</span>
-          <div className="flex-1 overflow-y-auto border border-white/10 rounded-lg bg-black/40 custom-scrollbar p-2">
+          <div className="max-h-[360px] overflow-y-auto border border-white/10 rounded-lg bg-black/40 custom-scrollbar p-2">
             {SKILL_CATEGORIES.map((cat) => {
               const skills = skillsByCategory[cat.id] || []
               if (skills.length === 0) return null
@@ -550,7 +752,7 @@ function StepName() {
   const setSwarmName = useSwarmStore((s) => s.setSwarmName)
 
   return (
-    <div className="flex flex-col h-full justify-center pb-20 max-w-4xl mx-auto w-full">
+    <div className="flex flex-col min-h-full justify-center pb-20 max-w-4xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8 justify-center border-b border-white/5 pb-4">
         <Type className="w-5 h-5 text-[#38bdf8]" />
         <h3 className="text-[18px] font-bold text-white tracking-widest uppercase font-mono">ASSIGN DESIGNATION</h3>
@@ -618,18 +820,31 @@ export function SwarmWizard({ onClose, onLaunch }: SwarmWizardProps) {
     }
   }, [canGoNext, isLastStep, launchSwarm, onLaunch, nextStep])
 
+  // Stable refs so the keyboard handler never re-registers
+  const canGoNextRef = useRef(canGoNext)
+  const handleNextRef = useRef(handleNext)
+  const onCloseRef = useRef(onClose)
+  canGoNextRef.current = canGoNext
+  handleNextRef.current = handleNext
+  onCloseRef.current = onClose
+
+  // Register keyboard handler once (stable — never steals focus)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
       if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
         e.preventDefault()
-        if (canGoNext) handleNext()
+        if (canGoNextRef.current) handleNextRef.current()
       }
     }
     document.addEventListener('keydown', handler)
-    panelRef.current?.focus()
     return () => document.removeEventListener('keydown', handler)
-  }, [onClose, canGoNext, handleNext])
+  }, [])
+
+  // Focus panel on mount only
+  useEffect(() => {
+    panelRef.current?.focus()
+  }, [])
 
   // Slide Animation (Only for main content area)
   const slideVariants = {
@@ -731,7 +946,7 @@ export function SwarmWizard({ onClose, onLaunch }: SwarmWizardProps) {
             </div>
 
             {/* Active Step Content */}
-            <div className="flex-1 overflow-y-auto p-12 custom-scrollbar">
+            <div className="flex-1 min-h-0 overflow-y-auto p-12 custom-scrollbar" id="wizard-step-content">
               <AnimatePresence mode="wait" custom={direction}>
                 <motion.div
                   key={currentStep}
@@ -741,7 +956,7 @@ export function SwarmWizard({ onClose, onLaunch }: SwarmWizardProps) {
                   animate="center"
                   exit="exit"
                   transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="h-full"
+                  className="min-h-full"
                 >
                   {currentStep === 'roster' && <StepRoster selectedProvider={selectedProvider} setSelectedProvider={setSelectedProvider} />}
                   {currentStep === 'mission' && <StepMission />}

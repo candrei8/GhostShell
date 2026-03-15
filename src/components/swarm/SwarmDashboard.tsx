@@ -2,11 +2,14 @@ import { useMemo, useCallback, useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, Square, Clock, Users } from 'lucide-react'
 import { useSwarmStore } from '../../stores/swarmStore'
-import type { SwarmStatus } from '../../lib/swarm-types'
+import type { SwarmStatus, SwarmAgentRole } from '../../lib/swarm-types'
+import { getRoleDef, SWARM_ROLES } from '../../lib/swarm-types'
+import { RoleIcon } from './swarm-icons'
 import { SwarmAgentCard } from './SwarmAgentCard'
 import { SwarmTaskBoard } from './SwarmTaskBoard'
 import { SwarmMessageLog } from './SwarmMessageLog'
 import { SwarmTopology } from './SwarmTopology'
+import SwarmMetrics from './SwarmMetrics'
 
 // ─── Status Badge ────────────────────────────────────────────
 
@@ -69,6 +72,25 @@ export function SwarmDashboard() {
     if (!activeSwarm) return new Map()
     return new Map(activeSwarm.config.roster.map((r) => [r.id, r]))
   }, [activeSwarm])
+
+  // Group agents by role for structured display
+  const roleGroups = useMemo(() => {
+    if (!activeSwarm) return []
+    const groups = new Map<SwarmAgentRole, { agent: typeof activeSwarm.agents[0]; rosterAgent: typeof activeSwarm.config.roster[0]; index: number }[]>()
+    const roleOrder: SwarmAgentRole[] = ['coordinator', 'scout', 'builder', 'reviewer', 'custom']
+
+    activeSwarm.agents.forEach((agent, i) => {
+      const rosterAgent = rosterMap.get(agent.rosterId)
+      if (!rosterAgent) return
+      const role = rosterAgent.role
+      if (!groups.has(role)) groups.set(role, [])
+      groups.get(role)!.push({ agent, rosterAgent, index: i })
+    })
+
+    return roleOrder
+      .filter(role => groups.has(role))
+      .map(role => ({ role, agents: groups.get(role)! }))
+  }, [activeSwarm, rosterMap])
 
   const handlePause = useCallback(() => {
     if (activeSwarm) pauseSwarm(activeSwarm.id)
@@ -151,38 +173,74 @@ export function SwarmDashboard() {
         </span>
       </div>
 
+      {/* Metrics Dashboard (Tier 3.1) */}
+      {(isRunning || isPaused) && activeSwarmId && (
+        <SwarmMetrics swarmId={activeSwarmId} />
+      )}
+
       {/* Topology Visualization */}
       <SwarmTopology
         agents={activeSwarm.agents}
         roster={activeSwarm.config.roster}
       />
 
-      {/* Agent Cards Grid */}
-      <div>
-        <h3 className="text-xs font-semibold text-ghost-text-dim uppercase tracking-[0.15em] mb-2 px-1">Agents</h3>
-        <div className="grid grid-cols-1 gap-2">
-          <AnimatePresence>
-            {activeSwarm.agents.map((agent, i) => {
-              const rosterAgent = rosterMap.get(agent.rosterId)
-              if (!rosterAgent) return null
-              return (
-                <SwarmAgentCard
-                  key={agent.rosterId}
-                  agent={agent}
-                  rosterAgent={rosterAgent}
-                  index={i}
-                />
-              )
-            })}
-          </AnimatePresence>
-        </div>
+      {/* Role Composition Bar */}
+      <div className="flex items-center gap-2 px-1">
+        {SWARM_ROLES.filter(r => roleGroups.some(g => g.role === r.id)).map(r => {
+          const group = roleGroups.find(g => g.role === r.id)
+          if (!group) return null
+          const activeCount = group.agents.filter(
+            a => a.agent.status === 'building' || a.agent.status === 'planning' || a.agent.status === 'review'
+          ).length
+          return (
+            <div key={r.id} className="flex items-center gap-1.5 px-2 py-1 rounded border border-white/[0.06] bg-white/[0.02]">
+              <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: r.color }} />
+              <span className="text-[10px] font-mono text-white/50 uppercase tracking-widest">{group.agents.length} {r.label}{group.agents.length !== 1 ? 's' : ''}</span>
+              {activeCount > 0 && (
+                <span className="text-[9px] font-bold font-mono px-1 py-0.5 rounded bg-white/[0.06]" style={{ color: r.color }}>
+                  {activeCount} active
+                </span>
+              )}
+            </div>
+          )
+        })}
       </div>
 
+      {/* Agent Cards — Grouped by Role */}
+      {roleGroups.map(({ role, agents: groupAgents }) => {
+        const roleDef = getRoleDef(role)
+        return (
+          <div key={role}>
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <RoleIcon iconName={roleDef.icon} className="w-3.5 h-3.5" color={roleDef.color} />
+              <h3 className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: roleDef.color + 'aa' }}>
+                {roleDef.label}{groupAgents.length > 1 ? 's' : ''}
+              </h3>
+              <span className="text-[10px] text-ghost-text-dim/40 font-mono">
+                {roleDef.description}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <AnimatePresence>
+                {groupAgents.map(({ agent, rosterAgent, index }) => (
+                  <SwarmAgentCard
+                    key={agent.rosterId}
+                    agent={agent}
+                    rosterAgent={rosterAgent}
+                    index={index}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+          </div>
+        )
+      })}
+
       {/* Task Board */}
-      <SwarmTaskBoard tasks={activeSwarm.tasks} />
+      <SwarmTaskBoard tasks={activeSwarm.tasks} roster={activeSwarm.config.roster} />
 
       {/* Message Log */}
-      <SwarmMessageLog messages={activeSwarm.messages} />
+      <SwarmMessageLog messages={activeSwarm.messages} roster={activeSwarm.config.roster} />
     </motion.div>
   )
 }

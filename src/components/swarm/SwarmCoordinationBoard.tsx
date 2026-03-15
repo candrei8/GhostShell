@@ -3,8 +3,10 @@ import { Network, AlertTriangle } from 'lucide-react'
 import { useSwarmStore } from '../../stores/swarmStore'
 import { useActivityStore } from '../../stores/activityStore'
 import { useAgentStore } from '../../stores/agentStore'
-import type { SwarmAgentState } from '../../lib/swarm-types'
+import type { SwarmAgentState, SwarmAgentRole } from '../../lib/swarm-types'
+import { getRoleDef, SWARM_ROLES } from '../../lib/swarm-types'
 import type { AgentActivity, ContextMetrics, SubAgent } from '../../lib/types'
+import { RoleIcon } from './swarm-icons'
 import SwarmHeader from './SwarmHeader'
 import SwarmMissionCard from './SwarmMissionCard'
 import SwarmStatusTimeline from './SwarmStatusTimeline'
@@ -24,6 +26,58 @@ export interface EnrichedSwarmAgent extends SwarmAgentState {
   currentActivity?: AgentActivity['currentActivity']
   contextMetrics?: ContextMetrics
   subAgents?: SubAgent[]
+}
+
+// ─── Role Summary Strip ─────────────────────────────────────
+
+function RoleSummaryStrip({ agents }: { agents: EnrichedSwarmAgent[]; roster: import('../../lib/swarm-types').SwarmRosterAgent[] }) {
+  const roleSummary = useMemo(() => {
+    const counts = new Map<SwarmAgentRole, { total: number; active: number; files: number; tasks: number }>()
+    for (const agent of agents) {
+      // Resolve role from roster
+      const role = (agent as any)._resolvedRole as SwarmAgentRole | undefined
+      if (!role) continue
+      if (!counts.has(role)) counts.set(role, { total: 0, active: 0, files: 0, tasks: 0 })
+      const c = counts.get(role)!
+      c.total++
+      if (agent.status === 'building' || agent.status === 'planning' || agent.status === 'review') c.active++
+      c.files += agent.filesOwned.length
+    }
+    return SWARM_ROLES
+      .filter(r => counts.has(r.id))
+      .map(r => ({ roleDef: r, ...counts.get(r.id)! }))
+  }, [agents])
+
+  if (roleSummary.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-2.5">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] text-white/30 font-mono uppercase tracking-[0.2em]">Role Overview</span>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {roleSummary.map(({ roleDef, total, active, files }) => (
+          <div
+            key={roleDef.id}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-white/[0.05] bg-white/[0.015]"
+          >
+            <RoleIcon iconName={roleDef.icon} className="w-3 h-3" color={roleDef.color} />
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider" style={{ color: roleDef.color + 'bb' }}>
+              {total} {roleDef.label}{total !== 1 ? 's' : ''}
+            </span>
+            {active > 0 && (
+              <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-white/[0.06]" style={{ color: roleDef.color }}>
+                {active} active
+              </span>
+            )}
+            {files > 0 && (
+              <span className="text-[9px] font-mono text-white/25">{files} files</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // ─── Empty State ─────────────────────────────────────────────
@@ -73,7 +127,13 @@ export default function SwarmCoordinationBoard() {
     return () => clearInterval(timer)
   }, [swarm?.id])
 
-  // Enrich swarm agents with activity data
+  // Build roster map for role resolution
+  const rosterMap = useMemo(() => {
+    if (!swarm) return new Map<string, import('../../lib/swarm-types').SwarmRosterAgent>()
+    return new Map(swarm.config.roster.map((r) => [r.id, r]))
+  }, [swarm?.config.roster])
+
+  // Enrich swarm agents with activity data + resolved role
   const enrichedAgents = useMemo<EnrichedSwarmAgent[]>(() => {
     if (!swarm) return []
 
@@ -82,16 +142,19 @@ export default function SwarmCoordinationBoard() {
         ? agents.find((a) => a.id === sa.agentId)
         : undefined
       const activity = sa.agentId ? activities[sa.agentId] : undefined
+      const rosterAgent = rosterMap.get(sa.rosterId)
 
-      return {
+      const enriched: any = {
         ...sa,
         agentName: storeAgent?.name,
         currentActivity: activity?.currentActivity,
         contextMetrics: activity?.contextMetrics,
         subAgents: activity?.subAgents,
+        _resolvedRole: rosterAgent?.role,
       }
+      return enriched as EnrichedSwarmAgent
     })
-  }, [swarm?.agents, agents, activities])
+  }, [swarm?.agents, agents, activities, rosterMap])
 
   // Aggregate metrics
   const { totalTokens, totalCost, filesOwned } = useMemo(() => {
@@ -151,6 +214,7 @@ export default function SwarmCoordinationBoard() {
         )}
 
         <SwarmMissionCard mission={swarm.config.mission} roster={swarm.config.roster} />
+        <RoleSummaryStrip agents={enrichedAgents} roster={swarm.config.roster} />
         <SwarmDelegationTree
           agents={swarm.agents}
           roster={swarm.config.roster}

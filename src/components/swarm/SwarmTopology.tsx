@@ -7,11 +7,24 @@ import { ROLE_ICONS } from './swarm-icons'
 // ─── Layout Constants ───────────────────────────────────────
 
 const NODE_SIZE = 40
-const RING_RADIUS = 105
 const CENTER_X = 160
-const CENTER_Y = 140
+const CENTER_Y = 80
 const SVG_WIDTH = 320
-const SVG_HEIGHT = 290
+const SVG_HEIGHT = 320
+
+// Tier Y positions for hierarchical layout
+const COORD_TIER_Y = 60
+const SCOUT_TIER_Y = 140
+const BUILDER_TIER_Y = 200
+const REVIEWER_TIER_Y = 270
+
+const TIER_Y_MAP: Record<string, number> = {
+  coordinator: COORD_TIER_Y,
+  scout: SCOUT_TIER_Y,
+  builder: BUILDER_TIER_Y,
+  reviewer: REVIEWER_TIER_Y,
+  custom: REVIEWER_TIER_Y,
+}
 
 // ─── Status Visuals ─────────────────────────────────────────
 
@@ -56,19 +69,9 @@ interface SwarmTopologyProps {
 }
 
 export function SwarmTopology({ agents, roster, messages = [] }: SwarmTopologyProps) {
-  // Compute node positions
-  const nodes = useMemo(() => {
+  // Compute node positions — grouped by role in a hierarchical tree layout
+  const { nodes, roleGroupBounds } = useMemo(() => {
     const rosterMap = new Map(roster.map((r) => [r.id, r]))
-    const coordinators: { agent: SwarmAgentState; rosterAgent: SwarmRosterAgent }[] = []
-    const workers: { agent: SwarmAgentState; rosterAgent: SwarmRosterAgent }[] = []
-
-    for (const a of agents) {
-      const r = rosterMap.get(a.rosterId)
-      if (!r) continue
-      if (r.role === 'coordinator') coordinators.push({ agent: a, rosterAgent: r })
-      else workers.push({ agent: a, rosterAgent: r })
-    }
-
     const result: TopoNode[] = []
     const roleCounts: Record<string, number> = {}
 
@@ -79,30 +82,50 @@ export function SwarmTopology({ agents, roster, messages = [] }: SwarmTopologyPr
       return `${def.label} ${roleCounts[r.role]}`
     }
 
-    // Place coordinators at center
-    const coordCount = coordinators.length
-    for (let ci = 0; ci < coordCount; ci++) {
-      const offset = coordCount > 1 ? (ci - (coordCount - 1) / 2) * 26 : 0
-      result.push({
-        x: CENTER_X + offset, y: CENTER_Y,
-        agent: coordinators[ci].agent, rosterAgent: coordinators[ci].rosterAgent,
-        isCenter: true, label: makeLabel(coordinators[ci].rosterAgent),
+    // Group agents by role
+    const roleOrder = ['coordinator', 'scout', 'builder', 'reviewer', 'custom']
+    const grouped = new Map<string, { agent: SwarmAgentState; rosterAgent: SwarmRosterAgent }[]>()
+    for (const a of agents) {
+      const r = rosterMap.get(a.rosterId)
+      if (!r) continue
+      if (!grouped.has(r.role)) grouped.set(r.role, [])
+      grouped.get(r.role)!.push({ agent: a, rosterAgent: r })
+    }
+
+    // Position each role group horizontally centered at their tier Y
+    const bounds: { role: string; x: number; y: number; w: number; color: string; label: string }[] = []
+    for (const role of roleOrder) {
+      const group = grouped.get(role)
+      if (!group || group.length === 0) continue
+      const tierY = TIER_Y_MAP[role] || BUILDER_TIER_Y
+      const spacing = Math.min(65, (SVG_WIDTH - 60) / Math.max(group.length, 1))
+      const startX = CENTER_X - ((group.length - 1) * spacing) / 2
+      const roleDef = getRoleDef(role as any)
+
+      for (let i = 0; i < group.length; i++) {
+        result.push({
+          x: startX + i * spacing,
+          y: tierY,
+          agent: group[i].agent,
+          rosterAgent: group[i].rosterAgent,
+          isCenter: role === 'coordinator',
+          label: makeLabel(group[i].rosterAgent),
+        })
+      }
+
+      // Compute group bounding box for the role cluster label
+      const groupW = (group.length - 1) * spacing + NODE_SIZE + 20
+      bounds.push({
+        role,
+        x: startX - NODE_SIZE / 2 - 10,
+        y: tierY - NODE_SIZE / 2 - 8,
+        w: groupW,
+        color: roleDef.color,
+        label: roleDef.label.toUpperCase() + (group.length > 1 ? 'S' : ''),
       })
     }
 
-    // Place workers in ring
-    const count = workers.length
-    for (let i = 0; i < count; i++) {
-      const angle = (2 * Math.PI * i) / count - Math.PI / 2
-      result.push({
-        x: CENTER_X + RING_RADIUS * Math.cos(angle),
-        y: CENTER_Y + RING_RADIUS * Math.sin(angle),
-        agent: workers[i].agent, rosterAgent: workers[i].rosterAgent,
-        isCenter: false, label: makeLabel(workers[i].rosterAgent),
-      })
-    }
-
-    return result
+    return { nodes: result, roleGroupBounds: bounds }
   }, [agents, roster])
 
   // Compute message flow edges
@@ -120,7 +143,7 @@ export function SwarmTopology({ agents, roster, messages = [] }: SwarmTopologyPr
   }, [messages])
 
   const centers = nodes.filter((n) => n.isCenter)
-  const ring = nodes.filter((n) => !n.isCenter)
+  const workers = nodes.filter((n) => !n.isCenter)
   const nodeMap = new Map(nodes.map((n) => [n.label, n]))
 
   return (
@@ -150,12 +173,39 @@ export function SwarmTopology({ agents, roster, messages = [] }: SwarmTopologyPr
           `}</style>
         </defs>
 
-        {/* Layer 1: Structural lines (coordinator → workers) */}
+        {/* Layer 0: Role group backgrounds & labels */}
+        {roleGroupBounds.map((g) => (
+          <g key={`group-${g.role}`}>
+            <rect
+              x={g.x} y={g.y}
+              width={g.w} height={NODE_SIZE + 16}
+              rx={6}
+              fill={g.color}
+              fillOpacity={0.03}
+              stroke={g.color}
+              strokeOpacity={0.08}
+              strokeWidth={0.5}
+            />
+            <text
+              x={g.x + 5} y={g.y + 9}
+              fontSize={6.5}
+              fill={g.color}
+              fillOpacity={0.3}
+              fontWeight={700}
+              fontFamily="ui-monospace, monospace"
+            >
+              {g.label}
+            </text>
+          </g>
+        ))}
+
+        {/* Layer 1: Structural lines (coordinator → each worker) */}
         {centers.map((c, ci) =>
-          ring.map((n, i) => (
+          workers.map((n, i) => (
             <motion.line
               key={`struct-${ci}-${i}`}
-              x1={c.x} y1={c.y} x2={n.x} y2={n.y}
+              x1={c.x} y1={c.y + NODE_SIZE / 2}
+              x2={n.x} y2={n.y - NODE_SIZE / 2}
               stroke={statusColor(n.agent.status)}
               strokeWidth={0.8}
               strokeOpacity={0.12}
@@ -165,20 +215,6 @@ export function SwarmTopology({ agents, roster, messages = [] }: SwarmTopologyPr
             />
           )),
         )}
-
-        {/* Layer 2: Peer mesh (ring connections) */}
-        {ring.map((n, i) => {
-          const next = ring[(i + 1) % ring.length]
-          if (!next) return null
-          return (
-            <line
-              key={`peer-${i}`}
-              x1={n.x} y1={n.y} x2={next.x} y2={next.y}
-              stroke="rgba(255,255,255,0.03)"
-              strokeWidth={0.5}
-            />
-          )
-        })}
 
         {/* Layer 3: Message flow lines (animated, colored by type) */}
         {messageEdges.map((edge, i) => {
