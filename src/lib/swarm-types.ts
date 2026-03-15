@@ -1,5 +1,10 @@
 import { Provider } from './types'
 
+// ─── Layout Preset IDs ──────────────────────────────────────────
+
+/** Canonical preset identifiers — derived from ROSTER_PRESETS[].id */
+export type SwarmLayoutPresetId = 'duo' | 'squad' | 'team' | 'platoon' | 'custom'
+
 // ─── Agent Roles ──────────────────────────────────────────────
 
 export type SwarmAgentRole = 'coordinator' | 'builder' | 'scout' | 'reviewer' | 'custom'
@@ -259,4 +264,214 @@ export interface Swarm {
   startedAt?: number
   completedAt?: number
   swarmRoot?: string
+}
+
+// ─── GhostSwarm Role Contract & Layout Model ─────────────────
+//
+// Centralized types for layout-aware agent behavior.
+// Replaces ad-hoc role math scattered across swarm-prompts.ts,
+// swarm-orchestrator.ts, and UI components.
+
+// ─── Swarm Tier (derived from agent count) ───────────────────
+
+/** Size tier derived from total roster count — drives behavioral adaptation */
+export type SwarmTier = 'duo' | 'squad' | 'team' | 'platoon'
+
+// ─── Role Counts ─────────────────────────────────────────────
+
+/** Pre-computed role counts for the full roster */
+export interface SwarmRoleCounts {
+  coordinators: number
+  builders: number
+  scouts: number
+  reviewers: number
+  custom: number
+  total: number
+}
+
+// ─── Role Position ───────────────────────────────────────────
+
+/**
+ * Per-agent position within the swarm — combines layout context with
+ * role-local indexing. This is the primary input for role specialization.
+ *
+ * Example: Builder 2 in a TEAM swarm (4 builders total)
+ *   → { layoutPreset: 'team', swarmTier: 'team', roleIndex: 1,
+ *        roleTotal: 4, isLead: false, swarmSize: 8, counts: {...} }
+ */
+export interface SwarmRolePosition {
+  /** Which preset layout this swarm uses */
+  layoutPreset: SwarmLayoutPresetId
+  /** Derived size tier */
+  swarmTier: SwarmTier
+  /** This agent's 0-based index among agents of the SAME role */
+  roleIndex: number
+  /** Total agents sharing this role */
+  roleTotal: number
+  /** True when roleIndex === 0 — designates lead for this role group */
+  isLead: boolean
+  /** Total agents in the swarm */
+  swarmSize: number
+  /** Pre-computed counts for all roles */
+  counts: SwarmRoleCounts
+}
+
+// ─── Role Behavior Hints ─────────────────────────────────────
+
+/** Task granularity levels for coordinators */
+export type SwarmTaskGranularity = 'coarse' | 'standard' | 'fine' | 'very-fine'
+
+/** Agent autonomy levels — how much independent action is allowed */
+export type SwarmAutonomyLevel = 'high' | 'standard' | 'guided' | 'strict'
+
+/** Work scope boundaries */
+export type SwarmWorkScope = 'full-stack' | 'task-scoped' | 'domain-scoped' | 'layer-scoped'
+
+/**
+ * Behavioral hints for a role at a specific swarm tier.
+ * Consumed by the prompt system to generate layout-aware instructions.
+ */
+export interface SwarmRoleBehaviorHints {
+  /** How finely tasks should be decomposed */
+  taskGranularity: SwarmTaskGranularity
+  /** How much independent decision-making is expected */
+  autonomy: SwarmAutonomyLevel
+  /** Boundaries of what this agent should touch */
+  scope: SwarmWorkScope
+  /** Whether a "lead" concept applies at this tier */
+  hasLeadConcept: boolean
+  /** Free-form behavioral notes for prompt generation */
+  notes: string[]
+}
+
+// ─── Role Specialization Contract ────────────────────────────
+
+/**
+ * Complete behavioral contract for a role across all swarm tiers.
+ * This is the single source of truth for "how should role X behave
+ * in tier Y?" — replaces duplicated logic in prompt builders.
+ */
+export interface SwarmRoleContract {
+  role: SwarmAgentRole
+  /** Behavior hints keyed by swarm tier */
+  tiers: Record<SwarmTier, SwarmRoleBehaviorHints>
+}
+
+// ─── Domain Ownership (multi-coordinator) ────────────────────
+
+/** Named domain for splitting work in PLATOON+ swarms */
+export interface SwarmDomain {
+  /** Unique domain identifier (e.g. 'frontend', 'backend', 'infra') */
+  id: string
+  /** Human-readable label */
+  label: string
+  /** Glob patterns for files belonging to this domain */
+  filePatterns: string[]
+  /** Directory prefixes for quick matching */
+  directoryPrefixes: string[]
+}
+
+/**
+ * Assignment of agents to a domain — used when coordinators split ownership.
+ * Each coordinator owns one domain and manages its assigned agents.
+ */
+export interface SwarmDomainAssignment {
+  domain: SwarmDomain
+  coordinatorLabel: string
+  /** Builder labels assigned to this domain */
+  builders: string[]
+  /** Scout labels assigned to this domain */
+  scouts: string[]
+  /** Reviewer labels assigned to this domain */
+  reviewers: string[]
+}
+
+// ─── Structured Handoff Schemas ──────────────────────────────
+
+/** Handoff types for structured inter-role communication */
+export type SwarmHandoffType =
+  | 'scout_findings'
+  | 'review_result'
+  | 'task_assignment'
+  | 'domain_split'
+  | 'context_bundle'
+
+/**
+ * A structured scout finding — replaces free-text in FINDINGS.md
+ * with machine-readable sections that builders can consume reliably.
+ */
+export interface SwarmScoutFinding {
+  /** Domain this finding covers (e.g. 'frontend', 'backend') */
+  domain: string
+  /** Key files discovered in this domain */
+  files: string[]
+  /** Code patterns identified */
+  patterns: string[]
+  /** Risk factors or hazards */
+  risks: string[]
+  /** Actionable recommendations for builders */
+  recommendations: string[]
+}
+
+/**
+ * A single review issue from a reviewer.
+ */
+export interface SwarmReviewIssue {
+  severity: 'critical' | 'major' | 'minor' | 'nit'
+  file: string
+  line?: number
+  description: string
+}
+
+/**
+ * Structured review result — replaces ad-hoc review messages
+ * with a typed verdict + issue list.
+ */
+export interface SwarmReviewResult {
+  taskId: string
+  verdict: 'approved' | 'changes_requested' | 'approved_with_notes'
+  issues: SwarmReviewIssue[]
+  notes: string[]
+}
+
+/**
+ * Generic typed handoff envelope — carries a typed payload between agents.
+ * Can be serialized to JSON for the gs-mail --meta field.
+ */
+export interface SwarmHandoff<T extends SwarmHandoffType = SwarmHandoffType> {
+  from: string
+  to: string
+  type: T
+  payload: T extends 'scout_findings' ? SwarmScoutFinding[]
+    : T extends 'review_result' ? SwarmReviewResult
+    : T extends 'domain_split' ? SwarmDomainAssignment[]
+    : Record<string, unknown>
+  timestamp: number
+}
+
+// ─── Layout Preset Metadata ──────────────────────────────────
+
+/**
+ * Extended preset metadata — augments RosterPreset with layout-aware
+ * behavioral defaults and domain templates.
+ */
+export interface SwarmLayoutPreset {
+  id: SwarmLayoutPresetId
+  tier: SwarmTier
+  label: string
+  total: number
+  composition: Record<SwarmAgentRole, number>
+  /** RAM estimate in MB (per agent) */
+  ramPerAgent: number
+  description: string
+  /** Default task sizing guidance for coordinators */
+  taskSizingHint: string
+  /** Whether this preset needs multi-coordinator protocol */
+  multiCoordinator: boolean
+  /** Default domain template (if multi-coordinator) */
+  domainTemplates: SwarmDomain[]
+  /** Recommended scout coverage strategy */
+  scoutStrategy: 'full-codebase' | 'domain-split' | 'deep-specialization'
+  /** Recommended review strategy */
+  reviewStrategy: 'self-review' | 'sequential' | 'round-robin' | 'domain-split'
 }
