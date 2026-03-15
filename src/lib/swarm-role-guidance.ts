@@ -61,7 +61,7 @@ TASK STRATEGY:
 
 SCOUT USAGE:
 - Request full codebase reconnaissance before task decomposition
-- Scout delivers FINDINGS.md, then stands by for Builder questions
+- Scout delivers findings to knowledge/FINDINGS.md, then stands by for Builder questions
 
 REVIEW PROCESS:
 - Route all completed tasks to the Reviewer
@@ -83,7 +83,8 @@ SCOUT USAGE:
 - 2 Scouts: assign domain territories
   * Scout A: frontend, UI components, styles, client-side logic
   * Scout B: backend, API, database, server-side logic
-- Each Scout writes their own section in FINDINGS.md
+- Each Scout writes to their own file: FINDINGS-scout-N.md (knowledge/ directory)
+- A consolidated FINDINGS.md index links to each Scout's section file
 - Builders consult the Scout assigned to their domain
 
 REVIEW PROCESS:
@@ -108,7 +109,8 @@ SCOUT USAGE:
   * Scout A: frontend, components, styles, UI patterns
   * Scout B: backend, API routes, services, data models
   * Scout C: testing, infrastructure, CI/CD, configuration
-- Each Scout writes their own section in FINDINGS.md
+- Each Scout writes to their own file: FINDINGS-scout-N.md (knowledge/ directory)
+- A consolidated FINDINGS.md index links to each Scout's section file
 - Builders consult domain-specific Scout
 
 MULTI-COORDINATOR PROTOCOL:
@@ -194,7 +196,7 @@ YOUR SCOPE:
 
 WORK STYLE:
 - Fine-grained tasks: each task is focused and specific
-- Read FINDINGS.md for your domain before exploring on your own
+- Read knowledge/FINDINGS.md (index) + your domain's FINDINGS-scout-N.md before exploring on your own
 - If you need a type/interface that doesn't exist yet, check if another Builder is creating it
   → If yes, wait for their task to complete (check dependency status)
   → If no, escalate to Coordinator to create a foundation task`
@@ -241,10 +243,12 @@ export function scoutLayoutGuidance(tier: SwarmTier, roleIndex: number, scoutTot
 
   const findingsFormat = scoutTotal === 1
     ? `Write a single comprehensive FINDINGS.md covering all areas.`
-    : `Write your findings as a clearly labeled section in FINDINGS.md:
-   ## Scout ${roleIndex + 1} — ${roleIndex === 0 ? 'Frontend' : roleIndex === 1 ? 'Backend' : 'Testing & Infrastructure'}
+    : `Write your findings to your DEDICATED section file — FINDINGS-scout-N.md (where N is your agent number).
+   This file was pre-created for you in the knowledge/ directory.
+   Do NOT write to FINDINGS.md directly — that is a consolidated index that links to each Scout's file.
 
-   If FINDINGS.md already has content from another Scout, APPEND your section — do NOT overwrite theirs.`
+   Your section file heading:
+   ## Scout ${roleIndex + 1} — ${roleIndex === 0 ? 'Frontend' : roleIndex === 1 ? 'Backend' : 'Testing & Infrastructure'}`
 
   return `
 LAYOUT ADAPTATION — ${tier.toUpperCase()} (${scoutTotal} scout${scoutTotal > 1 ? 's' : ''})
@@ -310,19 +314,24 @@ export function scoutToBuilderHandoff(swarmRoot: string): string {
 HANDOFF PROTOCOL: Scout -> Builder (Findings Delivery)
 
   SCOUT SIDE (after completing reconnaissance):
-  1. Write findings to ${swarmRoot}/knowledge/FINDINGS.md
+  1. Write findings to your section file:
+     - Single scout:  ${swarmRoot}/knowledge/FINDINGS.md (write directly)
+     - Multi-scout:   ${swarmRoot}/knowledge/FINDINGS-scout-N.md (your pre-created section file)
      - Use structured format: Tech Stack, Code Patterns, Critical Files, Risks, Testing
      - Include file paths, line numbers, and concrete examples
+     - Do NOT overwrite FINDINGS.md in multi-scout swarms — it is a consolidated index
   2. Send summary to Coordinator:
-     node ${swarmRoot}/bin/gs-mail.cjs send --to "<Coordinator>" --type message --body "Recon complete. FINDINGS.md updated with [N] critical files, [M] risk zones. Standing by for Builder questions."
+     node ${swarmRoot}/bin/gs-mail.cjs send --to "<Coordinator>" --type message --body "Recon complete. FINDINGS updated with [N] critical files, [M] risk zones. Standing by for Builder questions."
   3. Enter standby: monitor inbox every 30s for Builder questions
 
   BUILDER SIDE (before starting implementation):
   1. Read ${swarmRoot}/knowledge/FINDINGS.md BEFORE exploring on your own
-  2. Note: patterns, naming conventions, risk zones relevant to your task
-  3. If you need clarification, message the domain-appropriate Scout:
+     - This is the consolidated index. In multi-scout swarms it links to per-scout section files.
+  2. Also read each FINDINGS-scout-N.md file listed in the index for full codebase intelligence
+  3. Note: patterns, naming conventions, risk zones relevant to your task
+  4. If you need clarification, message the domain-appropriate Scout:
      node ${swarmRoot}/bin/gs-mail.cjs send --to "<Scout>" --type message --body "Question: [specific question about your task area]"
-  4. Wait for Scout response before making assumptions`
+  5. Wait for Scout response before making assumptions`
 }
 
 /**
