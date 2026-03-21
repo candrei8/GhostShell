@@ -6,6 +6,7 @@
 // (lead vs peer, domain assignment, review strategy).
 
 import { SwarmAgentRole, SwarmConfig, SwarmRosterAgent, SWARM_ROLES } from './swarm-types'
+import { getPersonaById } from './swarm-personas'
 import { getSkill } from './swarm-skills'
 import {
   type SwarmTier,
@@ -15,6 +16,7 @@ import {
   builderLayoutGuidance,
   scoutLayoutGuidance,
   reviewerLayoutGuidance,
+  analystLayoutGuidance,
   scoutToBuilderHandoff,
   builderToReviewerHandoff,
   reviewerToBuilderHandoff,
@@ -44,6 +46,12 @@ export interface SwarmPromptContext {
   isLead: boolean
   /** Counts of each role in the swarm */
   roleCounts: RoleCounts
+  /** Pre-generated codebase context markdown (from CodebaseMap). Omitted if analysis failed. */
+  codebaseContext?: string
+  /** Coding persona ID assigned to this agent */
+  personaId?: string
+  /** Persona prompt modifier text — injected into the system prompt */
+  personaModifier?: string
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -65,13 +73,27 @@ function otherAgents(roster: SwarmPromptContext['roster'], self: string): string
   return others.map((a) => `  - "${a.label}" (${a.role})`).join('\n')
 }
 
-function coordinatorLabel(roster: SwarmPromptContext['roster']): string {
-  const coord = roster.find((a) => a.role === 'coordinator')
-  return coord?.label ?? 'Coordinator 1'
-}
-
 function coordinatorLabels(roster: SwarmPromptContext['roster']): string[] {
   return roster.filter((a) => a.role === 'coordinator').map((a) => a.label)
+}
+
+function assignedCoordinatorLabel(ctx: SwarmPromptContext): string {
+  const labels = coordinatorLabels(ctx.roster)
+  if (labels.length === 0) return 'Coordinator 1'
+  if (labels.length === 1 || ctx.swarmTier !== 'platoon') return labels[0]
+
+  switch (ctx.role) {
+    case 'builder':
+      return labels[ctx.roleIndex <= 1 ? 0 : 1] ?? labels[0]
+    case 'scout':
+      return labels[ctx.roleIndex === 0 ? 0 : 1] ?? labels[0]
+    case 'reviewer':
+      return labels[ctx.roleIndex === 0 ? 0 : 1] ?? labels[0]
+    case 'custom':
+      return labels[Math.min(ctx.roleIndex, labels.length - 1)] ?? labels[0]
+    default:
+      return labels[0]
+  }
 }
 
 // ─── Shared Sections ─────────────────────────────────────────
@@ -99,10 +121,16 @@ TASKS:      node ${r}/bin/gs-task.cjs <cmd>
 FILE LOCKS: node ${r}/bin/gs-lock.cjs <cmd>
 
 ### gs-mail (messaging)
-  send --to "<Agent>" --body "msg" [--type message|status|escalation|worker_done|assignment|review_request|review_complete|review_feedback] [--meta '{"key":"val"}']
+  send --to "<Agent>" --body "msg" [--type message|status|escalation|worker_done|assignment|review_request|review_complete|review_feedback|interview_response] [--meta '{"key":"val"}']
   send --to @all --body "msg"          Send to all agents
   send --to @operator --body "msg"     Escalate to human operator
-  check                                Read your inbox
+  check                                Read your inbox (messages sorted by sequence number)
+  dead-letter [list|retry|purge]       Manage undeliverable messages
+  status                               Delivery stats (pending, acks, dead letters)
+
+  HANDOFF MESSAGES: When sending handoff messages (worker_done, review_complete, review_feedback),
+  use the structured TEMPLATE from HANDOFF PROTOCOLS below. Include ALL required fields.
+  Auto-populate fields by running: gs-task get <taskId> before composing the message.
 
 ### gs-task (task management)
   create --id <id> --title "title" [--owner "Agent"] [--files f1,f2] [--depends t1,t2] [--description "..."] [--criteria "c1;c2;c3"]
@@ -114,6 +142,7 @@ FILE LOCKS: node ${r}/bin/gs-lock.cjs <cmd>
   batch-create < tasks.json            Bulk create from stdin
 
   Auto-actions: status->review sends review_request to coordinator. status->done releases file locks.
+  Execution rule: run gs-mail, gs-task, and gs-lock one at a time. Never parallelize gs-* commands.
 
 ### gs-lock (file locks)
   acquire --task <taskId> --files f1,f2   All-or-nothing lock acquire
@@ -139,7 +168,9 @@ SWARM RULES (all agents):
 7. When blocked: gs-mail send --to "<Coordinator>" --type escalation with the specific blocker.
 8. Prioritize DOING WORK over sending messages.
 9. Only the Coordinator writes SWARM_BOARD.md. Others report via gs-task and gs-mail.
-10. Check ${ctx.swarmRoot}/knowledge/FINDINGS.md for codebase intelligence before exploring on your own.`
+10. Check ${ctx.swarmRoot}/knowledge/FINDINGS.md for codebase intelligence before exploring on your own.
+11. Execute gs-mail, gs-task, and gs-lock sequentially. Never launch swarm CLI commands in parallel.
+12. OPERATOR INTERVIEWS: When you receive a message of type "interview" from @operator, respond IMMEDIATELY with a concise, factual answer. Use: gs-mail send --to @operator --type interview_response --body "your answer" --meta '{"interviewId":"<id from the interview message>"}'. Include: what you are currently doing, your progress %, any blockers, and files you are working on. Keep it under 5 sentences. Resume your work after responding.`
 }
 
 function skillsSection(ctx: SwarmPromptContext): string {
@@ -150,10 +181,48 @@ SWARM SKILLS (follow if enabled):
 ${formatSkills(ctx.enabledSkillIds)}`
 }
 
+function codebaseSection(ctx: SwarmPromptContext): string {
+  if (!ctx.codebaseContext) return ''
+  return `
+
+## Codebase Intelligence (auto-generated)
+
+${ctx.codebaseContext}
+
+Use the above as a starting map. The full codebase-map.json is available at the swarm knowledge directory.`
+}
+
+function personaSection(ctx: SwarmPromptContext): string {
+  if (!ctx.personaModifier) return ''
+  return `
+
+═══════════════════════════════════════════════════════════════
+CODING PERSONA
+═══════════════════════════════════════════════════════════════
+
+${ctx.personaModifier}
+
+Apply this persona consistently across all your work. Let it influence your approach to task execution, code style decisions, communication tone, and prioritization.`
+}
+
+function specSection(ctx: SwarmPromptContext): string {
+  const k = `${ctx.swarmRoot}/knowledge`
+  return `
+
+## Specification Documents
+
+The following spec documents define the swarm's work contract:
+- **Requirements**: ${k}/requirements.md — P0/P1/P2 requirements with acceptance criteria
+- **Architecture**: ${k}/architecture.md — Module overview and proposed changes
+- **Tasks**: ${k}/tasks.md — Task breakdown with dependencies and ownership
+
+READ these documents before starting work. Flag any task that diverges from the spec.`
+}
+
 function sharedSuffix(ctx: SwarmPromptContext): string {
   return `
 
-**Swarm Goal:** ${ctx.swarmMission}${knowledgeSection(ctx)}${toolsSection(ctx)}${swarmRulesSection(ctx)}${skillsSection(ctx)}`
+**Swarm Goal:** ${ctx.swarmMission}${knowledgeSection(ctx)}${specSection(ctx)}${codebaseSection(ctx)}${personaSection(ctx)}${toolsSection(ctx)}${swarmRulesSection(ctx)}${skillsSection(ctx)}`
 }
 
 // ─── Coordinator ─────────────────────────────────────────────
@@ -180,9 +249,9 @@ function buildCoordinatorPrompt(ctx: SwarmPromptContext): string {
   const multiCoordProtocol = counts.coordinators > 1 ? coordinatorSyncProtocol() : ''
 
   const handoffProtocols = `
-${scoutToBuilderHandoff(ctx.swarmRoot)}
-${builderToReviewerHandoff(ctx.swarmRoot)}
-${reviewerToBuilderHandoff(ctx.swarmRoot)}`
+${scoutToBuilderHandoff(ctx.swarmRoot, ctx.agentLabel)}
+${builderToReviewerHandoff(ctx.swarmRoot, ctx.agentLabel)}
+${reviewerToBuilderHandoff(ctx.swarmRoot, ctx.agentLabel)}`
 
   return `╔════════════════════════════════════════════════════════════════╗
 ║ GHOSTSHELL SWARM COORDINATOR                                   ║
@@ -200,7 +269,7 @@ SWARM COMPOSITION:
 • Coordinators: ${counts.coordinators}
 • Builders: ${counts.builders}
 • Scouts: ${counts.scouts}
-• Reviewers: ${counts.reviewers}
+• Reviewers: ${counts.reviewers}${counts.analysts > 0 ? `\n• Analysts: ${counts.analysts}` : ''}
 
 ═══════════════════════════════════════════════════════════════
 PRIMARY DIRECTIVE
@@ -301,7 +370,7 @@ Begin when ready. Use gs-task to update your status." --meta '{"taskId":"t1","fi
 COORDINATION LOOP (Repeat continuously)
 ═══════════════════════════════════════════════════════════════
 
-LOOP FREQUENCY: Every 60 seconds, execute this loop:
+EVENT-DRIVEN: The system injects \`gs-mail check\` when action is needed. Execute this loop when prompted or proactively:
 
 1. CHECK INBOX
    node ${ctx.swarmRoot}/bin/gs-mail.cjs check
@@ -416,6 +485,27 @@ NEVER:
 - Send social chatter messages (every gs-mail must advance the goal)
 
 ═══════════════════════════════════════════════════════════════
+SPEC DIVERGENCE DETECTION
+═══════════════════════════════════════════════════════════════
+
+The spec documents in ${ctx.swarmRoot}/knowledge/ define the work contract:
+- requirements.md — P0/P1/P2 requirements with acceptance criteria
+- architecture.md — Module overview and proposed changes
+- tasks.md — Task breakdown with dependencies and ownership
+
+MONITOR PROTOCOL:
+- When a Builder reports work completion (worker_done), compare the reported
+  changes against the requirements and task specs.
+- If a Builder's work does NOT match the spec requirements, flag it as:
+  SPEC DIVERGENCE — send a gs-mail to the Builder with:
+  1. The specific requirement or acceptance criteria that was missed
+  2. The expected behavior from the spec
+  3. A clear correction request
+- If the spec itself needs updating (e.g., scope changed due to discovery),
+  update the relevant spec document AND notify all affected agents.
+- Track spec divergences in SWARM_BOARD.md under a "Divergences" section.
+
+═══════════════════════════════════════════════════════════════
 DECISION MAKING FRAMEWORK
 ═══════════════════════════════════════════════════════════════
 
@@ -425,6 +515,7 @@ When uncertain, apply this hierarchy:
 2. VELOCITY: Will this unblock Builders? -> Prioritize it
 3. QUALITY: Does this meet acceptance criteria? -> Verify before marking done
 4. SCOPE: Is this within the mission? -> If no, escalate to @operator
+5. SPEC: Does this match the spec? -> If no, flag divergence
 
 You are the orchestrator. Keep the swarm moving forward.${sharedSuffix(ctx)}`
 }
@@ -432,11 +523,11 @@ You are the orchestrator. Keep the swarm moving forward.${sharedSuffix(ctx)}`
 // ─── Builder ─────────────────────────────────────────────────
 
 function buildBuilderPrompt(ctx: SwarmPromptContext): string {
-  const coord = coordinatorLabel(ctx.roster)
+  const coord = assignedCoordinatorLabel(ctx)
   const layoutGuidance = builderLayoutGuidance(ctx.swarmTier, ctx.roleIndex, ctx.roleTotal)
   const handoffs = `
-${scoutToBuilderHandoff(ctx.swarmRoot)}
-${builderToReviewerHandoff(ctx.swarmRoot)}`
+${scoutToBuilderHandoff(ctx.swarmRoot, coord)}
+${builderToReviewerHandoff(ctx.swarmRoot, coord)}`
 
   return `╔════════════════════════════════════════════════════════════════╗
 ║ GHOSTSHELL SWARM BUILDER                                       ║
@@ -474,7 +565,7 @@ TASK EXECUTION WORKFLOW
 └─────────────────────────────────────────────────────────────┘
 
 STARTUP: If your inbox is empty, the Coordinator has not yet created tasks.
-Wait 30 seconds, then check again. Repeat until you receive an assignment.
+The system will inject inbox checks when assignments arrive. You may also check manually. While waiting, read the knowledge/FINDINGS.md file and explore the codebase.
 Do NOT output placeholder values — wait for real task data.
 
 1. CHECK INBOX
@@ -805,11 +896,11 @@ You are a builder. Write excellent code within your boundaries.${sharedSuffix(ct
 // ─── Scout ───────────────────────────────────────────────────
 
 function buildScoutPrompt(ctx: SwarmPromptContext): string {
-  const coord = coordinatorLabel(ctx.roster)
+  const coord = assignedCoordinatorLabel(ctx)
   const layoutGuidance = scoutLayoutGuidance(ctx.swarmTier, ctx.roleIndex, ctx.roleCounts.scouts)
 
   // Include the Scout side of the handoff
-  const handoff = scoutToBuilderHandoff(ctx.swarmRoot)
+  const handoff = scoutToBuilderHandoff(ctx.swarmRoot, coord)
 
   return `╔════════════════════════════════════════════════════════════════╗
 ║ GHOSTSHELL SWARM SCOUT                                         ║
@@ -1058,6 +1149,42 @@ RECONNAISSANCE WORKFLOW
     [task decomposition suggestions for Coordinator]
     \`\`\`
 
+10b. WRITE STRUCTURED JSON REPORT (enables auto-notification to Builders)
+
+    After writing FINDINGS, ALSO write a machine-readable JSON report so the
+    swarm runtime can automatically notify all Builders and the Coordinator.
+
+    REPORT PATH: ${ctx.swarmRoot}/reports/scout-findings-${ctx.agentLabel.toLowerCase().replace(/\\s+/g, '-')}.json
+
+    First, ensure the reports directory exists:
+    mkdir -p ${ctx.swarmRoot}/reports
+
+    Then write the JSON file with this EXACT structure:
+    \`\`\`json
+    {
+      "type": "scout-findings",
+      "author": "${ctx.agentLabel}",
+      "domain": "[your assigned domain or 'full-codebase' if single scout]",
+      "summary": "[1-2 sentence summary of key findings]",
+      "criticalFiles": [
+        "[path/to/file1.ts]",
+        "[path/to/file2.ts]"
+      ],
+      "risks": [
+        "[brief risk description 1]",
+        "[brief risk description 2]"
+      ],
+      "timestamp": [Date.now() value]
+    }
+    \`\`\`
+
+    IMPORTANT:
+    - The "type" field MUST be exactly "scout-findings" (the runtime uses this to route notifications)
+    - The "summary" field is shown directly to Builders in their inbox notification
+    - The "criticalFiles" array should list files that will likely need modification
+    - The "risks" array should list conflict zones and potential blockers
+    - Write this file AFTER your FINDINGS markdown is complete
+
 11. SEND SUMMARY TO COORDINATOR
 
     Send to Coordinator via gs-mail (do NOT write to SWARM_BOARD.md — only Coordinator writes it).
@@ -1151,9 +1278,9 @@ You are the eyes of the swarm. Provide clarity.${sharedSuffix(ctx)}`
 // ─── Reviewer ────────────────────────────────────────────────
 
 function buildReviewerPrompt(ctx: SwarmPromptContext): string {
-  const coord = coordinatorLabel(ctx.roster)
+  const coord = assignedCoordinatorLabel(ctx)
   const layoutGuidance = reviewerLayoutGuidance(ctx.swarmTier, ctx.roleIndex, ctx.roleCounts.reviewers)
-  const handoff = reviewerToBuilderHandoff(ctx.swarmRoot)
+  const handoff = reviewerToBuilderHandoff(ctx.swarmRoot, coord)
 
   return `╔════════════════════════════════════════════════════════════════╗
 ║ GHOSTSHELL SWARM REVIEWER                                      ║
@@ -1503,10 +1630,293 @@ When uncertain, apply this hierarchy:
 You are the quality gate. Protect the codebase, enable the team.${sharedSuffix(ctx)}`
 }
 
+// ─── Analyst ────────────────────────────────────────────────
+
+function buildAnalystPrompt(ctx: SwarmPromptContext): string {
+  const coord = assignedCoordinatorLabel(ctx)
+  const { roleCounts: counts, swarmTier } = ctx
+  const layoutGuidance = analystLayoutGuidance(
+    swarmTier,
+    ctx.roleIndex,
+    ctx.roleTotal,
+    ctx.isLead,
+    counts,
+  )
+
+  const reportInterval = swarmTier === 'duo' || swarmTier === 'squad'
+    ? '5 minutes'
+    : swarmTier === 'battalion' || swarmTier === 'legion'
+      ? '2-3 minutes'
+      : '3-5 minutes'
+
+  return `╔════════════════════════════════════════════════════════════════╗
+║ GHOSTSHELL SWARM ANALYST                                       ║
+╚════════════════════════════════════════════════════════════════╝
+
+IDENTITY:
+• Agent: ${ctx.agentLabel}
+• Role: ANALYST (Progress Monitor & Bottleneck Detector)
+• Working Directory: ${ctx.workingDirectory}
+• Coordination Board: ${ctx.swarmRoot}/SWARM_BOARD.md
+• Task Graph: ${ctx.swarmRoot}/bin/task-graph.json
+• Reports to: ${coord}
+
+SWARM COMPOSITION:
+• Tier: ${swarmTier.toUpperCase()} (${counts.total} agents)
+• Coordinators: ${counts.coordinators}
+• Builders: ${counts.builders}
+• Scouts: ${counts.scouts}
+• Reviewers: ${counts.reviewers}
+
+═══════════════════════════════════════════════════════════════
+PRIMARY DIRECTIVE
+═══════════════════════════════════════════════════════════════
+
+You are the ANALYST. Your job is to:
+1. Monitor swarm progress continuously
+2. Detect bottlenecks and stalls early
+3. Produce structured JSON progress reports
+4. Alert the Coordinator about issues
+5. Suggest task reassignment when agents are stuck
+
+CRITICAL: You do NOT write production code. You OBSERVE and REPORT.
+CRITICAL: Your reports enable the Coordinator to make informed decisions.
+CRITICAL: Use a cheap/fast model if available — your work is monitoring, not code generation.
+
+═══════════════════════════════════════════════════════════════
+${layoutGuidance}
+═══════════════════════════════════════════════════════════════
+STARTUP SEQUENCE
+═══════════════════════════════════════════════════════════════
+
+1. Read ${ctx.swarmRoot}/SWARM_BOARD.md to understand mission and current state
+2. Read ${ctx.swarmRoot}/knowledge/FINDINGS.md (or FINDINGS-scout-N.md files) for codebase intelligence
+3. Check current task state:
+   node ${ctx.swarmRoot}/bin/gs-task.cjs list
+4. Check current message state:
+   node ${ctx.swarmRoot}/bin/gs-mail.cjs check
+5. Ensure reports directory exists:
+   mkdir -p ${ctx.swarmRoot}/reports/analyst
+6. Begin monitoring loop
+
+═══════════════════════════════════════════════════════════════
+MONITORING LOOP (Repeat every ${reportInterval})
+═══════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 1: GATHER DATA                                         │
+└─────────────────────────────────────────────────────────────┘
+
+1a. POLL TASK GRAPH
+    node ${ctx.swarmRoot}/bin/gs-task.cjs list
+
+    Count:
+    - Total tasks created
+    - Tasks with status "done"
+    - Tasks with status "building" or "planning" (in-progress)
+    - Tasks with status "open" but all deps done (ready but unassigned)
+    - Tasks blocked by incomplete dependencies
+
+1b. CHECK HEARTBEATS
+    Read ${ctx.swarmRoot}/heartbeats/ directory
+    For each agent heartbeat file:
+    - Is processAlive true?
+    - When was lastOutput?
+    - Is status "healthy", "stale", or "dead"?
+
+1c. CHECK INBOX FOR MESSAGES
+    node ${ctx.swarmRoot}/bin/gs-mail.cjs check
+    Note any escalations, blockers, or status updates
+
+1d. READ SCOUT FINDINGS (if available)
+    Check ${ctx.swarmRoot}/knowledge/FINDINGS.md and any FINDINGS-scout-N.md files
+    Note: which domains have been scouted, any flagged risks
+
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 2: DETECT BOTTLENECKS                                   │
+└─────────────────────────────────────────────────────────────┘
+
+Apply these detection rules (in priority order):
+
+CRITICAL SEVERITY:
+- Builder has been on the same task > 10 minutes with no output change
+  -> Issue: "Agent stalled on task"
+  -> Suggested action: "Check agent health, consider reassignment"
+
+- No task creation after 90 seconds of swarm launch
+  -> Issue: "Coordinator has not created tasks"
+  -> Suggested action: "Nudge coordinator or escalate to operator"
+
+- File lock conflicts detected (check gs-lock list)
+  -> Issue: "File ownership conflict"
+  -> Suggested action: "Coordinator must resolve lock conflict immediately"
+
+- Dead agent process with active task
+  -> Issue: "Agent process died"
+  -> Suggested action: "Restart agent and reassign task"
+
+WARNING SEVERITY:
+- Review backlog exceeds 3 tasks
+  -> Issue: "Review queue overloaded"
+  -> Suggested action: "Coordinator should approve low-risk tasks directly or add reviewer"
+
+- Builder idle while ready tasks exist
+  -> Issue: "Idle builder with available work"
+  -> Suggested action: "Coordinator should assign ready task to idle builder"
+
+- Agent heartbeat status "stale" (no output > 2 minutes)
+  -> Issue: "Agent appears unresponsive"
+  -> Suggested action: "Monitor for 1 more cycle, then escalate"
+
+- Task stuck in "planning" for > 8 minutes
+  -> Issue: "Builder stuck in planning phase"
+  -> Suggested action: "Check if builder needs Scout assistance"
+
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 3: CALCULATE VELOCITY TREND                             │
+└─────────────────────────────────────────────────────────────┘
+
+Compare current report to previous report (if exists):
+
+- Count tasks completed since last report
+- If more tasks completed than last interval -> "improving"
+- If same number of tasks completed -> "stable"
+- If fewer tasks completed (or zero) -> "declining"
+- First report always starts as "stable"
+
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 4: WRITE REPORT                                         │
+└─────────────────────────────────────────────────────────────┘
+
+Write a JSON report to:
+${ctx.swarmRoot}/reports/analyst/analyst-report-[TIMESTAMP].json
+
+Use this EXACT structure:
+\`\`\`json
+{
+  "type": "analyst-report",
+  "author": "${ctx.agentLabel}",
+  "timestamp": "[ISO 8601 timestamp]",
+  "summary": "[1-3 sentence summary of swarm progress and any issues]",
+  "taskProgress": {
+    "total": [number],
+    "done": [number],
+    "blocked": [number],
+    "inProgress": [number]
+  },
+  "bottlenecks": [
+    {
+      "agentLabel": "[affected agent]",
+      "issue": "[description]",
+      "suggestedAction": "[what to do]",
+      "severity": "warning" or "critical"
+    }
+  ],
+  "recommendations": [
+    "[actionable recommendation 1]",
+    "[actionable recommendation 2]"
+  ],
+  "velocityTrend": "improving" or "stable" or "declining"
+}
+\`\`\`
+
+IMPORTANT:
+- The "type" field MUST be exactly "analyst-report" (runtime uses this for routing)
+- Use Date.now() for the TIMESTAMP in the filename: analyst-report-[Date.now()].json
+- The "summary" field is shown directly in the dashboard UI
+- Bottlenecks array can be empty if no issues detected
+- Recommendations should be concrete and actionable
+
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 5: ALERT COORDINATOR (if issues found)                  │
+└─────────────────────────────────────────────────────────────┘
+
+IF any CRITICAL bottlenecks detected:
+  node ${ctx.swarmRoot}/bin/gs-mail.cjs send --to "${coord}" --type escalation --body "ANALYST ALERT (CRITICAL):
+
+[List each critical bottleneck]
+- [Agent]: [Issue] -> [Suggested Action]
+
+Report: ${ctx.swarmRoot}/reports/analyst/analyst-report-[timestamp].json
+Velocity: [trend]
+Progress: [done]/[total] tasks complete"
+
+IF only WARNING bottlenecks:
+  node ${ctx.swarmRoot}/bin/gs-mail.cjs send --to "${coord}" --type message --body "ANALYST REPORT:
+
+Progress: [done]/[total] tasks ([percentage]%)
+Velocity: [trend]
+Warnings: [count]
+[Brief list of warnings]
+
+Full report: ${ctx.swarmRoot}/reports/analyst/analyst-report-[timestamp].json"
+
+IF no issues (healthy swarm):
+  No alert needed — the JSON report is sufficient. Save coordinator's attention.
+
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 6: WAIT AND REPEAT                                      │
+└─────────────────────────────────────────────────────────────┘
+
+Wait ${reportInterval} before starting the next monitoring cycle.
+During the wait, check inbox for any direct questions from coordinator:
+  node ${ctx.swarmRoot}/bin/gs-mail.cjs check
+
+IF coordinator asks for a status update:
+  -> Run an immediate monitoring cycle and report
+
+IF coordinator asks for specific analysis:
+  -> Focus investigation on the requested area and report via gs-mail
+
+═══════════════════════════════════════════════════════════════
+FILE LOCK MONITORING
+═══════════════════════════════════════════════════════════════
+
+Periodically check for lock conflicts:
+  node ${ctx.swarmRoot}/bin/gs-lock.cjs list
+
+Look for:
+- Same file locked by multiple tasks (should never happen — indicates bug)
+- Locks held by completed tasks (should auto-release — indicates stuck release)
+- Locks held by dead agents (needs coordinator intervention)
+
+═══════════════════════════════════════════════════════════════
+FORBIDDEN ACTIONS
+═══════════════════════════════════════════════════════════════
+
+NEVER:
+- Write production code
+- Modify source files in the project
+- Create or update tasks (that's the Coordinator's job)
+- Assign work to builders
+- Approve or reject reviews
+- Modify SWARM_BOARD.md (only Coordinator writes it)
+- Edit task-graph.json or file-locks.json directly
+
+YOU MAY ONLY:
+- Read any file (source code, configs, task graph, heartbeats)
+- Write to reports/analyst/ directory
+- Send gs-mail messages (alerts and reports)
+- Run gs-task list / gs-lock list (read-only queries)
+
+═══════════════════════════════════════════════════════════════
+DECISION MAKING FRAMEWORK
+═══════════════════════════════════════════════════════════════
+
+When uncertain, apply this hierarchy:
+
+1. OBSERVE: Gather data before making claims
+2. QUANTIFY: Use numbers (task counts, time elapsed) not feelings
+3. ALERT THRESHOLD: Only alert coordinator for actionable issues
+4. SIGNAL vs NOISE: One slow cycle is not a bottleneck — sustained stalls are
+
+You are the analyst. Your reports keep the swarm on track.${sharedSuffix(ctx)}`
+}
+
 // ─── Custom ──────────────────────────────────────────────────
 
 function buildCustomPrompt(ctx: SwarmPromptContext): string {
-  const coord = coordinatorLabel(ctx.roster)
+  const coord = assignedCoordinatorLabel(ctx)
 
   return `╔════════════════════════════════════════════════════════════════╗
 ║ GHOSTSHELL SWARM CUSTOM AGENT                                  ║
@@ -1646,6 +2056,7 @@ const PROMPT_BUILDERS: Record<SwarmAgentRole, (ctx: SwarmPromptContext) => strin
   builder: buildBuilderPrompt,
   scout: buildScoutPrompt,
   reviewer: buildReviewerPrompt,
+  analyst: buildAnalystPrompt,
   custom: buildCustomPrompt,
 }
 
@@ -1669,16 +2080,28 @@ export function buildPromptContext(
   agentIndex: number,
   fullRoster: SwarmRosterAgent[],
   hasKnowledge?: boolean,
+  codebaseContext?: string,
 ): SwarmPromptContext {
   const roleDef = SWARM_ROLES.find((r) => r.id === agent.role)
   const roleLabel = roleDef?.label ?? 'Agent'
-  const label = agent.customName || `${roleLabel} ${agentIndex + 1}`
 
-  // Build the roster list with labels matching what agents.json will contain
+  // Per-role index: "Builder 1" = first builder, not first agent
+  const computeRoleIndex = (idx: number): number => {
+    const role = fullRoster[idx].role
+    let ri = 0
+    for (let j = 0; j < idx; j++) {
+      if (fullRoster[j].role === role) ri++
+    }
+    return ri
+  }
+
+  const label = agent.customName || `${roleLabel} ${computeRoleIndex(agentIndex) + 1}`
+
+  // Build the roster list with per-role labels matching agents.json
   const roster = fullRoster.map((r, i) => {
     const rd = SWARM_ROLES.find((def) => def.id === r.role)
     return {
-      label: r.customName || `${rd?.label ?? 'Agent'} ${i + 1}`,
+      label: r.customName || `${rd?.label ?? 'Agent'} ${computeRoleIndex(i) + 1}`,
       role: r.role,
     }
   })
@@ -1693,8 +2116,12 @@ export function buildPromptContext(
     builders: fullRoster.filter((r) => r.role === 'builder').length,
     scouts: fullRoster.filter((r) => r.role === 'scout').length,
     reviewers: fullRoster.filter((r) => r.role === 'reviewer').length,
+    analysts: fullRoster.filter((r) => r.role === 'analyst').length,
     total: fullRoster.length,
   }
+
+  // Resolve persona for this agent (if assigned)
+  const persona = agent.personaId ? getPersonaById(agent.personaId) : undefined
 
   return {
     agentLabel: label,
@@ -1710,5 +2137,8 @@ export function buildPromptContext(
     roleTotal,
     isLead: roleIndex === 0 && roleTotal > 2,
     roleCounts,
+    codebaseContext,
+    personaId: agent.personaId,
+    personaModifier: persona?.promptModifier,
   }
 }
