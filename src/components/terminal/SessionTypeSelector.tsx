@@ -198,8 +198,8 @@ export function SessionTypeSelector({ onSelect, onClose }: SessionTypeSelectorPr
           exit={{ opacity: 0 }}
           transition={{ duration: 0.5 }}
           style={{
-            backgroundColor: 'rgba(56, 189, 248, 0.08)',
-            backdropFilter: 'blur(35px)'
+            backgroundColor: 'rgba(5, 8, 18, 0.97)',
+            backdropFilter: 'blur(24px)'
           }}
           onClick={onClose}
         />

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
-import { promises as fs } from 'fs'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { promises as fs, rmSync } from 'fs'
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { isAbsolute, join, normalize, resolve as pathResolve } from 'path'
 import { PtyManager } from './pty-manager'
@@ -43,9 +43,14 @@ app.commandLine.appendSwitch('enable-zero-copy')
 app.commandLine.appendSwitch('high-dpi-support', '1')
 app.commandLine.appendSwitch('force-device-scale-factor', '1')
 
-// Fix GPU disk cache "Access denied" errors on Windows by setting explicit cache paths
+// Fix GPU disk cache "Access denied" errors on Windows.
+// Chromium tries to move/rename the old cache dir on startup; stale lock files
+// from a previous process cause EPERM (0x5).  Purging the directory synchronously
+// before GPU init avoids the error entirely.
+const gpuCacheDir = join(app.getPath('userData'), 'GPUCache')
+try { rmSync(gpuCacheDir, { recursive: true, force: true }) } catch { /* may be locked by current process — harmless */ }
 app.commandLine.appendSwitch('disk-cache-dir', join(app.getPath('userData'), 'Cache'))
-app.commandLine.appendSwitch('gpu-disk-cache-dir', join(app.getPath('userData'), 'GPUCache'))
+app.commandLine.appendSwitch('gpu-disk-cache-dir', gpuCacheDir)
 
 function isProvider(value: string): value is Provider {
   return value === 'claude' || value === 'gemini' || value === 'codex'
@@ -68,6 +73,17 @@ function clearCloseForceTimer(): void {
 
 function getStorageDir(): string {
   return join(app.getPath('userData'), 'storage')
+}
+
+/**
+ * Validate that IPC input strings are reasonable (not absurdly long, no null bytes).
+ * File lock inputs (agentName, taskId, file paths) are validated here.
+ */
+function sanitizeSwarmInput(value: string, label: string, maxLen = 256): string {
+  if (typeof value !== 'string') throw new Error(`${label} must be a string`)
+  if (value.length > maxLen) throw new Error(`${label} exceeds max length of ${maxLen}`)
+  if (value.includes('\0')) throw new Error(`${label} contains null bytes`)
+  return value
 }
 
 async function getStorageFilePath(key: string): Promise<string | null> {
@@ -273,6 +289,10 @@ function setupIPC(): void {
     ptyManager.kill(id)
   })
 
+  ipcMain.handle('pty:isAlive', (_event, id: string) => {
+    return ptyManager.isAlive(id)
+  })
+
   ipcMain.handle('pty:getCwd', (_event, id: string) => {
     return ptyManager.getCwd(id)
   })
@@ -375,6 +395,62 @@ function setupIPC(): void {
     }
   })
 
+  // Git file hotspots (commit frequency per file in last 30 days)
+  ipcMain.handle('git:fileHotspots', async (_event, cwd: string) => {
+    try {
+      const output = await runCommand('git', [
+        'log', '--format=', '--name-only', '--since=30 days ago',
+      ], { cwd, timeoutMs: 15000 })
+
+      const counts: Record<string, number> = {}
+      for (const line of output.split('\n')) {
+        const file = line.trim()
+        if (file) counts[file] = (counts[file] || 0) + 1
+      }
+      return counts
+    } catch {
+      return {}
+    }
+  })
+
+  // Git checkpoint: create a stash-like commit object WITHOUT modifying working tree
+  ipcMain.handle('git:createCheckpoint', async (_event, cwd: string) => {
+    try {
+      // git stash create: returns hash if there are changes, empty string if clean
+      const hash = await runCommand('git', ['stash', 'create'], { cwd, timeoutMs: 10000 })
+      const trimmedHash = hash.trim()
+
+      if (trimmedHash) {
+        // There were uncommitted changes — hash captures them
+        return { hash: trimmedHash, clean: false }
+      }
+
+      // Working tree is clean — use HEAD as the reference point
+      const headHash = await runCommand('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5000 })
+      return { hash: headHash.trim(), clean: true }
+    } catch (error) {
+      return { hash: '', clean: true, error: String(error) }
+    }
+  })
+
+  // Git rollback: restore working tree to a checkpoint state
+  ipcMain.handle('git:rollback', async (_event, cwd: string, hash: string, isClean: boolean) => {
+    try {
+      if (isClean) {
+        // Checkpoint was from a clean state — just checkout that commit's files
+        await runCommand('git', ['checkout', hash, '--', '.'], { cwd, timeoutMs: 15000 })
+      } else {
+        // Checkpoint captured dirty state — first clean, then apply stash object
+        await runCommand('git', ['checkout', '.'], { cwd, timeoutMs: 10000 })
+        await runCommand('git', ['clean', '-fd'], { cwd, timeoutMs: 10000 })
+        await runCommand('git', ['stash', 'apply', hash], { cwd, timeoutMs: 15000 })
+      }
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
   // File CRUD handlers
   ipcMain.handle('fs:createFile', async (_event, filePath: string, content?: string) => {
     try {
@@ -463,10 +539,33 @@ function setupIPC(): void {
     }
   })
 
-  // Notification support: flash taskbar when app is unfocused
-  // (Native OS notification is handled via Web Notification API in renderer)
-  ipcMain.on('notify:show', () => {
+  // Notification support: native OS notification + taskbar flash when app is unfocused
+  ipcMain.on('notify:show', (_event, payload?: { title?: string; body?: string }) => {
     if (mainWindow && !mainWindow.isFocused()) {
+      const title = typeof payload?.title === 'string' && payload.title.trim()
+        ? payload.title.trim()
+        : 'GhostShell'
+      const body = typeof payload?.body === 'string' ? payload.body : ''
+
+      if (Notification.isSupported()) {
+        try {
+          const notification = new Notification({
+            title,
+            body,
+            silent: true,
+          })
+          notification.on('click', () => {
+            if (!mainWindow) return
+            if (mainWindow.isMinimized()) mainWindow.restore()
+            mainWindow.show()
+            mainWindow.focus()
+          })
+          notification.show()
+        } catch {
+          // Fall through to taskbar flash if native notification fails.
+        }
+      }
+
       mainWindow.flashFrame(true)
       const stopFlash = () => {
         mainWindow?.flashFrame(false)
@@ -526,6 +625,11 @@ function setupIPC(): void {
     files: string[]
   ) => {
     try {
+      sanitizeSwarmInput(swarmRoot, 'swarmRoot', 1024)
+      sanitizeSwarmInput(taskId, 'taskId', 128)
+      sanitizeSwarmInput(agentName, 'agentName', 128)
+      for (const f of files) sanitizeSwarmInput(f, 'file', 512)
+
       const binDir = join(swarmRoot, 'bin')
       try { await fs.access(binDir) } catch { return { success: false, error: 'Swarm directory not found' } }
       return await swarmFileLock.acquireLocks(swarmRoot, taskId, agentName, files)

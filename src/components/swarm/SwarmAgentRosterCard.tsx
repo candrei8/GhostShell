@@ -3,8 +3,9 @@ import { motion } from 'framer-motion'
 import { Users, Loader2 } from 'lucide-react'
 import type { SwarmAgentStatus, SwarmRosterAgent } from '../../lib/swarm-types'
 import { getRoleDef } from '../../lib/swarm-types'
+import { getPersonaById } from '../../lib/swarm-personas'
 import type { EnrichedSwarmAgent } from './SwarmCoordinationBoard'
-import { RoleIcon } from './swarm-icons'
+import { RoleIcon, PersonaIcon } from './swarm-icons'
 
 // ─── Status dot colors ──────────────────────────────────────
 
@@ -66,6 +67,10 @@ interface SwarmAgentRosterCardProps {
 
 export function SwarmAgentRosterCard({ agent, rosterAgent, index, health, onClick }: SwarmAgentRosterCardProps) {
   const roleDef = useMemo(() => getRoleDef(rosterAgent.role), [rosterAgent.role])
+  const persona = useMemo(
+    () => rosterAgent.personaId ? getPersonaById(rosterAgent.personaId) : undefined,
+    [rosterAgent.personaId],
+  )
   const agentLabel = rosterAgent.customName || `${roleDef.label} ${index + 1}`
 
   const dotColor = STATUS_DOT_COLORS[agent.status] || STATUS_DOT_COLORS.idle
@@ -115,10 +120,26 @@ export function SwarmAgentRosterCard({ agent, rosterAgent, index, health, onClic
           <RoleIcon iconName={roleDef.icon} className="w-3 h-3" color={roleDef.color} />
         </div>
 
-        {/* Agent Name */}
-        <span className="flex-1 min-w-0 text-xs font-medium text-ghost-text truncate">
-          {agentLabel}
-        </span>
+        {/* Agent Name + Persona */}
+        <div className="flex-1 min-w-0 flex items-center gap-1.5">
+          <span className="text-xs font-medium text-ghost-text truncate">
+            {agentLabel}
+          </span>
+          {persona && (
+            <span
+              className="flex items-center gap-0.5 px-1 py-0.5 rounded border text-[9px] font-medium shrink-0"
+              style={{
+                color: `${persona.color}bb`,
+                borderColor: `${persona.color}30`,
+                backgroundColor: `${persona.color}0a`,
+              }}
+              title={`${persona.title} — ${persona.workingStyle}`}
+            >
+              <PersonaIcon iconName={persona.icon} className="w-2.5 h-2.5" color={persona.color} />
+              {persona.name}
+            </span>
+          )}
+        </div>
 
         {/* Sub-agent badge */}
         {subAgentCount > 0 && (

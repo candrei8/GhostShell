@@ -8,6 +8,8 @@ import { ToastContainer } from '../common/ToastContainer'
 import { SettingsModal, type SettingsTab } from '../settings/SettingsModal'
 import { SubAgentMonitor } from '../agents/SubAgentMonitor'
 import { SwarmWizard } from '../swarm/SwarmWizard'
+import { SwarmDashboard } from '../swarm/SwarmDashboard'
+import { SwarmViewToggle } from '../swarm/SwarmViewToggle'
 import { useSwarmOrchestrator } from '../../hooks/useSwarmOrchestrator'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { UpdateBanner } from '../common/UpdateBanner'
@@ -28,9 +30,16 @@ export function AppLayout() {
   const [monitorOpen, setMonitorOpen] = useState(false)
   const wizardOpen = useSwarmStore((s) => s.wizard.isOpen)
   const activeSwarmId = useSwarmStore((s) => s.activeSwarmId)
+  const swarmViewMode = useSwarmStore((s) => s.swarmViewMode)
   const openWizard = useSwarmStore((s) => s.openWizard)
   const closeWizard = useSwarmStore((s) => s.closeWizard)
   const setActiveSwarm = useSwarmStore((s) => s.setActiveSwarm)
+
+  // Determine if the swarm dashboard should be shown as the main view
+  const swarms = useSwarmStore((s) => s.swarms)
+  const activeSwarm = activeSwarmId ? swarms.find((s) => s.id === activeSwarmId) : undefined
+  const isSwarmRunning = activeSwarm && (activeSwarm.status === 'running' || activeSwarm.status === 'launching' || activeSwarm.status === 'paused')
+  const showDashboardMode = isSwarmRunning && swarmViewMode === 'dashboard'
 
   const setSidebarView = useCallback((view: SidebarView | null) => {
     setSettingsOpen(false)
@@ -51,7 +60,10 @@ export function AppLayout() {
   const handleSwarmLaunch = useCallback(async (swarmId: string) => {
     closeWizard()
     setActiveSwarm(swarmId)
-    setSidebarView('swarm')
+    // Auto-switch to dashboard mode on launch
+    useSwarmStore.getState().setSwarmViewMode('dashboard')
+    // Close sidebar — dashboard IS the main view now
+    setSidebarView(null)
 
     const swarm = useSwarmStore.getState().getSwarm(swarmId)
     if (swarm) {
@@ -244,10 +256,10 @@ export function AppLayout() {
     }
   }, [activeSwarmId, activeView])
 
-  // Refit on activeView change so terminal resizes if panel covers it
+  // Refit on activeView / swarm view mode change so terminal resizes if panel covers it
   useEffect(() => {
     setTimeout(() => window.dispatchEvent(new CustomEvent('ghostshell:refit')), 50)
-  }, [activeView, monitorOpen])
+  }, [activeView, monitorOpen, swarmViewMode])
 
   useEffect(() => {
     const handleOpenSettings = () => openSettings('appearance')
@@ -263,14 +275,28 @@ export function AppLayout() {
       />
 
       <div className="relative flex min-h-0 flex-1 px-3 pb-3">
-        {/* Terminals Area */}
+        {/* Main Content Area */}
         <div className="flex-1 min-w-0 relative">
-          <TerminalContainer />
+          {/* Dashboard overlay (full-width, shown when in dashboard mode) */}
+          {showDashboardMode && (
+            <div className="absolute inset-0 z-10">
+              <SwarmDashboard />
+            </div>
+          )}
+
+          {/* Terminals always stay mounted to keep PTY sessions alive.
+              Hidden behind dashboard when in dashboard mode. */}
+          <div className={showDashboardMode ? 'invisible h-full' : 'h-full'}>
+            <TerminalContainer />
+          </div>
         </div>
 
-        {/* Sidebar Context */}
-        <VibeSidebar activeView={activeView} />
+        {/* Sidebar Context — hidden when dashboard mode is active */}
+        {!showDashboardMode && <VibeSidebar activeView={activeView} />}
       </div>
+
+      {/* Floating view mode toggle when swarm is active */}
+      {isSwarmRunning && <SwarmViewToggle />}
 
       {monitorOpen && (
         <div className="shrink-0 px-3 pb-3">

@@ -5,6 +5,7 @@ let mainWindow: BrowserWindow | null = null
 let checkInterval: ReturnType<typeof setInterval> | null = null
 let initialCheckTimer: ReturnType<typeof setTimeout> | null = null
 let isDownloading = false
+let lastAvailableVersion: string | null = null
 let listenersRegistered = false
 let ipcRegistered = false
 
@@ -58,6 +59,7 @@ function registerUpdaterListeners(): void {
   })
 
   autoUpdater.on('update-available', (info) => {
+    lastAvailableVersion = info.version
     log(`Update available: v${info.version}`)
     send({ status: 'available', version: info.version })
   })
@@ -83,7 +85,7 @@ function registerUpdaterListeners(): void {
 
     if (isDownloading) {
       isDownloading = false
-      send({ status: 'error', error: message })
+      send({ status: 'error', error: message, version: lastAvailableVersion })
       return
     }
 

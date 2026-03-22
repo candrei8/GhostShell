@@ -15,40 +15,33 @@ interface TerminalTabsProps {
 
 function getTabBackground(color: string | undefined, isActive: boolean) {
     if (!color || !color.startsWith('#')) {
-        return isActive ? '#4b36c4' : 'rgba(255, 255, 255, 0.03)'
+        return isActive ? '#38bdf8' : 'rgba(255, 255, 255, 0.03)'
     }
     if (isActive) return color;
     const r = parseInt(color.slice(1, 3), 16)
     const g = parseInt(color.slice(3, 5), 16)
     const b = parseInt(color.slice(5, 7), 16)
     if (isNaN(r) || isNaN(g) || isNaN(b)) {
-        return 'rgba(255, 255, 255, 0.15)';
+        return 'rgba(255, 255, 255, 0.03)';
     }
-    // Make the inactive color very visible by using 0.55 opacity instead of 0.12
-    return `rgba(${r}, ${g}, ${b}, 0.55)`
+    return `rgba(${r}, ${g}, ${b}, 0.12)`
 }
 
 const Logo = () => (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2L3 7V17L12 22L21 17V7L12 2Z" fill="#1A1B26"/>
-        <path d="M13 3L5 13H12L11 21L19 11H12L13 3Z" fill="url(#logo_gradient)"/>
-        <defs>
-            <linearGradient id="logo_gradient" x1="5" y1="3" x2="19" y2="21" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#FACC15" />
-                <stop offset="1" stopColor="#3B82F6" />
-            </linearGradient>
-        </defs>
+        <path d="M12 2L3 7V17L12 22L21 17V7L12 2Z" fill="#1A1B26" />
+        <path d="M13 3L5 13H12L11 21L19 11H12L13 3Z" fill="#38bdf8" />
     </svg>
 )
 
 const TAB_COLORS = [
-    { label: 'Red', value: '#ef4444' },
-    { label: 'Orange', value: '#f97316' },
-    { label: 'Yellow', value: '#eab308' },
-    { label: 'Green', value: '#22c55e' },
-    { label: 'Blue', value: '#3b82f6' },
-    { label: 'Purple', value: '#a855f7' },
-    { label: 'Pink', value: '#ec4899' },
+    { label: 'Rojo', value: '#ef4444' },
+    { label: 'Naranja', value: '#f97316' },
+    { label: 'Amarillo', value: '#eab308' },
+    { label: 'Verde', value: '#22c55e' },
+    { label: 'Azul', value: '#3b82f6' },
+    { label: 'Morado', value: '#a855f7' },
+    { label: 'Rosa', value: '#ec4899' },
 ]
 
 const AUTO_COLORS = TAB_COLORS.map(c => c.value);
@@ -141,7 +134,7 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
         }))
 
         items.push({
-            label: 'Default Dark',
+            label: 'Oscuro por Defecto',
             icon: <div className="w-3 h-3 rounded-full border border-white/20" />,
             onClick: () => {
                 updateWorkspace(id, { color: 'default' })
@@ -149,7 +142,7 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
         })
 
         items.push({
-            label: 'Rename',
+            label: 'Renombrar',
             icon: <div className="w-3 h-3" />,
             onClick: () => {
                 const ws = workspaces.find(w => w.id === id)
@@ -174,10 +167,10 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
             )}
             {/* Left Icons */}
             <div className="flex h-full items-center gap-4 px-4 pr-6 shrink-0">
-                <button 
+                <button
                     onClick={() => window.dispatchEvent(new CustomEvent('ghostshell:open-settings'))}
                     className="text-white/40 hover:text-white/80 transition-colors"
-                    title="Settings"
+                    title="Ajustes"
                 >
                     <Settings className="w-[18px] h-[18px]" />
                 </button>
@@ -191,7 +184,7 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                 {workspaces.map((ws) => {
                     const isActive = ws.id === activeWorkspaceId
                     const agent = ws.agentId ? agents.find((a) => a.id === ws.agentId) : null
-                    
+
                     let tabColor = ws.color;
                     if (!tabColor) {
                         tabColor = agent?.color || getAutoColor(ws.id);
@@ -217,17 +210,16 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                                 e.preventDefault()
                                 setContextMenu({ id: ws.id, x: e.clientX, y: e.clientY })
                             }}
-                            className={`group flex h-full min-w-[140px] max-w-[240px] shrink-0 cursor-pointer items-center justify-between px-4 transition-colors duration-150 border-r border-white/5 ${
-                                isActive ? 'text-white shadow-lg' : 'text-white/90 hover:text-white'
-                            }`}
-                            style={{ 
+                            className={`group flex h-full min-w-[140px] max-w-[240px] shrink-0 cursor-pointer items-center justify-between px-4 transition-colors duration-150 border-r border-white/5 ${isActive ? 'text-white shadow-lg' : 'text-white/90 hover:text-white'
+                                }`}
+                            style={{
                                 backgroundColor: getTabBackground(tabColor, isActive)
                             }}
                         >
                             <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                <TabIcon 
-                                    className="h-4 w-4 shrink-0" 
-                                    style={{ color: isActive ? 'white' : 'rgba(255, 255, 255, 0.85)' }} 
+                                <TabIcon
+                                    className="h-4 w-4 shrink-0"
+                                    style={{ color: isActive ? 'white' : 'rgba(255, 255, 255, 0.85)' }}
                                 />
                                 {isEditing ? (
                                     <input
@@ -246,9 +238,8 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                                     <span className="truncate text-[13px] font-medium leading-none">{ws.title}</span>
                                 )}
                                 {!isEditing && ws.sessionIds.length > 1 && (
-                                    <span className={`flex items-center justify-center rounded-full px-1.5 h-4 text-[10px] font-bold ${
-                                        isActive ? 'bg-black/20 text-white' : 'bg-black/30 text-white/90'
-                                    }`}>
+                                    <span className={`flex items-center justify-center rounded-full px-1.5 h-4 text-[10px] font-bold ${isActive ? 'bg-black/20 text-white' : 'bg-black/30 text-white/90'
+                                        }`}>
                                         {ws.sessionIds.length}
                                     </span>
                                 )}
@@ -259,10 +250,9 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                                     e.stopPropagation()
                                     onCloseWorkspace(ws)
                                 }}
-                                className={`ml-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-all hover:bg-black/40 ${
-                                    isActive ? 'text-white/80 hover:text-white' : 'opacity-0 group-hover:opacity-100 text-white/70 hover:text-white'
-                                }`}
-                                title="Close"
+                                className={`ml-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-all hover:bg-black/40 ${isActive ? 'text-white/80 hover:text-white' : 'opacity-0 group-hover:opacity-100 text-white/70 hover:text-white'
+                                    }`}
+                                title="Cerrar"
                             >
                                 <X className="h-3.5 w-3.5" />
                             </button>
@@ -274,7 +264,7 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                 <button
                     onClick={onNewTab}
                     className="ml-2 flex h-8 w-8 shrink-0 items-center justify-center text-white/30 transition-all hover:text-white/70"
-                    title="New Workspace"
+                    title="Nuevo Espacio de Trabajo"
                 >
                     <Plus className="h-4 w-4" />
                 </button>
@@ -286,12 +276,11 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                     onClick={switchToTabs}
                     disabled={viewMode === 'tabs'}
                     aria-pressed={viewMode === 'tabs'}
-                    className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default ${
-                        viewMode === 'tabs'
-                            ? 'text-white/80'
-                            : 'text-white/25 hover:text-white/50 hover:bg-white/5'
-                    }`}
-                    title="Tabs View"
+                    className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default ${viewMode === 'tabs'
+                        ? 'text-white/80'
+                        : 'text-white/25 hover:text-white/50 hover:bg-white/5'
+                        }`}
+                    title="Vista de Pestañas"
                 >
                     {viewMode === 'tabs' && (
                         <motion.span
@@ -306,12 +295,11 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                     onClick={switchToGrid}
                     disabled={viewMode === 'grid'}
                     aria-pressed={viewMode === 'grid'}
-                    className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default ${
-                        viewMode === 'grid'
-                            ? 'text-white/80'
-                            : 'text-white/25 hover:text-white/50 hover:bg-white/5'
-                    }`}
-                    title="Grid View"
+                    className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default ${viewMode === 'grid'
+                        ? 'text-white/80'
+                        : 'text-white/25 hover:text-white/50 hover:bg-white/5'
+                        }`}
+                    title="Vista de Cuadrícula"
                 >
                     {viewMode === 'grid' && (
                         <motion.span
@@ -326,7 +314,7 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                 <button
                     onClick={collapseTabs}
                     className="flex h-7 w-7 items-center justify-center rounded-md text-white/20 transition-all hover:bg-white/5 hover:text-white/40"
-                    title="Collapse Tabs"
+                    title="Ocultar Pestañas"
                 >
                     <PanelTopClose className="h-4 w-4" />
                 </button>

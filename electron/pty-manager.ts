@@ -1,5 +1,5 @@
 import * as pty from 'node-pty'
-import { statSync } from 'fs'
+import { readlinkSync, statSync } from 'fs'
 import { platform } from 'os'
 import { basename } from 'path'
 
@@ -169,7 +169,13 @@ export class PtyManager {
     }
 
     if (options.env) {
-      Object.assign(env, options.env)
+      // Filter out dangerous env vars that could compromise child process security
+      const dangerousKeys = /^(LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|PYTHONHOME|PYTHONPATH|NODE_OPTIONS|ELECTRON_RUN_AS_NODE)$/i
+      for (const [key, value] of Object.entries(options.env)) {
+        if (!dangerousKeys.test(key)) {
+          env[key] = value
+        }
+      }
     }
 
     const fallbackShell = this.parseShell()
@@ -234,8 +240,7 @@ export class PtyManager {
       // On Linux/macOS we could read /proc/<pid>/cwd
       if (platform() !== 'win32') {
         try {
-          const fs = require('fs')
-          const cwd = fs.readlinkSync(`/proc/${pid}/cwd`)
+          const cwd = readlinkSync(`/proc/${pid}/cwd`)
           return cwd
         } catch {
           return null
@@ -245,6 +250,22 @@ export class PtyManager {
       return null
     } catch {
       return null
+    }
+  }
+
+  /** Check if a PTY process is still alive */
+  isAlive(id: string): boolean {
+    const proc = this.processes.get(id)
+    if (!proc) return false
+    try {
+      // node-pty process — check if pid is still valid
+      const pid = proc.pid
+      if (!pid || pid <= 0) return false
+      // On all platforms, sending signal 0 checks if the process exists
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
     }
   }
 

@@ -28,7 +28,7 @@ export function OrchestratorSection({ agent }: OrchestratorSectionProps) {
   const setActiveAgent = useAgentStore((s) => s.setActiveAgent)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
   const activity = useActivityStore((s) => s.activities[agent.id])
-  const { restartAgent, sendToAgent } = useAgent()
+  const { restartAgent, submitPromptToAgent } = useAgent()
 
   const isAlive = agent.status !== 'offline' && agent.status !== 'error' && !!agent.terminalId
   const isWorking = agent.status === 'working'
@@ -63,7 +63,7 @@ export function OrchestratorSection({ agent }: OrchestratorSectionProps) {
   const handleSendPrompt = (e: React.FormEvent) => {
     e.preventDefault()
     if (promptInput.trim()) {
-      sendToAgent(agent.id, promptInput.trim() + '\r')
+      submitPromptToAgent(agent.id, promptInput.trim())
       setPromptInput('')
       setShowPrompt(false)
     }

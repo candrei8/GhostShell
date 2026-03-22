@@ -16,6 +16,7 @@ import {
 import { useCommandBlockStore, type CommandBlock } from '../../stores/commandBlockStore'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { formatClockTime, formatDuration, smartTruncatePath } from '../../lib/formatUtils'
+import { submitPromptToSession } from '../../lib/terminalPromptSubmission'
 
 type BlockFilter = 'all' | 'active' | 'running' | 'bookmarked' | 'errors'
 
@@ -142,7 +143,7 @@ export function CommandBlocksPanel() {
     const targetSessionId = activeSessionId || item.sessionId
     if (!targetSessionId) return
     setActiveSession(targetSessionId)
-    window.ghostshell.ptyWrite(targetSessionId, item.block.command + '\r')
+    submitPromptToSession(targetSessionId, item.block.command)
   }
 
   const handleCopy = async (value: string) => {

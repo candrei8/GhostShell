@@ -24,7 +24,7 @@ function resolveAppearanceSafe(
 }
 
 export function useTerminal(
-  containerRef: React.RefObject<HTMLDivElement | null>,
+  containerElement: HTMLDivElement | null,
   isActive?: boolean,
   provider?: Provider,
 ) {
@@ -132,7 +132,7 @@ export function useTerminal(
 
   // Create terminal instance
   useEffect(() => {
-    const container = containerRef.current
+    const container = containerElement
     if (!container || mounted.current) return
 
     mounted.current = true
@@ -156,7 +156,7 @@ export function useTerminal(
       theme: appearance.theme,
       allowTransparency: true,
       scrollback: 10000,
-      convertEol: true,
+      convertEol: provider !== 'gemini',
       fontWeight: '400',
       fontWeightBold: '700',
       letterSpacing: appearance.letterSpacing,
@@ -221,7 +221,7 @@ export function useTerminal(
       setTerminal(null)
       fitAddonRef.current = null
     }
-  }, [containerRef, debouncedFit, detachWebgl])
+  }, [containerElement, debouncedFit, detachWebgl])
 
   // Attach WebGL as soon as terminal is created
   useEffect(() => {
@@ -305,6 +305,7 @@ export function useTerminal(
         term.options.theme = appearance.theme
         term.options.cursorBlink = appearance.cursorBlink
         term.options.cursorStyle = appearance.cursorStyle
+        term.options.convertEol = provider !== 'gemini'
         term.options.letterSpacing = appearance.letterSpacing
         term.options.lineHeight = appearance.lineHeight
         debouncedFit()
@@ -346,6 +347,7 @@ export function useTerminal(
     terminal.options.theme = initialAppearance.theme
     terminal.options.cursorBlink = initialAppearance.cursorBlink
     terminal.options.cursorStyle = initialAppearance.cursorStyle
+    terminal.options.convertEol = provider !== 'gemini'
     terminal.options.letterSpacing = initialAppearance.letterSpacing
     terminal.options.lineHeight = initialAppearance.lineHeight
     debouncedFit()

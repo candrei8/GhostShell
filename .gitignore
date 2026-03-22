@@ -43,6 +43,7 @@ Desktop.ini
 $RECYCLE.BIN/
 
 # GhostSwarm runtime data
+.ghostswarm/
 .bridgespace/
 
 # Screenshots

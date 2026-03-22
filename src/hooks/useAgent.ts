@@ -3,8 +3,10 @@ import { useAgentStore } from '../stores/agentStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { useThreadStore } from '../stores/threadStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useSwarmStore } from '../stores/swarmStore'
 import { AgentAvatarConfig, ClaudeConfig, GeminiConfig, CodexConfig, Provider } from '../lib/types'
 import { buildClaudeCommand, buildLaunchCommand, resolveProvider } from '../lib/providers'
+import { submitPromptToSession } from '../lib/terminalPromptSubmission'
 
 // Re-export for backward compat
 export { buildClaudeCommand } from '../lib/providers'
@@ -107,7 +109,8 @@ export function useAgent() {
     [removeSession, updateAgent, setAgentStatus],
   )
 
-  /** Restart an offline agent: create new terminal + relaunch with --continue/--resume if had conversation */
+  /** Restart an offline agent: create new terminal + relaunch with --continue/--resume if had conversation.
+   *  Tier 1.3: If agent was in a swarm with a task, inject context about what they were working on. */
   const restartAgent = useCallback(
     (agentId: string) => {
       const agent = useAgentStore.getState().getAgent(agentId)
@@ -123,6 +126,23 @@ export function useAgent() {
       for (const s of oldSessions) {
         if (s.agentId === agentId) {
           removeSession(s.id)
+        }
+      }
+
+      // Tier 1.3: Gather task context from swarm store before restart
+      let taskContext: { taskId: string; taskTitle: string; filesOwned: string[] } | null = null
+      const swarms = useSwarmStore.getState().swarms
+      for (const swarm of swarms) {
+        if (swarm.status !== 'running' && swarm.status !== 'paused') continue
+        const agentState = swarm.agents.find(a => a.agentId === agentId)
+        if (agentState?.currentTask) {
+          const task = swarm.tasks.find(t => t.id === agentState.currentTask)
+          taskContext = {
+            taskId: agentState.currentTask,
+            taskTitle: task?.title || agentState.currentTask,
+            filesOwned: agentState.filesOwned || task?.ownedFiles || [],
+          }
+          break
         }
       }
 
@@ -146,18 +166,50 @@ export function useAgent() {
         const shouldResume = !!agent.hasConversation
         const cmd = buildLaunchCommand(agent, shouldResume)
 
-        // Delay to let PTY initialize
-        setTimeout(() => {
+        // Wait for PTY to become alive before writing (poll up to 5s)
+        let attempts = 0
+        const maxAttempts = 10
+        const waitForPty = () => {
+          attempts++
           const currentAgent = useAgentStore.getState().getAgent(agentId)
           if (currentAgent?.terminalId !== sessionId) return
 
-          try {
-            window.ghostshell.ptyWrite(sessionId, cmd + '\r')
-            useAgentStore.getState().setAgentStatus(agentId, 'working')
-          } catch {
-            // PTY not ready - user can send command manually
-          }
-        }, 1000)
+          window.ghostshell.ptyIsAlive(sessionId).then((alive) => {
+            if (!alive && attempts < maxAttempts) {
+              setTimeout(waitForPty, 500)
+              return
+            }
+
+            try {
+              window.ghostshell.ptyWrite(sessionId, cmd + '\r')
+              useAgentStore.getState().setAgentStatus(agentId, 'working')
+
+              // Tier 1.3: Inject task context after CLI starts
+              if (taskContext) {
+                setTimeout(() => {
+                  try {
+                    const contextMsg = [
+                      `You were previously working on a task before being restarted.`,
+                      `Task ID: ${taskContext!.taskId}`,
+                      `Task: ${taskContext!.taskTitle}`,
+                      taskContext!.filesOwned.length > 0
+                        ? `Files you owned: ${taskContext!.filesOwned.join(', ')}`
+                        : '',
+                      `Continue from where you left off. Check your task status with gs-task and your inbox with gs-mail.`,
+                    ].filter(Boolean).join('\n')
+
+                    window.ghostshell.ptyWrite(sessionId, contextMsg + '\r')
+                  } catch { /* agent may not be ready */ }
+                }, 3000)
+              }
+            } catch {
+              // PTY not ready - user can send command manually
+            }
+          }).catch(() => {
+            if (attempts < maxAttempts) setTimeout(waitForPty, 500)
+          })
+        }
+        setTimeout(waitForPty, 500)
       }
     },
     [addSession, removeSession, updateAgent, setAgentStatus],
@@ -193,6 +245,15 @@ export function useAgent() {
       if (agent?.terminalId) {
         window.ghostshell.ptyWrite(agent.terminalId, text)
       }
+    },
+    [],
+  )
+
+  const submitPromptToAgent = useCallback(
+    (agentId: string, command: string) => {
+      const agent = useAgentStore.getState().getAgent(agentId)
+      if (!agent?.terminalId) return false
+      return submitPromptToSession(agent.terminalId, command, agent.cwd)
     },
     [],
   )
@@ -270,6 +331,7 @@ export function useAgent() {
     restartAgent,
     cloneAgent,
     sendToAgent,
+    submitPromptToAgent,
     moveAgentToThread,
     buildClaudeCommand,
   }

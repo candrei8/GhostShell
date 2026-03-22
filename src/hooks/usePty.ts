@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { useAgentStore } from '../stores/agentStore'
 import { useTerminalStore } from '../stores/terminalStore'
-import { useHistoryStore } from '../stores/historyStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useCompanionStore } from '../stores/companionStore'
@@ -15,6 +14,9 @@ import { SHORTCUT_EVENTS } from '../lib/shortcutEvents'
 import { Provider, SubAgentOutputLine } from '../lib/types'
 import { detectDomain } from '../lib/domain-detector'
 import { reportAgentOutput } from '../lib/swarm-message-injector'
+import { feedAgentOutput } from '../lib/swarm-self-heal'
+import { registerPromptSubmission } from '../lib/terminalPromptSubmission'
+import { emitSwarmActivity } from '../lib/swarm-activity-emitter'
 
 interface UsePtyOptions {
   sessionId: string
@@ -238,11 +240,6 @@ let idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 // Track last time a working pattern was seen per tracked activity source.
 const lastWorkingPatternTime = new Map<string, number>()
 
-// Track when an agent's current work session started.
-// Only fire "finished" notification if the agent worked for a meaningful duration.
-const workSessionStartedAt = new Map<string, number>()
-const MINIMUM_WORK_DURATION_MS = 3000
-
 // Timing constants for idle/completion detection
 const IDLE_DELAY_MS = 8000
 const IDLE_GRACE_MS = 5000
@@ -306,27 +303,6 @@ function scheduleIdleCheck(activityId: string, sessionId: string, delayMs: numbe
 
     if (wasWorking) {
       useAgentStore.getState().setAgentStatus(agentId, 'idle')
-
-      // Only notify if agent worked for a meaningful duration (not just startup)
-      const workStart = workSessionStartedAt.get(activityId)
-      const workDuration = workStart ? Date.now() - workStart : 0
-      workSessionStartedAt.delete(activityId)
-
-      if (workDuration >= MINIMUM_WORK_DURATION_MS) {
-        const name = agentLabel || agent?.name || 'Agent'
-        const appFocused = typeof document !== 'undefined' ? document.hasFocus() : false
-        const tier = appFocused ? 'toast' : 'full'
-        useNotificationStore.getState().addNotification({
-          type: 'success',
-          title: `${name} finished`,
-          message: 'Task completed.',
-          source: name,
-          duration: 5000,
-          tier,
-          dedupeKey: `agent-idle:${agentId}`,
-          dedupeWindowMs: 15000,
-        })
-      }
     }
 
     const activityStore = useActivityStore.getState()
@@ -417,9 +393,27 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    function notifyCommandCompletion(_block: CommandBlock) {
-      // Notification is handled by idle detection in scheduleIdleCheck.
-      // Individual command-block completions no longer fire notifications.
+    function notifyCommandCompletion(block: CommandBlock) {
+      if (block.status !== 'success') return
+
+      const profile = getCompletionTimingProfile()
+      const runtimeMs = block.durationMs || 0
+      if (runtimeMs < profile.minCommandRuntimeMs) return
+
+      const appFocused = typeof document !== 'undefined' ? document.hasFocus() : false
+      const tier = appFocused ? 'toast' : 'full'
+      const source = agentName || 'Terminal'
+
+      useNotificationStore.getState().addNotification({
+        type: 'success',
+        title: `${source} finished`,
+        message: shortenCommand(block.command),
+        source,
+        duration: 5000,
+        tier,
+        dedupeKey: `command-complete:${sessionId}:${block.id}`,
+        dedupeWindowMs: 5000,
+      })
     }
 
     function finalizeActiveBlock(
@@ -539,9 +533,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           if (agentId && currentAgent && currentAgent.status !== 'working' && now - lastWorkingSet > WORKING_COOLDOWN_MS) {
             setAgentStatus(agentId, 'working')
             lastWorkingSet = now
-            if (!workSessionStartedAt.has(activityId)) {
-              workSessionStartedAt.set(activityId, now)
-            }
           }
           if (agentId && currentAgent && !currentAgent.hasConversation) {
             updateAgent(agentId, { hasConversation: true })
@@ -643,6 +634,9 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           lineBuffer = ''
         }
       }
+
+      // Emit activity events for swarm feed
+      emitSwarmActivity(sessionId, results)
     }, 100, () => currentProvider)
 
     const init = async () => {
@@ -670,15 +664,34 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         // PTY -> Terminal
         const removeDataListener = window.ghostshell.ptyOnData(sessionId, (data) => {
           clearCompletionCheck()
-          // Report output for swarm heartbeat tracking
+          // Report output for swarm heartbeat tracking + self-heal analysis
           reportAgentOutput(sessionId)
+          feedAgentOutput(sessionId, data)
           const outputEmphasis = useSettingsStore.getState().terminalOutputEmphasis
           const hasResolvedProvider = !!agentId || !!useTerminalStore.getState().getSession(sessionId)?.detectedProvider
+          const bypassOutputEnhancer = currentProvider === 'gemini'
           const displayData =
-            outputEmphasis === 'off' || !hasResolvedProvider
+            outputEmphasis === 'off' || !hasResolvedProvider || bypassOutputEnhancer
               ? data
               : enhanceTerminalOutput(data, currentProvider, outputEmphasis)
-          terminal.write(displayData)
+          const bufferBeforeWrite = terminal.buffer.active
+          const savedViewportY = bufferBeforeWrite.viewportY
+          const preserveViewport =
+            currentProvider === 'gemini' &&
+            !data.includes('\x1b') &&
+            bufferBeforeWrite.baseY - bufferBeforeWrite.viewportY > 1
+
+          if (preserveViewport) {
+            terminal.write(displayData, () => {
+              const bufferAfterWrite = terminal.buffer.active
+              const targetViewportY = Math.min(savedViewportY, bufferAfterWrite.baseY)
+              if (bufferAfterWrite.viewportY !== targetViewportY) {
+                terminal.scrollToLine(targetViewportY)
+              }
+            })
+          } else {
+            terminal.write(displayData)
+          }
 
           // Buffer output for export
           outputBuffer += data
@@ -789,9 +802,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             if (agentId && currentAgent && currentAgent.status !== 'working') {
               setAgentStatus(agentId, 'working')
               lastWorkingSet = now
-              if (!workSessionStartedAt.has(activityId)) {
-                workSessionStartedAt.set(activityId, now)
-              }
             }
             if (agentId && currentAgent && !currentAgent.hasConversation) {
               updateAgent(agentId, { hasConversation: true })
@@ -819,7 +829,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         let inputBuffer = ''
 
         // Clipboard: copy/paste support (Ctrl+C with selection, Ctrl+Shift+C/V, Ctrl+V, right-click paste)
-        const writeToPty = (text: string) => {
+        const writeToPty = (text: string, mirrorToInputBuffer = false) => {
+          if (mirrorToInputBuffer) {
+            inputBuffer += text.replace(/\x1b\[200~|\x1b\[201~/g, '')
+          }
+
           const { syncInputsMode, sessions } = useTerminalStore.getState()
           if (syncInputsMode === 'all') {
             sessions.forEach((s) => {
@@ -873,6 +887,13 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             return false
           }
 
+          // Ctrl+V: Prevent xterm from sending \x16 (raw Ctrl+V control char) to PTY.
+          // Return false so the browser fires the native paste event, which our
+          // paste listener handles. This preserves Wispr Flow and OS-level paste tools.
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyV') {
+            return false
+          }
+
           if (e.type !== 'keydown') return true
 
           // Ctrl+Shift+C: Copy selection
@@ -922,10 +943,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           } else {
             navigator.clipboard.readText().then((text) => {
               if (text) {
+                const normalized = text.replace(/\r?\n/g, '\r')
                 if (terminal.modes.bracketedPasteMode) {
-                  writeToPty(`\x1b[200~${text}\x1b[201~`)
+                  writeToPty(`\x1b[200~${normalized}\x1b[201~`, true)
                 } else {
-                  writeToPty(text)
+                  writeToPty(normalized, true)
                 }
               }
             }).catch(() => {})
@@ -954,7 +976,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                     const buffer = await blob.arrayBuffer()
                     const filePath = await window.ghostshell.saveTempImage(buffer, mimeType)
                     if (filePath) {
-                      writeToPty(filePath)
+                      writeToPty(filePath, true)
                       terminal.writeln(`\r\n\x1b[36m[Image saved: ${filePath}]\x1b[0m`)
                     }
                   } catch {
@@ -965,6 +987,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               }
             }
             // Text paste: write to PTY manually and block xterm native handler.
+            // Normalize line endings (\r\n → \r, \n → \r) like xterm.js does internally
+            // in prepareTextForTerminal — terminals expect \r for Enter, not \r\n.
             // Wrap with bracketed paste sequences when the application has enabled
             // bracketed paste mode — this lets TUI apps (Claude CLI, Gemini CLI)
             // know the input is a paste so they batch-process it instead of
@@ -973,10 +997,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             if (text) {
               e.preventDefault()
               e.stopPropagation()
+              const normalized = text.replace(/\r?\n/g, '\r')
               if (terminal.modes.bracketedPasteMode) {
-                writeToPty(`\x1b[200~${text}\x1b[201~`)
+                writeToPty(`\x1b[200~${normalized}\x1b[201~`, true)
               } else {
-                writeToPty(text)
+                writeToPty(normalized, true)
               }
             }
           }
@@ -1055,7 +1080,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               if (paths.length > 0) {
                 // Quote paths with spaces, join with space
                 const text = paths.map((p) => p.includes(' ') ? `"${p}"` : p).join(' ')
-                writeToPty(text)
+                writeToPty(text, true)
                 // Show feedback for saved images
                 const imageCount = paths.filter((p) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)).length
                 if (imageCount > 0) {
@@ -1089,8 +1114,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               if (detectedCommandProvider) {
                 setStandaloneProvider(detectedCommandProvider)
               }
-              const agent = agentId ? getAgent(agentId) : undefined
-              useHistoryStore.getState().addEntry(command, sessionId, agent?.name)
               const sessionCwd =
                 useTerminalStore.getState().getSession(sessionId)?.cwd ||
                 lastDetectedCwd ||
@@ -1098,9 +1121,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                 ''
               autoConfirmPendingUntil = 0
               clearCompletionCheck()
-              useCommandBlockStore.getState().startBlock(sessionId, command, sessionCwd)
+              registerPromptSubmission(sessionId, command, sessionCwd)
               promptTail = ''
-              useCompanionStore.getState().addUserMessage(sessionId, command)
               inputBuffer = ''
             }
           } else if (data === '\x7f') {

@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useMemo, useState } from 'react'
+import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
 import type {
   SwarmAgentState,
   SwarmRosterAgent,
@@ -11,31 +11,27 @@ import { getRoleDef } from '../../lib/swarm-types'
 import { ROLE_ICONS } from './swarm-icons'
 
 // ─── Layout Constants ───────────────────────────────────────
-
-const SVG_W = 340
-const SVG_H = 340
-const NODE_R = 22
-const OPERATOR_Y = 28
-const COORD_Y = 100
-const WORKER_Y = 210
-const CENTER_X = SVG_W / 2
+const SVG_H = 360
+const NODE_R = 24
+const OPERATOR_Y = 32
+const COORD_Y = 120
+const WORKER_Y = 240
 
 // ─── Status Visuals ─────────────────────────────────────────
-
 const STATUS_COLOR: Record<SwarmAgentStatus, string> = {
-  waiting: '#4b5563',
-  planning: '#60a5fa',
-  building: '#fbbf24',
-  review: '#a78bfa',
-  done: '#34d399',
-  error: '#fb7185',
+  waiting: '#4b5563', // gray
+  planning: '#38bdf8', // sky
+  building: '#f59e0b', // amber
+  review: '#a855f7', // purple
+  done: '#10b981', // emerald
+  error: '#f43f5e', // rose
   idle: '#4b5563',
 }
 
 const HEALTH_COLOR: Record<string, string> = {
-  healthy: '#34d399',
-  stale: '#fbbf24',
-  dead: '#fb7185',
+  healthy: '#10b981',
+  stale: '#f59e0b',
+  dead: '#f43f5e',
 }
 
 function isActive(s: SwarmAgentStatus): boolean {
@@ -43,7 +39,6 @@ function isActive(s: SwarmAgentStatus): boolean {
 }
 
 // ─── Types ──────────────────────────────────────────────────
-
 interface TreeNode {
   x: number
   y: number
@@ -58,7 +53,6 @@ interface TreeNode {
 }
 
 // ─── Component ──────────────────────────────────────────────
-
 interface SwarmDelegationTreeProps {
   agents: SwarmAgentState[]
   roster: SwarmRosterAgent[]
@@ -74,7 +68,22 @@ export function SwarmDelegationTree({
   tasks = [],
   agentHealth,
 }: SwarmDelegationTreeProps) {
-  const { operatorNode, coordinators, workers, edges } = useMemo(() => {
+  // Parallax Setup
+  const x = useMotionValue(0)
+  const y = useMotionValue(0)
+  const mouseXSpring = useSpring(x, { stiffness: 150, damping: 15 })
+  const mouseYSpring = useSpring(y, { stiffness: 150, damping: 15 })
+  const rotateX = useTransform(mouseYSpring, [-0.5, 0.5], ["12deg", "-12deg"])
+  const rotateY = useTransform(mouseXSpring, [-0.5, 0.5], ["-12deg", "12deg"])
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    x.set((e.clientX - rect.left) / rect.width - 0.5)
+    y.set((e.clientY - rect.top) / rect.height - 0.5)
+  }
+  const handleMouseLeave = () => { x.set(0); y.set(0) }
+
+  const { operatorNode, coordinators, workers, edges, svgW, centerX } = useMemo(() => {
     const rosterMap = new Map(roster.map((r) => [r.id, r]))
     const coords: TreeNode[] = []
     const workerList: TreeNode[] = []
@@ -93,6 +102,7 @@ export function SwarmDelegationTree({
       if (!r) continue
       const label = makeLabel(r)
       const taskCount = tasks.filter((t) => t.owner === label).length
+      // Calculate active interactions
       const msgsSent = messages.filter((m) => m.from === label).length
       const msgsRecv = messages.filter((m) => m.to === label || m.to === '@all').length
       const health = agentHealth?.[label]?.status
@@ -106,20 +116,26 @@ export function SwarmDelegationTree({
       else workerList.push(node)
     }
 
+    // Dynamic Sizing to avoid overlap
+    const neededWorkerWidth = Math.max(workerList.length * 90 + 60, 400)
+    const neededCoordWidth = Math.max(coords.length * 120 + 60, 400)
+    const computedSvgW = Math.max(neededWorkerWidth, neededCoordWidth)
+    const computedCenterX = computedSvgW / 2
+
     // Position coordinators
-    const coordSpacing = Math.min(90, SVG_W / (coords.length + 1))
-    const coordStartX = CENTER_X - ((coords.length - 1) * coordSpacing) / 2
+    const coordSpacing = Math.min(130, (computedSvgW - 60) / Math.max(coords.length, 1))
+    const coordStartX = computedCenterX - ((coords.length - 1) * coordSpacing) / 2
     coords.forEach((c, i) => {
       c.x = coordStartX + i * coordSpacing
       c.y = COORD_Y
     })
 
-    // Position workers by role groups: scouts → builders → reviewers → custom
+    // Position workers by role groups
     const roleOrder = ['scout', 'builder', 'reviewer', 'custom']
     workerList.sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role))
 
-    const workerSpacing = Math.min(72, (SVG_W - 40) / Math.max(workerList.length, 1))
-    const workerStartX = CENTER_X - ((workerList.length - 1) * workerSpacing) / 2
+    const workerSpacing = Math.min(100, (computedSvgW - 60) / Math.max(workerList.length, 1))
+    const workerStartX = computedCenterX - ((workerList.length - 1) * workerSpacing) / 2
     workerList.forEach((w, i) => {
       w.x = workerStartX + i * workerSpacing
       w.y = WORKER_Y
@@ -145,325 +161,338 @@ export function SwarmDelegationTree({
 
     // Operator virtual node
     const opMsgs = messages.filter((m) => m.to === '@operator').length
-    const opNode = { x: CENTER_X, y: OPERATOR_Y, msgCount: opMsgs }
+    const opNode = { x: computedCenterX, y: OPERATOR_Y, msgCount: opMsgs }
 
-    return { operatorNode: opNode, coordinators: coords, workers: workerList, edges: edgeList }
+    return {
+      operatorNode: opNode,
+      coordinators: coords,
+      workers: workerList,
+      edges: edgeList,
+      svgW: computedSvgW,
+      centerX: computedCenterX
+    }
   }, [agents, roster, messages, tasks, agentHealth])
 
   const allNodes = [...coordinators, ...workers]
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-2 h-2 rounded-full bg-sky-400/60 animate-pulse" />
-        <span className="text-[10px] font-semibold text-ghost-text-dim uppercase tracking-[0.15em]">
-          Delegation Tree
-        </span>
-        <span className="ml-auto text-[10px] text-ghost-text-dim tabular-nums font-mono">
-          {agents.length} agents
-          {messages.length > 0 && ` · ${messages.length} msg`}
-        </span>
-      </div>
-
-      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full">
-        <defs>
-          <style>{`
-            @keyframes dash-flow {
-              to { stroke-dashoffset: -16; }
-            }
-            .edge-active {
-              animation: dash-flow 1s linear infinite;
-            }
-          `}</style>
-          <marker id="dt-arrow" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
-            <polygon points="0 0, 6 2, 0 4" fill="rgba(255,255,255,0.15)" />
-          </marker>
-        </defs>
-
-        {/* ── Layer 0: Tier labels ── */}
-        <text x={8} y={OPERATOR_Y + 4} fontSize={7} fill="rgba(255,255,255,0.12)" fontWeight={700} fontFamily="ui-monospace, monospace">
-          OPERATOR
-        </text>
-        <text x={8} y={COORD_Y + 4} fontSize={7} fill="rgba(255,255,255,0.12)" fontWeight={700} fontFamily="ui-monospace, monospace">
-          COORD
-        </text>
-        <text x={8} y={WORKER_Y + 4} fontSize={7} fill="rgba(255,255,255,0.12)" fontWeight={700} fontFamily="ui-monospace, monospace">
-          WORKERS
-        </text>
-
-        {/* Tier separator lines */}
-        <line x1={0} y1={58} x2={SVG_W} y2={58} stroke="rgba(255,255,255,0.04)" strokeWidth={0.5} />
-        <line x1={0} y1={155} x2={SVG_W} y2={155} stroke="rgba(255,255,255,0.04)" strokeWidth={0.5} />
-
-        {/* ── Layer 1: Operator → Coordinator edges ── */}
-        {coordinators.map((c, i) => (
-          <motion.line
-            key={`op-coord-${i}`}
-            x1={operatorNode.x} y1={operatorNode.y + 10}
-            x2={c.x} y2={c.y - NODE_R}
-            stroke="rgba(255,255,255,0.08)"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-            initial={{ pathLength: 0 }}
-            animate={{ pathLength: 1 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-          />
-        ))}
-
-        {/* ── Layer 2: Coordinator → Worker edges ── */}
-        {edges.map((e, i) => {
-          const sc = STATUS_COLOR[e.to.agent.status]
-          const thickness = e.msgCount > 0
-            ? Math.min(2.5, 0.8 + e.msgCount * 0.3)
-            : 0.6
-          const opacity = e.isActive ? 0.35 : 0.08
-
-          return (
-            <g key={`edge-${i}`}>
-              <motion.line
-                x1={e.from.x} y1={e.from.y + NODE_R}
-                x2={e.to.x} y2={e.to.y - NODE_R}
-                stroke={e.isActive ? sc : 'rgba(255,255,255,0.1)'}
-                strokeWidth={thickness}
-                strokeOpacity={opacity}
-                strokeDasharray={e.isActive ? '4 4' : 'none'}
-                className={e.isActive ? 'edge-active' : ''}
-                markerEnd="url(#dt-arrow)"
-                initial={{ pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 0.4, delay: 0.2 + i * 0.03 }}
-              />
-              {/* Message count on edge */}
-              {e.msgCount > 0 && (
-                <text
-                  x={(e.from.x + e.to.x) / 2 + 6}
-                  y={(e.from.y + NODE_R + e.to.y - NODE_R) / 2}
-                  fontSize={7}
-                  fill="rgba(255,255,255,0.2)"
-                  fontFamily="ui-monospace, monospace"
-                >
-                  {e.msgCount}
-                </text>
-              )}
-            </g>
-          )
-        })}
-
-        {/* ── Layer 3: Operator node (crown) ── */}
-        <motion.g
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
+    <div className="w-full overflow-x-auto no-scrollbar py-6">
+      <div
+        className="mx-auto flex justify-center items-center"
+        style={{ perspective: 1800, minWidth: svgW }}
+      >
+        <motion.div
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
+          className="relative rounded-2xl cursor-pointer w-full max-w-5xl"
         >
-          <circle
-            cx={operatorNode.x} cy={operatorNode.y}
-            r={12}
-            fill="#0a0f1a"
-            stroke="#f59e0b"
-            strokeWidth={1.5}
-            strokeOpacity={0.5}
+          {/* Glass Background (Pushed backward) */}
+          <div
+            className="absolute inset-0 bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl"
+            style={{ transform: "translateZ(-30px)" }}
           />
-          <text
-            x={operatorNode.x} y={operatorNode.y + 3}
-            textAnchor="middle"
-            fontSize={10}
-            fill="#f59e0b"
-          >
-            &#x1F451;
-          </text>
-          {operatorNode.msgCount > 0 && (
-            <g>
-              <circle cx={operatorNode.x + 10} cy={operatorNode.y - 6} r={5} fill="#f59e0b" fillOpacity={0.9} />
-              <text x={operatorNode.x + 10} y={operatorNode.y - 3} textAnchor="middle" fontSize={6} fill="#000" fontWeight={800}>
-                {operatorNode.msgCount > 9 ? '9+' : operatorNode.msgCount}
-              </text>
-            </g>
-          )}
-        </motion.g>
 
-        {/* ── Layer 4: Agent nodes ── */}
-        {allNodes.map((n, i) => {
-          const roleDef = getRoleDef(n.roster.role)
-          const Icon = ROLE_ICONS[roleDef.icon]
-          const sc = STATUS_COLOR[n.agent.status]
-          const active = isActive(n.agent.status)
-          const isCoord = n.role === 'coordinator'
-          const r = isCoord ? NODE_R + 2 : NODE_R
+          {/* Content Wrapper */}
+          <div className="relative p-6 w-full h-full pointer-events-none" style={{ transformStyle: "preserve-3d" }}>
 
-          return (
-            <motion.g
-              key={n.agent.rosterId}
-              initial={{ opacity: 0, scale: 0 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.25, delay: 0.15 + i * 0.05 }}
-            >
-              {/* Active pulse ring */}
-              {active && (
-                <circle cx={n.x} cy={n.y} r={r + 3} fill="none" stroke={sc} strokeWidth={1} opacity={0.12}>
-                  <animate attributeName="r" from={r + 2} to={r + 12} dur="2s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" from="0.15" to="0" dur="2s" repeatCount="indefinite" />
-                </circle>
-              )}
+            {/* Header (Floating above) */}
+            <div className="flex items-center gap-2 mb-4" style={{ transform: "translateZ(40px)" }}>
+              <div className="w-2.5 h-2.5 rounded-sm bg-[#38bdf8] animate-pulse" />
+              <span className="text-[10px] font-semibold text-ghost-text-dim uppercase tracking-[0.15em]">
+                Red de Delegación
+              </span>
+              <span className="ml-auto text-[10px] text-ghost-text-dim tabular-nums font-mono">
+                {agents.length} agentes
+                {messages.length > 0 && ` · ${messages.length} msg`}
+              </span>
+            </div>
 
-              {/* Node circle */}
-              <circle
-                cx={n.x} cy={n.y} r={r}
-                fill="#0a0f1a"
-                stroke={sc}
-                strokeWidth={isCoord ? 2 : 1.5}
-                strokeOpacity={active ? 0.8 : 0.4}
-              />
+            <svg viewBox={`0 0 ${svgW} ${SVG_H}`} className="w-full h-auto overflow-visible" style={{ transformStyle: "preserve-3d" }}>
+              <defs>
+                <style>{`
+                  @keyframes dash-flow {
+                    to { stroke-dashoffset: -20; }
+                  }
+                  .edge-active {
+                    animation: dash-flow 1s linear infinite;
+                  }
+                `}</style>
+                <marker id="dt-arrow" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                  <polygon points="0 0, 6 2, 0 4" fill="rgba(255,255,255,0.2)" />
+                </marker>
+                <marker id="dt-arrow-active" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                  <polygon points="0 0, 6 2, 0 4" fill="#38bdf8" />
+                </marker>
+              </defs>
 
-              {/* Role icon */}
-              <foreignObject x={n.x - 7} y={n.y - 7} width={14} height={14}>
-                {Icon && (
-                  <div style={{ color: roleDef.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon className="w-3.5 h-3.5" />
-                  </div>
-                )}
-              </foreignObject>
+              {/* ── Tiers / Background Geometry (Pushed very back) ── */}
+              <g style={{ transform: "translateZ(-15px)" }}>
+                <text x={8} y={OPERATOR_Y + 4} fontSize={8} fill="rgba(255,255,255,0.15)" fontWeight={800} fontFamily="ui-monospace, monospace">
+                  OPERADOR
+                </text>
+                <text x={8} y={COORD_Y + 4} fontSize={8} fill="rgba(255,255,255,0.15)" fontWeight={800} fontFamily="ui-monospace, monospace">
+                  COORD
+                </text>
+                <text x={8} y={WORKER_Y + 4} fontSize={8} fill="rgba(255,255,255,0.15)" fontWeight={800} fontFamily="ui-monospace, monospace">
+                  TRABAJADORES
+                </text>
 
-              {/* Label below */}
-              <text
-                x={n.x} y={n.y + r + 11}
-                textAnchor="middle"
-                fill="rgba(255,255,255,0.45)"
-                fontSize={7.5}
-                fontFamily="ui-monospace, monospace"
-                fontWeight={600}
-              >
-                {n.label}
-              </text>
+                <line x1={0} y1={65} x2={svgW} y2={65} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+                <line x1={0} y1={175} x2={svgW} y2={175} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+              </g>
 
-              {/* Status dot (top-right) */}
-              <circle
-                cx={n.x + r - 3} cy={n.y - r + 3}
-                r={3.5}
-                fill={sc}
-                stroke="#0a0f1a"
-                strokeWidth={1.5}
-              />
+              {/* ── Edges / Links (Mid Layer) ── */}
+              <g style={{ transform: "translateZ(10px)" }}>
+                {/* Operator → Coordinator edges */}
+                {coordinators.map((c, i) => (
+                  <motion.line
+                    key={`op-coord-${i}`}
+                    x1={operatorNode.x} y1={operatorNode.y + 12}
+                    x2={c.x} y2={c.y - NODE_R - 4}
+                    stroke="rgba(255,255,255,0.15)"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    initial={{ pathLength: 0 }}
+                    animate={{ pathLength: 1 }}
+                    transition={{ duration: 0.5, delay: 0.1 }}
+                  />
+                ))}
 
-              {/* Health dot (top-left) — only show if not healthy */}
-              {n.health && n.health !== 'healthy' && (
-                <circle
-                  cx={n.x - r + 3} cy={n.y - r + 3}
-                  r={3}
-                  fill={HEALTH_COLOR[n.health] || '#4b5563'}
-                  stroke="#0a0f1a"
-                  strokeWidth={1.5}
+                {/* Coordinator → Worker edges */}
+                {edges.map((e, i) => {
+                  const sc = e.isActive ? '#38bdf8' : 'rgba(255,255,255,0.15)'
+                  const thickness = e.msgCount > 0
+                    ? Math.min(3.5, 1.2 + e.msgCount * 0.4)
+                    : 1.2
+                  const opacity = e.isActive ? 0.7 : 0.4
+
+                  return (
+                    <g key={`edge-${i}`}>
+                      <motion.line
+                        x1={e.from.x} y1={e.from.y + NODE_R + 4}
+                        x2={e.to.x} y2={e.to.y - NODE_R - 4}
+                        stroke={sc}
+                        strokeWidth={thickness}
+                        strokeOpacity={opacity}
+                        strokeDasharray={e.isActive ? '6 6' : 'none'}
+                        className={e.isActive ? 'edge-active' : ''}
+                        markerEnd={e.isActive ? "url(#dt-arrow-active)" : "url(#dt-arrow)"}
+                        initial={{ pathLength: 0 }}
+                        animate={{ pathLength: 1 }}
+                        transition={{ duration: 0.4, delay: 0.2 + i * 0.03 }}
+                      />
+                      {/* Message count on edge */}
+                      {e.msgCount > 0 && (
+                        <foreignObject
+                          x={(e.from.x + e.to.x) / 2 - 10}
+                          y={(e.from.y + NODE_R + e.to.y - NODE_R) / 2 - 8}
+                          width={20}
+                          height={16}
+                        >
+                          <div className="flex items-center justify-center w-full h-full bg-black/60 rounded-sm border border-white/10 text-[9px] text-white font-mono">
+                            {e.msgCount}
+                          </div>
+                        </foreignObject>
+                      )}
+                    </g>
+                  )
+                })}
+              </g>
+
+              {/* ── Nodes (Popping out) ── */}
+              <g style={{ transform: "translateZ(60px)" }}>
+
+                {/* Operator node */}
+                <motion.g
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.4, type: "spring" }}
                 >
-                  {n.health === 'dead' && (
-                    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" />
+                  <circle
+                    cx={operatorNode.x} cy={operatorNode.y}
+                    r={18}
+                    fill="#0D0F15"
+                    stroke="#f59e0b"
+                    strokeWidth={2.5}
+                  />
+                  <text
+                    x={operatorNode.x} y={operatorNode.y + 5}
+                    textAnchor="middle"
+                    fontSize={14}
+                    fill="#f59e0b"
+                  >
+                    👑
+                  </text>
+                  {operatorNode.msgCount > 0 && (
+                    <g>
+                      <circle cx={operatorNode.x + 14} cy={operatorNode.y - 10} r={7} fill="#f59e0b" />
+                      <text x={operatorNode.x + 14} y={operatorNode.y - 7} textAnchor="middle" fontSize={8} fill="#000" fontWeight={800}>
+                        {operatorNode.msgCount > 9 ? '9+' : operatorNode.msgCount}
+                      </text>
+                    </g>
                   )}
-                </circle>
-              )}
+                </motion.g>
 
-              {/* Task count badge (bottom-right) */}
-              {n.taskCount > 0 && (
-                <g>
-                  <circle
-                    cx={n.x + r - 2} cy={n.y + r - 6}
-                    r={6}
-                    fill="#38bdf8" fillOpacity={0.85}
-                  />
-                  <text
-                    x={n.x + r - 2} y={n.y + r - 3}
-                    textAnchor="middle"
-                    fill="#000"
-                    fontSize={7}
-                    fontWeight={800}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    {n.taskCount > 9 ? '9+' : n.taskCount}
-                  </text>
+                {/* Agent nodes */}
+                {allNodes.map((n, i) => {
+                  const roleDef = getRoleDef(n.roster.role)
+                  const Icon = ROLE_ICONS[roleDef.icon]
+                  const sc = STATUS_COLOR[n.agent.status]
+                  const active = isActive(n.agent.status)
+                  const isCoord = n.role === 'coordinator'
+                  const r = isCoord ? NODE_R + 4 : NODE_R
+
+                  return (
+                    <motion.g
+                      key={n.agent.rosterId}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.35, delay: 0.15 + i * 0.05, type: 'spring' }}
+                    >
+                      {/* Active pulse indicator (solid border, no glow/scale) */}
+                      {active && (
+                        <motion.circle
+                          cx={n.x} cy={n.y} r={r + 6} fill="none" stroke={sc} strokeWidth={2}
+                          animate={{ opacity: [0.3, 0.7, 0.3] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                        />
+                      )}
+
+                      {/* Node circle */}
+                      <circle
+                        cx={n.x} cy={n.y} r={r}
+                        fill="#0D0F15"
+                        stroke={active ? '#38bdf8' : sc}
+                        strokeWidth={active ? 3 : 2}
+                      />
+
+                      {/* Role icon */}
+                      <foreignObject x={n.x - 10} y={n.y - 10} width={20} height={20}>
+                        {Icon && (
+                          <div style={{ color: active ? '#ffffff' : roleDef.color, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                            <Icon className="w-4 h-4" />
+                          </div>
+                        )}
+                      </foreignObject>
+
+                      {/* Label below */}
+                      <text
+                        x={n.x} y={n.y + r + 14}
+                        textAnchor="middle"
+                        fill="rgba(255, 255, 255, 0.85)"
+                        fontSize={9}
+                        fontFamily="ui-monospace, monospace"
+                        fontWeight={700}
+                        style={{ filter: "drop-shadow(0px 1px 2px rgba(0,0,0,0.8))" }}
+                      >
+                        {n.label}
+                      </text>
+
+                      {/* Status dot (top-right) */}
+                      <circle
+                        cx={n.x + r - 4} cy={n.y - r + 4}
+                        r={4.5}
+                        fill={sc}
+                        stroke="#0D0F15"
+                        strokeWidth={2}
+                      />
+
+                      {/* Health dot (top-left) */}
+                      {n.health && n.health !== 'healthy' && (
+                        <circle
+                          cx={n.x - r + 4} cy={n.y - r + 4}
+                          r={4.5}
+                          fill={HEALTH_COLOR[n.health] || '#4b5563'}
+                          stroke="#0D0F15"
+                          strokeWidth={2}
+                        />
+                      )}
+
+                      {/* Task count badge */}
+                      {n.taskCount > 0 && (
+                        <g>
+                          <circle cx={n.x + r} cy={n.y + r - 5} r={7} fill="#38bdf8" />
+                          <text x={n.x + r} y={n.y + r - 2} textAnchor="middle" fill="#000" fontSize={8} fontWeight={800} fontFamily="ui-monospace, monospace">
+                            {n.taskCount > 9 ? '9+' : n.taskCount}
+                          </text>
+                        </g>
+                      )}
+
+                      {/* Msg count badge */}
+                      {n.msgsSent > 0 && (
+                        <g>
+                          <circle cx={n.x - r} cy={n.y + r - 5} r={6} fill="#ffffff" />
+                          <text x={n.x - r} y={n.y + r - 2} textAnchor="middle" fill="#000" fontSize={7} fontWeight={800} fontFamily="ui-monospace, monospace">
+                            {n.msgsSent > 9 ? '9+' : n.msgsSent}
+                          </text>
+                        </g>
+                      )}
+                    </motion.g>
+                  )
+                })}
+
+                {/* ── Task flowing labels (workers) ── */}
+                {workers.map((w) => {
+                  const currentTask = tasks.find((t) => t.owner === w.label && t.status !== 'done')
+                  if (!currentTask) return null
+                  return (
+                    <foreignObject key={`task-${w.agent.rosterId}`} x={w.x - 45} y={w.y + NODE_R + 22} width={90} height={20}>
+                      <div className="flex items-center justify-center w-full h-full bg-[#38bdf8]/10 border border-[#38bdf8]/30 rounded-[4px] px-1 overflow-hidden">
+                        <span className="text-[8px] text-[#38bdf8] font-mono whitespace-nowrap truncate font-semibold">
+                          {currentTask.id}: {currentTask.title}
+                        </span>
+                      </div>
+                    </foreignObject>
+                  )
+                })}
+              </g>
+
+              {/* ── Legend (bottom) Pushed Back ── */}
+              <g style={{ transform: "translateZ(0px)" }}>
+                <g transform={`translate(${centerX - 160}, ${SVG_H - 24})`}>
+                  {/* Status legend */}
+                  {[
+                    { label: 'ESPERA', color: '#4b5563' },
+                    { label: 'PLAN', color: '#60a5fa' },
+                    { label: 'CONST', color: '#fbbf24' },
+                    { label: 'REV', color: '#a78bfa' },
+                    { label: 'LISTO', color: '#34d399' },
+                    { label: 'ERR', color: '#fb7185' },
+                  ].map((item, i) => (
+                    <g key={item.label} transform={`translate(${i * 45}, 0)`}>
+                      <circle cx={4} cy={4} r={4} fill={item.color} />
+                      <text x={12} y={7} fontSize={8} fill="rgba(255,255,255,0.4)" fontFamily="ui-monospace, monospace" fontWeight="bold">
+                        {item.label}
+                      </text>
+                    </g>
+                  ))}
+
+                  <g transform="translate(0, 18)">
+                    <circle cx={4} cy={4} r={3} fill="#38bdf8" fillOpacity={0.85} />
+                    <text x={10} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
+                      Tareas
+                    </text>
+                    <circle cx={55} cy={4} r={3} fill="#ffffff" />
+                    <text x={63} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
+                      Msgs
+                    </text>
+                    <circle cx={92} cy={4} r={3} fill="#fbbf24" />
+                    <text x={98} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
+                      Lento
+                    </text>
+                    <circle cx={130} cy={4} r={3} fill="#fb7185" />
+                    <text x={136} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
+                      Muerto
+                    </text>
+                  </g>
                 </g>
-              )}
+              </g>
 
-              {/* Message badge (bottom-left, messages sent) */}
-              {n.msgsSent > 0 && (
-                <g>
-                  <circle
-                    cx={n.x - r + 3} cy={n.y + r - 6}
-                    r={5}
-                    fill="rgba(255,255,255,0.12)"
-                  />
-                  <text
-                    x={n.x - r + 3} y={n.y + r - 3}
-                    textAnchor="middle"
-                    fill="rgba(255,255,255,0.4)"
-                    fontSize={6}
-                    fontWeight={700}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    {n.msgsSent > 9 ? '9+' : n.msgsSent}
-                  </text>
-                </g>
-              )}
-            </motion.g>
-          )
-        })}
-
-        {/* ── Layer 5: Task flow labels under workers ── */}
-        {workers.map((w) => {
-          const currentTask = tasks.find((t) => t.owner === w.label && t.status !== 'done')
-          if (!currentTask) return null
-          return (
-            <text
-              key={`task-${w.agent.rosterId}`}
-              x={w.x}
-              y={w.y + NODE_R + 22}
-              textAnchor="middle"
-              fill="rgba(255,255,255,0.2)"
-              fontSize={6.5}
-              fontFamily="ui-monospace, monospace"
-            >
-              {currentTask.id}: {currentTask.title.length > 14 ? currentTask.title.slice(0, 13) + '\u2026' : currentTask.title}
-            </text>
-          )
-        })}
-
-        {/* ── Legend (bottom) ── */}
-        <g transform={`translate(${SVG_W / 2 - 120}, ${SVG_H - 38})`}>
-          {/* Status legend */}
-          {[
-            { label: 'WAIT', color: '#4b5563' },
-            { label: 'PLAN', color: '#60a5fa' },
-            { label: 'BUILD', color: '#fbbf24' },
-            { label: 'REVIEW', color: '#a78bfa' },
-            { label: 'DONE', color: '#34d399' },
-            { label: 'ERR', color: '#fb7185' },
-          ].map((item, i) => (
-            <g key={item.label} transform={`translate(${i * 40}, 0)`}>
-              <circle cx={4} cy={4} r={3} fill={item.color} />
-              <text x={10} y={7} fontSize={6} fill="rgba(255,255,255,0.3)" fontFamily="ui-monospace, monospace">
-                {item.label}
-              </text>
-            </g>
-          ))}
-
-          {/* Badges legend */}
-          <g transform="translate(0, 14)">
-            <circle cx={4} cy={4} r={3} fill="#38bdf8" fillOpacity={0.85} />
-            <text x={10} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
-              Tasks
-            </text>
-            <circle cx={50} cy={4} r={3} fill="rgba(255,255,255,0.12)" />
-            <text x={56} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
-              Msgs
-            </text>
-            <circle cx={92} cy={4} r={3} fill="#fbbf24" />
-            <text x={98} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
-              Stale
-            </text>
-            <circle cx={130} cy={4} r={3} fill="#fb7185" />
-            <text x={136} y={7} fontSize={6} fill="rgba(255,255,255,0.25)" fontFamily="ui-monospace, monospace">
-              Dead
-            </text>
-          </g>
-        </g>
-      </svg>
+            </svg>
+          </div>
+        </motion.div>
+      </div>
     </div>
   )
 }

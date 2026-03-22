@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Download, RotateCcw, X, RefreshCw } from 'lucide-react'
+import { Download, RotateCcw, X, RefreshCw, ExternalLink } from 'lucide-react'
+
+const RELEASES_URL = 'https://github.com/candrei8/GhostShell/releases'
 
 type UpdateStatus =
   | { status: 'checking' }
@@ -7,7 +9,7 @@ type UpdateStatus =
   | { status: 'not-available' }
   | { status: 'downloading'; progress: number }
   | { status: 'downloaded'; version: string }
-  | { status: 'error'; error: string }
+  | { status: 'error'; error: string; version?: string }
 
 export function UpdateBanner() {
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
@@ -87,7 +89,7 @@ export function UpdateBanner() {
         {update.status === 'error' && (
           <>
             <span className="truncate" title={update.error}>
-              Update failed{update.error ? `: ${update.error}` : ''}
+              Update failed
             </span>
             <button
               onClick={handleRetry}
@@ -95,6 +97,18 @@ export function UpdateBanner() {
             >
               <RefreshCw size={12} />
               Retry
+            </button>
+            <button
+              onClick={() => {
+                const url = update.version
+                  ? `${RELEASES_URL}/tag/v${update.version}`
+                  : `${RELEASES_URL}/latest`
+                window.open(url)
+              }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 transition-colors"
+            >
+              <ExternalLink size={12} />
+              Get .exe
             </button>
           </>
         )}

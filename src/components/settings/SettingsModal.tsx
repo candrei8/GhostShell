@@ -13,6 +13,7 @@ import { RangeSlider } from '../common/RangeSlider'
 import { getProviderColor, getInstallCommand, getUpdateCommand, resolveModelsForProvider } from '../../lib/providers'
 import { useModelStore } from '../../stores/modelStore'
 import { playNotificationSound } from '../../lib/sounds'
+import { submitPromptToSession } from '../../lib/terminalPromptSubmission'
 import { Provider } from '../../lib/types'
 import { CLI_VISUAL_PROFILE_OPTIONS } from '../../lib/terminalPresets'
 import type { LucideIcon } from 'lucide-react'
@@ -131,7 +132,7 @@ function SettingsModalContent({ initialTab, onClose }: { initialTab: SettingsTab
     useTerminalStore.getState().addSession({ id: sessionId, title, cwd })
     setTimeout(() => {
       try {
-        window.ghostshell.ptyWrite(sessionId, command + '\r')
+        submitPromptToSession(sessionId, command, cwd)
       } catch {
         // PTY may not be ready
       }

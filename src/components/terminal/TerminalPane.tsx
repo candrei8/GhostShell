@@ -39,7 +39,7 @@ export function TerminalPane({
   onSearchClose,
   outputViewMode,
 }: TerminalPaneProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
 
   const agent = useAgentStore((s) =>
     session.agentId ? s.agents.find((a) => a.id === session.agentId) : undefined,
@@ -58,7 +58,7 @@ export function TerminalPane({
 
   const sessionProvider = session.detectedProvider
   const provider = agent ? resolveProvider(agent) : sessionProvider
-  const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerRef, isActive, provider)
+  const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerEl, isActive, provider)
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const [labelHovered, setLabelHovered] = useState(false)
   const [contextOpen, setContextOpen] = useState(outputViewMode === 'companion')
@@ -462,7 +462,7 @@ export function TerminalPane({
       {/* Terminal Canvas */}
       <div className="flex min-h-0 flex-1 bg-transparent">
         <div className="relative min-w-0 flex-1">
-          <div ref={containerRef} className="absolute inset-0" />
+          <div ref={setContainerEl} className="absolute inset-0" />
 
           {searchOpen && (
             <div className="absolute top-2 right-4 z-20">

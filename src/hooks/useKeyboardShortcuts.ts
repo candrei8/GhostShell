@@ -6,6 +6,7 @@ import { useShortcutStore } from '../stores/shortcutStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useSwarmStore } from '../stores/swarmStore'
 
 // Stack of recently closed sessions for reopen (module-level, survives re-renders)
 const closedTabStack: Array<{ title: string; cwd?: string; shell?: string }> = []
@@ -474,6 +475,17 @@ export function useKeyboardShortcuts({
       if (run('nav.blocks', () => onNavigate?.('blocks'))) return
       if (run('nav.quickLaunch', () => onToggleQuickLaunch?.())) return
       if (run('nav.monitor', () => onToggleMonitor?.())) return
+      if (
+        run('nav.swarmViewToggle', () => {
+          const swarmState = useSwarmStore.getState()
+          if (swarmState.activeSwarmId) {
+            swarmState.toggleSwarmViewMode()
+          }
+        })
+      ) {
+        return
+      }
+
       if (run('nav.sidebarSwarm', () => onNavigate?.('swarm'))) return
       if (run('nav.sidebarFiles', () => onNavigate?.('files'))) return
       if (run('nav.sidebarHistory', () => onNavigate?.('history'))) return

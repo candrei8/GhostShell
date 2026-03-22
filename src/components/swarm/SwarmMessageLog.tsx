@@ -21,6 +21,8 @@ const MSG_TYPE_MAP: Record<SwarmMessage['type'], TypeMeta> = {
   review_complete: { color: 'text-emerald-400', icon: CheckCircle2 },
   review_feedback: { color: 'text-rose-400', icon: MessageCircle },
   heartbeat: { color: 'text-gray-400/40', icon: Heart },
+  interview: { color: 'text-sky-400', icon: MessageCircle },
+  interview_response: { color: 'text-emerald-400', icon: MessageCircle },
 }
 
 // ─── Format Timestamp ────────────────────────────────────────

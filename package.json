@@ -1,6 +1,6 @@
 {
   "name": "ghostshell",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "author": "GhostShell Team",
   "description": "GhostShell - Terminal for VibeCoders",
   "main": "./out/main/index.js",
@@ -12,6 +12,8 @@
     "package": "electron-vite build && electron-builder --win",
     "release": "electron-vite build && electron-builder --win --publish always",
     "package:dir": "electron-vite build && electron-builder --win --dir",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "generate-icon": "node scripts/generate-icon.js",
     "postinstall": "node -e \"const{readdirSync,chmodSync}=require('fs');const{join}=require('path');const d='node_modules/node-pty/prebuilds';try{readdirSync(d).forEach(p=>{const f=join(d,p,'spawn-helper');try{chmodSync(f,0o755)}catch{}});console.log('node-pty spawn-helpers fixed')}catch{}\""
   },
@@ -45,6 +47,7 @@
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0"
   }
 }

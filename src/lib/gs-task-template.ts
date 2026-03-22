@@ -1,17 +1,17 @@
-// Embedded bs-task scripts for swarm task management.
+// Embedded gs-task scripts for swarm task management.
 // These are written to each swarm's bin/ directory at launch time.
 
-export const BS_TASK_CJS = `#!/usr/bin/env node
+export const GS_TASK_CJS = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const SCRIPT_DIR = __dirname;
-const BS_ROOT = path.dirname(SCRIPT_DIR);
+const GS_ROOT = path.dirname(SCRIPT_DIR);
 const TASK_FILE = path.join(SCRIPT_DIR, 'task-graph.json');
 const LOCK_FILE = path.join(SCRIPT_DIR, 'file-locks.json');
-const INBOX_DIR = path.join(BS_ROOT, 'inbox');
-const AGENTS_FILE = path.join(BS_ROOT, 'agents.json');
+const INBOX_DIR = path.join(GS_ROOT, 'inbox');
+const AGENTS_FILE = path.join(GS_ROOT, 'agents.json');
 
 // --- Shared utility functions ---
 
@@ -55,6 +55,44 @@ function atomicWriteSync(filePath, data) {
       }
     }
   }
+}
+
+function withFileLock(lockPath, fn) {
+  var MAX_RETRIES = 20;
+  var BASE_DELAY = 25;
+  var MAX_DELAY = 500;
+  var STALE_MS = 10000;
+
+  for (var attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      var fd = fs.openSync(lockPath, 'wx');
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+      fs.closeSync(fd);
+      try {
+        return fn();
+      } finally {
+        try { fs.unlinkSync(lockPath); } catch (e) {}
+      }
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      // Lock file exists — check if stale
+      try {
+        var stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > STALE_MS) {
+          try { fs.unlinkSync(lockPath); } catch (e) {}
+          continue; // retry immediately after stealing stale lock
+        }
+      } catch (e) {
+        // Lock file disappeared between open and stat — retry
+        continue;
+      }
+      // Exponential backoff
+      var delay = Math.min(BASE_DELAY * Math.pow(2, attempt), MAX_DELAY);
+      var start = Date.now();
+      while (Date.now() - start < delay) { /* busy wait */ }
+    }
+  }
+  throw new Error('withFileLock: failed to acquire ' + lockPath + ' after ' + MAX_RETRIES + ' retries');
 }
 
 function readTaskGraph() {
@@ -149,19 +187,25 @@ function readAgents() {
   try {
     var raw = fs.readFileSync(AGENTS_FILE, 'utf8');
     var parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed : ((parsed && parsed.agents) || []);
   } catch (e) {
     return [];
   }
 }
 
-function sendBsMail(to, type, body, meta) {
-  var NUDGE_DIR = path.join(BS_ROOT, 'nudges');
+function sendGsMail(to, type, body, meta) {
+  var NUDGE_DIR = path.join(GS_ROOT, 'nudges');
   var msgId = genId();
   var timestamp = Math.floor(Date.now() / 1000).toString();
   var from = process.env.SWARM_AGENT_NAME || 'unknown';
 
-  var targetInbox = path.join(INBOX_DIR, to);
+  // Sanitize target to prevent path traversal
+  var safeTo = path.basename(to).replace(/[\\\\/:*?"<>|.]/g, '_');
+  if (!safeTo || safeTo === '.' || safeTo === '..') {
+    console.error('Invalid target: ' + to);
+    return;
+  }
+  var targetInbox = path.join(INBOX_DIR, safeTo);
   fs.mkdirSync(targetInbox, { recursive: true });
   fs.mkdirSync(NUDGE_DIR, { recursive: true });
 
@@ -178,7 +222,7 @@ function sendBsMail(to, type, body, meta) {
   }
 
   fs.writeFileSync(path.join(targetInbox, msgId + '.json'), JSON.stringify(payload) + '\\n', 'utf8');
-  fs.writeFileSync(path.join(NUDGE_DIR, to + '.txt'), 'Message from ' + from + '\\n', 'utf8');
+  fs.writeFileSync(path.join(NUDGE_DIR, safeTo + '.txt'), 'Message from ' + from + '\\n', 'utf8');
 }
 
 function releaseLocks(taskId) {
@@ -192,7 +236,7 @@ function releaseLocks(taskId) {
       history.push({
         file: key,
         taskId: taskId,
-        owner: locks[key].owner || '',
+        agentName: locks[key].agentName || locks[key].owner || '',
         releasedAt: Date.now()
       });
       delete locks[key];
@@ -235,63 +279,65 @@ function createCommand(argv) {
   var title = args.title || '';
 
   if (!id || !title) {
-    console.error('Usage: bs-task create --id <id> --title <title> [--owner <agent>] [--files f1,f2] [--depends t1,t2] [--description "..."] [--criteria "c1;c2;c3"]');
+    console.error('Usage: gs-task create --id <id> --title <title> [--owner <agent>] [--files f1,f2] [--depends t1,t2] [--description "..."] [--criteria "c1;c2;c3"]');
     process.exit(1);
   }
 
-  var graph = readTaskGraph();
+  withFileLock(TASK_FILE + '.flock', function() {
+    var graph = readTaskGraph();
 
-  if (graph.tasks[id]) {
-    console.error('Task with id "' + id + '" already exists');
-    process.exit(1);
-  }
-
-  var files = args.files ? args.files.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var depends = args.depends ? args.depends.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var criteria = args.criteria ? args.criteria.split(';').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-
-  var task = {
-    id: id,
-    title: title,
-    owner: args.owner || '',
-    ownedFiles: files,
-    dependsOn: depends,
-    status: 'open',
-    description: args.description || '',
-    acceptanceCriteria: criteria,
-    reviewer: '',
-    verdict: '',
-    createdAt: Date.now(),
-    completedAt: null
-  };
-
-  graph.tasks[id] = task;
-
-  // Add dependencies
-  for (var i = 0; i < depends.length; i++) {
-    graph.dependencies.push({ from: id, to: depends[i] });
-  }
-
-  // Validate cycles
-  var cycleErrors = detectCycles(graph.tasks);
-  if (cycleErrors.length > 0) {
-    for (var i = 0; i < cycleErrors.length; i++) {
-      console.error(cycleErrors[i]);
+    if (graph.tasks[id]) {
+      console.error('Task with id "' + id + '" already exists');
+      process.exit(1);
     }
-    process.exit(1);
-  }
 
-  // Validate duplicate files
-  var dupErrors = checkDuplicateFiles(graph.tasks);
-  if (dupErrors.length > 0) {
-    for (var i = 0; i < dupErrors.length; i++) {
-      console.error(dupErrors[i]);
+    var files = args.files ? args.files.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+    var depends = args.depends ? args.depends.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+    var criteria = args.criteria ? args.criteria.split(';').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+
+    var task = {
+      id: id,
+      title: title,
+      owner: args.owner || '',
+      ownedFiles: files,
+      dependsOn: depends,
+      status: 'open',
+      description: args.description || '',
+      acceptanceCriteria: criteria,
+      reviewer: '',
+      verdict: '',
+      createdAt: Date.now(),
+      completedAt: null
+    };
+
+    graph.tasks[id] = task;
+
+    // Add dependencies (from=dependency, to=this task)
+    for (var i = 0; i < depends.length; i++) {
+      graph.dependencies.push({ from: depends[i], to: id });
     }
-    process.exit(1);
-  }
 
-  writeTaskGraph(graph);
-  console.log('Created task ' + id + ': ' + title);
+    // Validate cycles
+    var cycleErrors = detectCycles(graph.tasks);
+    if (cycleErrors.length > 0) {
+      for (var i = 0; i < cycleErrors.length; i++) {
+        console.error(cycleErrors[i]);
+      }
+      process.exit(1);
+    }
+
+    // Validate duplicate files
+    var dupErrors = checkDuplicateFiles(graph.tasks);
+    if (dupErrors.length > 0) {
+      for (var i = 0; i < dupErrors.length; i++) {
+        console.error(dupErrors[i]);
+      }
+      process.exit(1);
+    }
+
+    writeTaskGraph(graph);
+    console.log('Created task ' + id + ': ' + title);
+  });
 }
 
 function updateCommand(argv) {
@@ -307,77 +353,88 @@ function updateCommand(argv) {
   }
 
   if (!taskId) {
-    console.error('Usage: bs-task update <taskId> --status <status> [--owner <agent>] [--reviewer <agent>] [--verdict approved|changes_requested|approved_with_notes]');
+    console.error('Usage: gs-task update <taskId> --status <status> [--owner <agent>] [--reviewer <agent>] [--verdict approved|changes_requested|approved_with_notes]');
     process.exit(1);
   }
 
   var args = parseArgs(rest);
-  var graph = readTaskGraph();
 
-  if (!graph.tasks[taskId]) {
-    console.error('Task "' + taskId + '" not found');
-    process.exit(1);
-  }
+  withFileLock(TASK_FILE + '.flock', function() {
+    var graph = readTaskGraph();
 
-  var task = graph.tasks[taskId];
-  var validStatuses = ['open', 'assigned', 'planning', 'building', 'review', 'done'];
-  var validVerdicts = ['approved', 'changes_requested', 'approved_with_notes'];
-
-  if (args.status) {
-    if (validStatuses.indexOf(args.status) === -1) {
-      console.error('Invalid status: ' + args.status + '. Valid: ' + validStatuses.join(', '));
+    if (!graph.tasks[taskId]) {
+      console.error('Task "' + taskId + '" not found');
       process.exit(1);
     }
-    task.status = args.status;
-  }
 
-  if (args.owner) {
-    task.owner = args.owner;
-  }
+    var task = graph.tasks[taskId];
+    var validStatuses = ['open', 'assigned', 'planning', 'building', 'review', 'done'];
+    var validVerdicts = ['approved', 'changes_requested', 'approved_with_notes'];
 
-  if (args.reviewer) {
-    task.reviewer = args.reviewer;
-  }
-
-  if (args.verdict) {
-    if (validVerdicts.indexOf(args.verdict) === -1) {
-      console.error('Invalid verdict: ' + args.verdict + '. Valid: ' + validVerdicts.join(', '));
-      process.exit(1);
+    if (args.status) {
+      if (validStatuses.indexOf(args.status) === -1) {
+        console.error('Invalid status: ' + args.status + '. Valid: ' + validStatuses.join(', '));
+        process.exit(1);
+      }
+      task.status = args.status;
     }
-    task.verdict = args.verdict;
-  }
 
-  var newStatus = args.status || '';
+    if (args.owner) {
+      task.owner = args.owner;
+    }
 
-  // Auto-action on status -> review
-  if (newStatus === 'review') {
-    var agents = readAgents();
-    var coord = null;
-    for (var i = 0; i < agents.length; i++) {
-      if (agents[i] && agents[i].role === 'coordinator') {
-        coord = agents[i];
-        break;
+    if (args.reviewer) {
+      task.reviewer = args.reviewer;
+    }
+
+    if (args.verdict) {
+      if (validVerdicts.indexOf(args.verdict) === -1) {
+        console.error('Invalid verdict: ' + args.verdict + '. Valid: ' + validVerdicts.join(', '));
+        process.exit(1);
+      }
+      task.verdict = args.verdict;
+    }
+
+    var newStatus = args.status || '';
+
+    // Auto-action on status -> review: notify reviewer or fall back to coordinators
+    if (newStatus === 'review') {
+      if (task.reviewer) {
+        sendGsMail(
+          task.reviewer,
+          'review_request',
+          'Task ' + taskId + ' ready for review. Owner: ' + task.owner + '. Files: ' + (task.ownedFiles || []).join(', '),
+          { taskId: taskId, owner: task.owner, files: task.ownedFiles }
+        );
+      } else {
+        var agents = readAgents();
+        var coords = [];
+        for (var i = 0; i < agents.length; i++) {
+          if (agents[i] && agents[i].role === 'coordinator' && agents[i].label) {
+            coords.push(agents[i]);
+          }
+        }
+        for (var c = 0; c < coords.length; c++) {
+          sendGsMail(
+            coords[c].label,
+            'review_request',
+            'Task ' + taskId + ' ready for review. Owner: ' + task.owner + '. Files: ' + (task.ownedFiles || []).join(', '),
+            { taskId: taskId, owner: task.owner, files: task.ownedFiles }
+          );
+        }
       }
     }
-    if (coord) {
-      sendBsMail(
-        coord.label,
-        'review_request',
-        'Task ' + taskId + ' ready for review. Owner: ' + task.owner + '. Files: ' + (task.ownedFiles || []).join(', '),
-        JSON.stringify({ taskId: taskId, owner: task.owner, files: task.ownedFiles })
-      );
+
+    // Auto-action on status -> done
+    if (newStatus === 'done') {
+      task.completedAt = Date.now();
+      releaseLocks(taskId);
     }
-  }
 
-  // Auto-action on status -> done
-  if (newStatus === 'done') {
-    task.completedAt = Date.now();
-    releaseLocks(taskId);
-  }
-
-  graph.tasks[taskId] = task;
-  writeTaskGraph(graph);
-  console.log('Updated task ' + taskId + ': status=' + task.status);
+    graph.tasks[taskId] = task;
+    writeTaskGraph(graph);
+    console.log('Updated task ' + taskId + ': status=' + task.status);
+  });
 }
 
 function listCommand(argv) {
@@ -471,7 +528,7 @@ function getCommand(argv) {
   }
 
   if (!taskId) {
-    console.error('Usage: bs-task get <taskId>');
+    console.error('Usage: gs-task get <taskId>');
     process.exit(1);
   }
 
@@ -511,65 +568,114 @@ function batchCreateCommand() {
     process.exit(1);
   }
 
+  withFileLock(TASK_FILE + '.flock', function() {
+    var graph = readTaskGraph();
+
+    for (var i = 0; i < taskArray.length; i++) {
+      var item = taskArray[i];
+      if (!item.id || !item.title) {
+        console.error('Task at index ' + i + ' is missing required id or title');
+        process.exit(1);
+      }
+      if (graph.tasks[item.id]) {
+        console.error('Task with id "' + item.id + '" already exists');
+        process.exit(1);
+      }
+
+      var files = Array.isArray(item.ownedFiles) ? item.ownedFiles : (item.files ? String(item.files).split(',').map(function(s) { return s.trim(); }).filter(Boolean) : []);
+      var depends = Array.isArray(item.dependsOn) ? item.dependsOn : (item.depends ? String(item.depends).split(',').map(function(s) { return s.trim(); }).filter(Boolean) : []);
+      var criteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+
+      var task = {
+        id: item.id,
+        title: item.title,
+        owner: item.owner || '',
+        ownedFiles: files,
+        dependsOn: depends,
+        status: item.status || 'open',
+        description: item.description || '',
+        acceptanceCriteria: criteria,
+        reviewer: item.reviewer || '',
+        verdict: item.verdict || '',
+        createdAt: Date.now(),
+        completedAt: null
+      };
+
+      graph.tasks[item.id] = task;
+
+      for (var j = 0; j < depends.length; j++) {
+        graph.dependencies.push({ from: depends[j], to: item.id });
+      }
+    }
+
+    // Validate cycles
+    var cycleErrors = detectCycles(graph.tasks);
+    if (cycleErrors.length > 0) {
+      for (var i = 0; i < cycleErrors.length; i++) {
+        console.error(cycleErrors[i]);
+      }
+      process.exit(1);
+    }
+
+    // Validate duplicate files
+    var dupErrors = checkDuplicateFiles(graph.tasks);
+    if (dupErrors.length > 0) {
+      for (var i = 0; i < dupErrors.length; i++) {
+        console.error(dupErrors[i]);
+      }
+      process.exit(1);
+    }
+
+    writeTaskGraph(graph);
+    console.log('Created ' + taskArray.length + ' tasks');
+  });
+}
+
+function validateCommand() {
   var graph = readTaskGraph();
+  var errors = [];
 
-  for (var i = 0; i < taskArray.length; i++) {
-    var item = taskArray[i];
-    if (!item.id || !item.title) {
-      console.error('Task at index ' + i + ' is missing required id or title');
-      process.exit(1);
-    }
-    if (graph.tasks[item.id]) {
-      console.error('Task with id "' + item.id + '" already exists');
-      process.exit(1);
-    }
-
-    var files = Array.isArray(item.ownedFiles) ? item.ownedFiles : (item.files ? String(item.files).split(',').map(function(s) { return s.trim(); }).filter(Boolean) : []);
-    var depends = Array.isArray(item.dependsOn) ? item.dependsOn : (item.depends ? String(item.depends).split(',').map(function(s) { return s.trim(); }).filter(Boolean) : []);
-    var criteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
-
-    var task = {
-      id: item.id,
-      title: item.title,
-      owner: item.owner || '',
-      ownedFiles: files,
-      dependsOn: depends,
-      status: item.status || 'open',
-      description: item.description || '',
-      acceptanceCriteria: criteria,
-      reviewer: item.reviewer || '',
-      verdict: item.verdict || '',
-      createdAt: Date.now(),
-      completedAt: null
-    };
-
-    graph.tasks[item.id] = task;
-
-    for (var j = 0; j < depends.length; j++) {
-      graph.dependencies.push({ from: item.id, to: depends[j] });
-    }
-  }
-
-  // Validate cycles
+  // Check cycles
   var cycleErrors = detectCycles(graph.tasks);
-  if (cycleErrors.length > 0) {
-    for (var i = 0; i < cycleErrors.length; i++) {
-      console.error(cycleErrors[i]);
-    }
-    process.exit(1);
+  for (var c = 0; c < cycleErrors.length; c++) {
+    errors.push(cycleErrors[c]);
   }
 
-  // Validate duplicate files
+  // Check duplicate file ownership
   var dupErrors = checkDuplicateFiles(graph.tasks);
-  if (dupErrors.length > 0) {
-    for (var i = 0; i < dupErrors.length; i++) {
-      console.error(dupErrors[i]);
-    }
-    process.exit(1);
+  for (var d = 0; d < dupErrors.length; d++) {
+    errors.push(dupErrors[d]);
   }
 
-  writeTaskGraph(graph);
-  console.log('Created ' + taskArray.length + ' tasks');
+  // Check missing dependency references
+  var taskIds = Object.keys(graph.tasks);
+  for (var i = 0; i < taskIds.length; i++) {
+    var task = graph.tasks[taskIds[i]];
+    if (!Array.isArray(task.dependsOn)) continue;
+    for (var j = 0; j < task.dependsOn.length; j++) {
+      if (!graph.tasks[task.dependsOn[j]]) {
+        errors.push('Task ' + taskIds[i] + ' depends on non-existent task ' + task.dependsOn[j]);
+      }
+    }
+  }
+
+  // Check tasks with no owner
+  for (var k = 0; k < taskIds.length; k++) {
+    var t = graph.tasks[taskIds[k]];
+    if (t.status !== 'open' && !t.owner) {
+      errors.push('Task ' + taskIds[k] + ' has status ' + t.status + ' but no owner assigned');
+    }
+  }
+
+  if (errors.length === 0) {
+    console.log('Task graph is valid (' + taskIds.length + ' tasks, 0 errors)');
+  } else {
+    for (var e = 0; e < errors.length; e++) {
+      console.error('ERROR: ' + errors[e]);
+    }
+    console.error(errors.length + ' error(s) found');
+    process.exit(1);
+  }
 }
 
 // --- Main ---
@@ -585,18 +691,19 @@ switch (command) {
   case 'ready': readyCommand(); break;
   case 'get': getCommand(argv); break;
   case 'batch-create': batchCreateCommand(); break;
+  case 'validate': validateCommand(); break;
   default:
-    console.error("bs-task: unknown command '" + command + "'");
-    console.error('Commands: create, update, list, mine, ready, get, batch-create');
+    console.error("gs-task: unknown command '" + command + "'");
+    console.error('Commands: create, update, list, mine, ready, get, batch-create, validate');
     process.exit(1);
 }
 `
 
-export const BS_TASK_SH = `#!/bin/sh
+export const GS_TASK_SH = `#!/bin/sh
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-node "$SCRIPT_DIR/bs-task.cjs" "$@"
+node "$SCRIPT_DIR/gs-task.cjs" "$@"
 `
 
-export const BS_TASK_CMD = `@echo off
-node "%~dp0bs-task.cjs" %*
+export const GS_TASK_CMD = `@echo off
+node "%~dp0gs-task.cjs" %*
 `

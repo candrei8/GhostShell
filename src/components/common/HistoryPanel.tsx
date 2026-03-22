@@ -3,6 +3,7 @@ import { Clock, Search, Trash2 } from 'lucide-react'
 import { useHistoryStore } from '../../stores/historyStore'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { formatDuration } from '../../lib/formatUtils'
+import { submitPromptToSession } from '../../lib/terminalPromptSubmission'
 
 export function HistoryPanel() {
   const history = useHistoryStore((s) => s.entries)
@@ -19,7 +20,7 @@ export function HistoryPanel() {
 
   const handleRunCommand = (cmd: string) => {
     if (activeSessionId) {
-      window.ghostshell.ptyWrite(activeSessionId, cmd + '\r')
+      submitPromptToSession(activeSessionId, cmd)
     }
   }
 

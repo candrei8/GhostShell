@@ -26,13 +26,15 @@ import { ROSTER_PRESETS, RAM_PER_AGENT_MB } from './swarm-types'
 
 /**
  * Derive the swarm tier from total agent count.
- * Thresholds match ROSTER_PRESETS: duo≤3, squad≤5, team≤8, platoon>8.
+ * Thresholds match ROSTER_PRESETS: duo≤3, squad≤5, team≤8, platoon≤15, battalion≤25, legion>25.
  */
 export function computeSwarmTier(rosterSize: number): SwarmTier {
   if (rosterSize <= 3) return 'duo'
   if (rosterSize <= 5) return 'squad'
   if (rosterSize <= 8) return 'team'
-  return 'platoon'
+  if (rosterSize <= 15) return 'platoon'
+  if (rosterSize <= 25) return 'battalion'
+  return 'legion'
 }
 
 /**
@@ -46,7 +48,8 @@ export function resolvePresetId(roster: SwarmRosterAgent[]): SwarmLayoutPresetId
       preset.composition.coordinator === composition.coordinators &&
       preset.composition.builder === composition.builders &&
       preset.composition.scout === composition.scouts &&
-      preset.composition.reviewer === composition.reviewers
+      preset.composition.reviewer === composition.reviewers &&
+      (preset.composition.analyst ?? 0) === composition.analysts
     ) {
       return preset.id as SwarmLayoutPresetId
     }
@@ -68,6 +71,7 @@ export function computeRoleCounts(roster: { role: SwarmAgentRole }[]): SwarmRole
     builders: 0,
     scouts: 0,
     reviewers: 0,
+    analysts: 0,
     custom: 0,
     total: roster.length,
   }
@@ -77,6 +81,7 @@ export function computeRoleCounts(roster: { role: SwarmAgentRole }[]): SwarmRole
       case 'builder':     counts.builders++;     break
       case 'scout':       counts.scouts++;       break
       case 'reviewer':    counts.reviewers++;    break
+      case 'analyst':     counts.analysts++;     break
       case 'custom':      counts.custom++;       break
     }
   }
@@ -189,6 +194,32 @@ export const SWARM_ROLE_CONTRACTS: Record<SwarmAgentRole, SwarmRoleContract> = {
           'Assign reviewers to specific domains',
         ],
       },
+      battalion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'strict',
+        scope: 'domain-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Create 20-30 tasks, each 10-15 min, domain-split across 2 coordinators',
+          'Each coordinator owns a domain and manages 6 builders',
+          'Strict inter-coordinator sync for shared boundaries',
+          'Use lead builders as sub-coordinators within each domain',
+          'Assign reviewers and scouts per domain',
+        ],
+      },
+      legion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'strict',
+        scope: 'domain-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Create 30-40 tasks, each 10-15 min, triple-domain split across 3 coordinators',
+          'Each coordinator owns a domain and manages 6 builders',
+          'Primary coordinator (index 0) manages cross-domain dependencies',
+          'Use lead builders as sub-coordinators within each domain',
+          'Assign dedicated scouts and reviewers per domain',
+        ],
+      },
     },
   },
 
@@ -241,6 +272,31 @@ export const SWARM_ROLE_CONTRACTS: Record<SwarmAgentRole, SwarmRoleContract> = {
           'Layer-scoped work (e.g. only types, only UI, only backend)',
           'Per-task branches, strictly scoped',
           'Report blockers immediately — many parallel dependencies',
+        ],
+      },
+      battalion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'strict',
+        scope: 'layer-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Builder 1 in each domain is lead — sub-coordinates 5 peer builders',
+          'Strictly layer-scoped within assigned domain',
+          'Per-task branches, no cross-domain file edits',
+          'Report blockers to domain coordinator immediately',
+        ],
+      },
+      legion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'strict',
+        scope: 'layer-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Builder 1 in each domain is lead — sub-coordinates 5 peer builders',
+          'Strictly layer-scoped within assigned domain',
+          'Per-task branches, absolutely no cross-domain file edits',
+          'Report blockers to domain coordinator immediately',
+          'Expect high parallelism — minimize blocking dependencies',
         ],
       },
     },
@@ -297,6 +353,30 @@ export const SWARM_ROLE_CONTRACTS: Record<SwarmAgentRole, SwarmRoleContract> = {
           'Coordinate with domain coordinator for target priorities',
         ],
       },
+      battalion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'guided',
+        scope: 'domain-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Deep specialization — one domain per scout',
+          'Assigned to specific coordinator domain',
+          'Continuous monitoring of assigned domain for changes',
+          'Proactive risk reporting to domain coordinator',
+        ],
+      },
+      legion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'guided',
+        scope: 'domain-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Deep specialization — one or two scouts per domain',
+          'Scout 1 is lead scout — coordinates cross-domain intelligence',
+          'Continuous monitoring and proactive risk reporting',
+          'Coordinate with all three domain coordinators',
+        ],
+      },
     },
   },
 
@@ -349,6 +429,104 @@ export const SWARM_ROLE_CONTRACTS: Record<SwarmAgentRole, SwarmRoleContract> = {
           'Approximately 50% workload each',
         ],
       },
+      battalion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'guided',
+        scope: 'domain-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Domain-split reviews — each reviewer owns a domain',
+          'Reviewer 1 is lead — manages cross-domain review dependencies',
+          'Prioritize blocking tasks within assigned domain',
+          'Escalate cross-domain issues to lead reviewer',
+        ],
+      },
+      legion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'guided',
+        scope: 'domain-scoped',
+        hasLeadConcept: true,
+        notes: [
+          'Domain-split reviews — at least one reviewer per domain',
+          'Reviewer 1 is lead — manages cross-domain review dependencies',
+          'Extra reviewers handle overflow queue from busiest domains',
+          'Prioritize blocking tasks, escalate cross-domain issues',
+        ],
+      },
+    },
+  },
+
+  analyst: {
+    role: 'analyst',
+    tiers: {
+      duo: {
+        taskGranularity: 'coarse',
+        autonomy: 'high',
+        scope: 'full-stack',
+        hasLeadConcept: false,
+        notes: [
+          'Lightweight monitoring — one report every 5 minutes',
+          'Focus on task creation delays and builder idle time',
+          'Small swarm — limited coordination overhead to detect',
+        ],
+      },
+      squad: {
+        taskGranularity: 'standard',
+        autonomy: 'standard',
+        scope: 'full-stack',
+        hasLeadConcept: false,
+        notes: [
+          'Standard monitoring — one report every 5 minutes',
+          'Track review backlog and builder utilization',
+          'Alert coordinator on bottlenecks only',
+        ],
+      },
+      team: {
+        taskGranularity: 'standard',
+        autonomy: 'standard',
+        scope: 'full-stack',
+        hasLeadConcept: false,
+        notes: [
+          'Domain-aware monitoring — track per-domain velocity',
+          'Report every 3-5 minutes',
+          'Flag domain velocity imbalances',
+        ],
+      },
+      platoon: {
+        taskGranularity: 'fine',
+        autonomy: 'guided',
+        scope: 'full-stack',
+        hasLeadConcept: false,
+        notes: [
+          'Multi-coordinator sync tracking',
+          'Report every 3 minutes',
+          'Monitor cross-domain dependencies and coordinator sync gaps',
+        ],
+      },
+      battalion: {
+        taskGranularity: 'fine',
+        autonomy: 'guided',
+        scope: 'full-stack',
+        hasLeadConcept: false,
+        notes: [
+          'Full-scale monitoring across 2 coordinator domains',
+          'Report every 2-3 minutes',
+          'Track builder utilization and reviewer queue balance',
+          'Flag cross-domain dependency stalls',
+        ],
+      },
+      legion: {
+        taskGranularity: 'very-fine',
+        autonomy: 'guided',
+        scope: 'full-stack',
+        hasLeadConcept: false,
+        notes: [
+          'Maximum-scale monitoring across 3 coordinator domains',
+          'Report every 2-3 minutes',
+          'Track per-coordinator domain velocity and builder utilization',
+          'Priority: prevent cascading stalls in large swarms',
+        ],
+      },
     },
   },
 
@@ -377,6 +555,20 @@ export const SWARM_ROLE_CONTRACTS: Record<SwarmAgentRole, SwarmRoleContract> = {
         notes: ['Custom role — awaits coordinator instructions'],
       },
       platoon: {
+        taskGranularity: 'standard',
+        autonomy: 'standard',
+        scope: 'task-scoped',
+        hasLeadConcept: false,
+        notes: ['Custom role — awaits coordinator instructions'],
+      },
+      battalion: {
+        taskGranularity: 'standard',
+        autonomy: 'standard',
+        scope: 'task-scoped',
+        hasLeadConcept: false,
+        notes: ['Custom role — awaits coordinator instructions'],
+      },
+      legion: {
         taskGranularity: 'standard',
         autonomy: 'standard',
         scope: 'task-scoped',
@@ -440,7 +632,10 @@ export function getDomainTemplates(tier: SwarmTier): SwarmDomain[] {
     case 'team':
       return [] // No domain splitting for single-coordinator swarms
     case 'platoon':
+    case 'battalion':
       return [DOMAIN_FRONTEND, DOMAIN_BACKEND]
+    case 'legion':
+      return [DOMAIN_FRONTEND, DOMAIN_BACKEND, DOMAIN_TESTING]
     default:
       return []
   }
@@ -467,7 +662,7 @@ export const SWARM_LAYOUT_PRESETS: SwarmLayoutPreset[] = [
     tier: 'duo',
     label: 'DUO',
     total: 3,
-    composition: { coordinator: 1, builder: 1, scout: 1, reviewer: 0, custom: 0 },
+    composition: { coordinator: 1, builder: 1, scout: 1, reviewer: 0, analyst: 0, custom: 0 },
     ramPerAgent: RAM_PER_AGENT_MB,
     description: 'Minimum viable swarm — fast, low overhead',
     taskSizingHint: 'Size tasks for ~5-15 min of focused agent work',
@@ -481,7 +676,7 @@ export const SWARM_LAYOUT_PRESETS: SwarmLayoutPreset[] = [
     tier: 'squad',
     label: 'SQUAD',
     total: 5,
-    composition: { coordinator: 1, builder: 2, scout: 1, reviewer: 1, custom: 0 },
+    composition: { coordinator: 1, builder: 2, scout: 1, reviewer: 1, analyst: 0, custom: 0 },
     ramPerAgent: RAM_PER_AGENT_MB,
     description: 'Sweet spot — Anthropic recommended team size',
     taskSizingHint: 'Size tasks for ~5-15 min of focused agent work',
@@ -495,7 +690,7 @@ export const SWARM_LAYOUT_PRESETS: SwarmLayoutPreset[] = [
     tier: 'team',
     label: 'TEAM',
     total: 8,
-    composition: { coordinator: 1, builder: 4, scout: 2, reviewer: 1, custom: 0 },
+    composition: { coordinator: 1, builder: 4, scout: 2, reviewer: 1, analyst: 0, custom: 0 },
     ramPerAgent: RAM_PER_AGENT_MB,
     description: 'Max for most machines — Cursor\'s cap',
     taskSizingHint: 'Size tasks for ~10-20 min of focused agent work — favor more granular decomposition to keep all builders busy',
@@ -509,12 +704,40 @@ export const SWARM_LAYOUT_PRESETS: SwarmLayoutPreset[] = [
     tier: 'platoon',
     label: 'PLATOON',
     total: 12,
-    composition: { coordinator: 2, builder: 5, scout: 3, reviewer: 2, custom: 0 },
+    composition: { coordinator: 2, builder: 5, scout: 3, reviewer: 2, analyst: 0, custom: 0 },
     ramPerAgent: RAM_PER_AGENT_MB,
     description: 'Power users — requires 32GB+ RAM, split coordinators',
     taskSizingHint: 'Size tasks for ~10-15 min each — with this many agents, maximize parallelism by creating many small, independent tasks',
     multiCoordinator: true,
     domainTemplates: [DOMAIN_FRONTEND, DOMAIN_BACKEND],
+    scoutStrategy: 'deep-specialization',
+    reviewStrategy: 'domain-split',
+  },
+  {
+    id: 'battalion',
+    tier: 'battalion',
+    label: 'BATTALION',
+    total: 20,
+    composition: { coordinator: 2, builder: 12, scout: 3, reviewer: 3, analyst: 0, custom: 0 },
+    ramPerAgent: RAM_PER_AGENT_MB,
+    description: 'Large-scale — 2 coordinators, domain-split, 64GB+ RAM recommended',
+    taskSizingHint: 'Size tasks for ~10-15 min each — create 20-30 small independent tasks to keep all 12 builders busy',
+    multiCoordinator: true,
+    domainTemplates: [DOMAIN_FRONTEND, DOMAIN_BACKEND],
+    scoutStrategy: 'deep-specialization',
+    reviewStrategy: 'domain-split',
+  },
+  {
+    id: 'legion',
+    tier: 'legion',
+    label: 'LEGION',
+    total: 30,
+    composition: { coordinator: 3, builder: 18, scout: 5, reviewer: 4, analyst: 0, custom: 0 },
+    ramPerAgent: RAM_PER_AGENT_MB,
+    description: 'Maximum scale — 3 coordinators, triple-domain split, 128GB+ RAM',
+    taskSizingHint: 'Size tasks for ~10-15 min each — create 30-40 small independent tasks across 3 domains',
+    multiCoordinator: true,
+    domainTemplates: [DOMAIN_FRONTEND, DOMAIN_BACKEND, DOMAIN_TESTING],
     scoutStrategy: 'deep-specialization',
     reviewStrategy: 'domain-split',
   },
@@ -552,6 +775,7 @@ export function getLayoutPresetForRoster(roster: SwarmRosterAgent[]): SwarmLayou
       builder: counts.builders,
       scout: counts.scouts,
       reviewer: counts.reviewers,
+      analyst: counts.analysts,
       custom: counts.custom,
     },
     ramPerAgent: RAM_PER_AGENT_MB,
@@ -601,7 +825,7 @@ export function getReviewerStrategy(
   if (reviewerCount === 1) {
     return { strategy: 'sequential', notes: 'Single reviewer — sequential queue, blocking tasks first' }
   }
-  if (tier === 'platoon') {
+  if (tier === 'platoon' || tier === 'battalion' || tier === 'legion') {
     return { strategy: 'domain-split', notes: 'Domain-split reviews — each reviewer owns a domain' }
   }
   return { strategy: 'round-robin', notes: 'Round-robin reviews — alternate between reviewers' }
@@ -625,6 +849,7 @@ export function buildRoleLocalLabel(
     builder: 'Builder',
     scout: 'Scout',
     reviewer: 'Reviewer',
+    analyst: 'Analyst',
     custom: 'Agent',
   }
   return `${roleLabels[role]} ${roleIndex + 1}`

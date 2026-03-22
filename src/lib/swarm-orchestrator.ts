@@ -11,6 +11,7 @@ import { useActivityStore } from '../stores/activityStore'
 import {
   Swarm,
   SwarmRosterAgent,
+  SwarmAgentState,
   SwarmContextFile,
   SwarmAgentRole,
   SWARM_ROLES,
@@ -21,10 +22,11 @@ import {
 import type { SwarmLayoutPresetId } from './swarm-types'
 import type { ClaudeConfig, GeminiConfig, CodexConfig, Provider } from './types'
 import { buildPromptContext, buildSwarmPrompt } from './swarm-prompts'
-import { GS_MAIL_CJS, GS_MAIL_SH, GS_MAIL_CMD } from './bs-mail-template'
-import { GS_TASK_CJS, GS_TASK_SH, GS_TASK_CMD } from './bs-task-template'
-import { GS_LOCK_CJS, GS_LOCK_SH, GS_LOCK_CMD } from './bs-lock-template'
+import { GS_MAIL_CJS, GS_MAIL_SH, GS_MAIL_CMD } from './gs-mail-template'
+import { GS_TASK_CJS, GS_TASK_SH, GS_TASK_CMD } from './gs-task-template'
+import { GS_LOCK_CJS, GS_LOCK_SH, GS_LOCK_CMD } from './gs-lock-template'
 import { startMessageInjector } from './swarm-message-injector'
+import { startConflictDetector } from './swarm-conflict-detector'
 import {
   buildSwarmRoot,
   swarmBinPath,
@@ -78,6 +80,7 @@ export function computeLayoutMeta(
     builder: 0,
     scout: 0,
     reviewer: 0,
+    analyst: 0,
     custom: 0,
   }
   for (const agent of roster) {
@@ -100,12 +103,12 @@ export function computeLayoutMeta(
     ? 'CUSTOM'
     : layoutPreset.toUpperCase()
 
-  // Collect ordered labels per role
+  // Collect ordered labels per role (using per-role indexing)
   const labelsByRole = (role: SwarmAgentRole): string[] =>
     roster
       .map((agent, i) => ({ agent, i }))
       .filter(({ agent }) => agent.role === role)
-      .map(({ agent, i }) => agentLabel(agent, i))
+      .map(({ agent, i }) => agentLabel(agent, roster, i))
 
   return {
     layoutPreset,
@@ -122,10 +125,28 @@ export function computeLayoutMeta(
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-function agentLabel(agent: SwarmRosterAgent, index: number): string {
+/**
+ * Per-role index for an agent at `globalIndex` in the roster.
+ * E.g. [coord, builder, builder, scout] → builder at index 2 has roleIndex 1.
+ */
+function getRoleIndex(roster: SwarmRosterAgent[], globalIndex: number): number {
+  const role = roster[globalIndex].role
+  let idx = 0
+  for (let i = 0; i < globalIndex; i++) {
+    if (roster[i].role === role) idx++
+  }
+  return idx
+}
+
+/**
+ * Human-readable label using per-role numbering:
+ * "Coordinator 1", "Builder 1", "Builder 2", "Scout 1", etc.
+ */
+function agentLabel(agent: SwarmRosterAgent, roster: SwarmRosterAgent[], globalIndex: number): string {
   if (agent.customName) return agent.customName
   const roleDef = SWARM_ROLES.find((r) => r.id === agent.role)
-  return `${roleDef?.label ?? 'Agent'} ${index + 1}`
+  const roleIndex = getRoleIndex(roster, globalIndex)
+  return `${roleDef?.label ?? 'Agent'} ${roleIndex + 1}`
 }
 
 function mapProvider(cliProvider: string): Provider {
@@ -139,7 +160,7 @@ function roleColor(role: string): string {
 }
 
 function slugify(str: string): string {
-  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64)
 }
 
 function isWindows(): boolean {
@@ -164,6 +185,10 @@ async function setupSwarmDirectory(swarmRoot: string): Promise<void> {
     await window.ghostshell.fsCreateDir(dir)
   }
 
+  await writeSwarmCliTools(swarmRoot)
+}
+
+async function writeSwarmCliTools(swarmRoot: string): Promise<void> {
   const bin = swarmBinPath(swarmRoot)
 
   // Write gs-mail scripts
@@ -180,6 +205,25 @@ async function setupSwarmDirectory(swarmRoot: string): Promise<void> {
   await window.ghostshell.fsCreateFile(`${bin}/gs-lock.cjs`, GS_LOCK_CJS)
   await window.ghostshell.fsCreateFile(`${bin}/gs-lock`, GS_LOCK_SH)
   await window.ghostshell.fsCreateFile(`${bin}/gs-lock.cmd`, GS_LOCK_CMD)
+}
+
+export async function repairSwarmRuntimeFiles(swarmRoot: string): Promise<void> {
+  const dirs = [
+    swarmRoot,
+    swarmBinPath(swarmRoot),
+    `${swarmRoot}/inbox`,
+    `${swarmRoot}/nudges`,
+    swarmKnowledgePath(swarmRoot),
+    `${swarmRoot}/heartbeats`,
+    swarmReportsPath(swarmRoot),
+    swarmPromptsPath(swarmRoot),
+  ]
+
+  for (const dir of dirs) {
+    await window.ghostshell.fsCreateDir(dir)
+  }
+
+  await writeSwarmCliTools(swarmRoot)
 }
 
 // ─── swarm-meta.json ────────────────────────────────────────
@@ -217,9 +261,10 @@ async function writeAgentsJson(
   meta: SwarmLayoutMeta,
 ): Promise<void> {
   const agents = roster.map((agent, i) => ({
-    label: agentLabel(agent, i),
+    label: agentLabel(agent, roster, i),
     role: agent.role,
     provider: agent.cliProvider,
+    personaId: agent.personaId || null,
   }))
   await window.ghostshell.fsCreateFile(
     `${swarmRoot}/agents.json`,
@@ -238,7 +283,7 @@ async function generateSwarmBoard(
 
   const agentRows = config.roster
     .map((agent, i) => {
-      const label = agentLabel(agent, i)
+      const label = agentLabel(agent, config.roster, i)
       const roleDef = SWARM_ROLES.find((r) => r.id === agent.role)
       return `| ${i + 1} | ${label} | ${roleDef?.label ?? agent.role} | WAITING | — |`
     })
@@ -407,6 +452,7 @@ _Coordinator: verify all scouts have reported before assigning builder tasks._
 
 /**
  * Create per-scout report directories so scouts have dedicated output space.
+ * Also creates reports/analyst/ if the roster includes an analyst.
  */
 async function scaffoldReports(
   swarmRoot: string,
@@ -417,6 +463,11 @@ async function scaffoldReports(
   for (const scoutLabel of meta.scoutLabels) {
     const scoutSlug = slugify(scoutLabel)
     await window.ghostshell.fsCreateDir(`${reportsDir}/${scoutSlug}`)
+  }
+
+  // Create analyst report directory if roster includes analysts
+  if ((meta.roleCounts.analyst ?? 0) > 0) {
+    await window.ghostshell.fsCreateDir(`${reportsDir}/analyst`)
   }
 }
 
@@ -449,13 +500,17 @@ function buildFileBasedLaunchCommand(
   }
 
   if (provider === 'gemini') {
-    // Gemini reads GEMINI.md from the working directory automatically
-    return `${envPrefix} gemini${autoApprove ? ' --approval-mode=yolo' : ''}`
+    // Gemini reads system prompts from GEMINI.md in the working directory (no --system-instruction flag).
+    // The prompt file is already written to GEMINI.md by spawnSwarmAgents before this is called.
+    const cmd = `${envPrefix} gemini`
+    return autoApprove ? `${cmd} --yolo` : cmd
   }
 
   if (provider === 'codex') {
-    // Codex reads AGENTS.md from the working directory automatically
-    return `${envPrefix} codex${autoApprove ? ' --full-auto' : ''}`
+    // Codex reads system prompts from AGENTS.md in the working directory (no --instructions flag).
+    // The prompt file is already written to AGENTS.md by spawnSwarmAgents before this is called.
+    const cmd = `${envPrefix} codex`
+    return autoApprove ? `${cmd} --full-auto` : cmd
   }
 
   // Fallback: Claude
@@ -488,18 +543,19 @@ async function spawnSwarmAgents(
   swarmRoot: string,
   createAgent: CreateAgentFn,
   hasKnowledge: boolean,
+  codebaseContext?: string,
 ): Promise<void> {
   const { config } = swarm
   const { roster } = config
 
   for (let i = 0; i < roster.length; i++) {
     const rosterAgent = roster[i]
-    const label = agentLabel(rosterAgent, i)
+    const label = agentLabel(rosterAgent, roster, i)
     const provider = mapProvider(rosterAgent.cliProvider)
     const color = roleColor(rosterAgent.role)
 
     // Build prompt context and system prompt
-    const ctx = buildPromptContext(config, rosterAgent, swarmRoot, i, roster, hasKnowledge)
+    const ctx = buildPromptContext(config, rosterAgent, swarmRoot, i, roster, hasKnowledge, codebaseContext)
     const systemPrompt = buildSwarmPrompt(rosterAgent.role, ctx)
 
     // Write system prompt to a file (avoids multi-line command in PTY)
@@ -507,7 +563,9 @@ async function spawnSwarmAgents(
     const promptFilePath = `${swarmPromptsPath(swarmRoot)}/${promptSlug}.md`
     await window.ghostshell.fsCreateFile(promptFilePath, systemPrompt)
 
-    // Gemini/Codex: write prompt as auto-read markdown in working directory
+    // For Gemini/Codex: also write to their auto-read files in the working directory.
+    // Gemini reads GEMINI.md, Codex reads AGENTS.md — these are the only way to pass
+    // system prompts since these CLIs don't have --system-prompt flags.
     if (provider === 'gemini') {
       await window.ghostshell.fsCreateFile(`${config.directory}/GEMINI.md`, systemPrompt)
     } else if (provider === 'codex') {
@@ -587,12 +645,39 @@ export async function orchestrateSwarm(
     // 2. Persist runtime metadata (single source of truth for layout/tier)
     await writeSwarmMeta(swarmRoot, layoutMeta, swarm)
 
-    // 3. Initialize task-graph.json
+    // 3. Initialize task-graph.json (pre-seed from mission analysis if available)
     const bin = swarmBinPath(swarmRoot)
-    await window.ghostshell.fsCreateFile(
-      `${bin}/task-graph.json`,
-      JSON.stringify({ tasks: {}, dependencies: [] }, null, 2),
-    )
+    if (swarm.config.missionAnalysis?.tasks?.length) {
+      const preSeeded: Record<string, unknown> = {}
+      const deps: Array<{ from: string; to: string }> = []
+      for (const task of swarm.config.missionAnalysis.tasks) {
+        preSeeded[task.id] = {
+          id: task.id,
+          title: task.title,
+          description: task.description,
+          status: 'open',
+          dependsOn: task.dependencies,
+          ownedFiles: task.likelyFiles,
+          owner: '',
+          complexity: task.complexity,
+          suggestedRole: task.suggestedRole,
+          estimatedMinutes: task.estimatedMinutes,
+        }
+        // Build dependency edges
+        for (const dep of task.dependencies) {
+          deps.push({ from: dep, to: task.id })
+        }
+      }
+      await window.ghostshell.fsCreateFile(
+        `${bin}/task-graph.json`,
+        JSON.stringify({ tasks: preSeeded, dependencies: deps }, null, 2),
+      )
+    } else {
+      await window.ghostshell.fsCreateFile(
+        `${bin}/task-graph.json`,
+        JSON.stringify({ tasks: {}, dependencies: [] }, null, 2),
+      )
+    }
 
     // 4. Initialize file-locks.json
     await window.ghostshell.fsCreateFile(
@@ -615,8 +700,45 @@ export async function orchestrateSwarm(
     // 9. Scaffold per-scout report directories
     await scaffoldReports(swarmRoot, layoutMeta)
 
+    // 9.5. Analyze codebase and write codebase map (non-fatal)
+    let codebaseContext: string | undefined
+    try {
+      const { analyzeCodebase, generateCodebaseContext } = await import('./codebase-analyzer')
+      const codebaseMap = await analyzeCodebase(swarm.config.directory)
+      await window.ghostshell.fsCreateFile(
+        `${swarmKnowledgePath(swarmRoot)}/codebase-map.json`,
+        JSON.stringify(codebaseMap, null, 2),
+      )
+      codebaseContext = generateCodebaseContext(codebaseMap)
+
+      // 9.6. Ingest codebase map into knowledge graph (non-fatal)
+      try {
+        const { loadGraph, ingestCodebaseMap, saveGraph } = await import('./swarm-knowledge-graph')
+        const knowledgeGraph = await loadGraph()
+        ingestCodebaseMap(knowledgeGraph, codebaseMap)
+        await saveGraph(knowledgeGraph)
+      } catch (kgErr) {
+        console.warn('[swarm] Knowledge graph ingestion failed (non-fatal):', kgErr)
+      }
+    } catch (err) {
+      console.warn('[swarm] Codebase analysis failed (non-fatal):', err)
+    }
+
+    // 9.7 Generate spec documents (requirements.md, architecture.md, tasks.md)
+    try {
+      const { generateSpecs } = await import('./swarm-spec-generator')
+      await generateSpecs(
+        swarm.config.mission,
+        swarm.config.missionAnalysis || null,
+        codebaseContext || undefined,
+        swarmRoot,
+      )
+    } catch (err) {
+      console.warn('[swarm] Spec generation failed (non-fatal):', err)
+    }
+
     // 10. Spawn all agents into terminals
-    await spawnSwarmAgents(swarm, swarmRoot, createAgent, hasKnowledge)
+    await spawnSwarmAgents(swarm, swarmRoot, createAgent, hasKnowledge, codebaseContext)
 
     // 11. Group all swarm sessions into a single tab group
     const updatedSwarm = useSwarmStore.getState().getSwarm(swarm.id)
@@ -640,6 +762,19 @@ export async function orchestrateSwarm(
       }
     }
 
+    // 11.5. Initialize performance profiles for all agents (A7)
+    try {
+      const { initializeProfile, loadPerformanceData } = await import('./swarm-performance-tracker')
+      await loadPerformanceData(swarm.config.directory)
+      for (let i = 0; i < swarm.config.roster.length; i++) {
+        const ra = swarm.config.roster[i]
+        const label = agentLabel(ra, swarm.config.roster, i)
+        initializeProfile(swarm.id, label, ra.role)
+      }
+    } catch (err) {
+      console.warn('[swarm] Performance tracker init failed (non-fatal):', err)
+    }
+
     // 12. Store swarmRoot in swarmStore
     setSwarmRoot(swarm.id, swarmRoot)
 
@@ -651,10 +786,46 @@ export async function orchestrateSwarm(
       void syncTasksFromFile(swarm.id, swarmRoot)
     }, TASK_SYNC_INTERVAL_MS)
 
+    // 15. Start conflict detector (watches activity feed for overlapping writes)
+    const stopConflictDetector = startConflictDetector(swarm.id)
+
+    // 16. Start self-heal monitor (auto-recovery for crashed/frozen agents)
+    let stopSelfHeal: (() => void) | undefined
+    try {
+      const { startSelfHealMonitor } = await import('./swarm-self-heal')
+      stopSelfHeal = startSelfHealMonitor(swarm.id, swarmRoot)
+    } catch (err) {
+      console.warn('[swarm] Self-heal monitor failed to start (non-fatal):', err)
+    }
+
+    // 17. Start CI/CD feedback loop monitor (auto-runs lint/typecheck/test after file changes)
+    let stopCIMonitor: (() => void) | undefined
+    try {
+      const { startCIMonitor } = await import('./swarm-ci-runner')
+      stopCIMonitor = startCIMonitor(swarm.id, swarm.config.directory)
+    } catch (err) {
+      console.warn('[swarm] CI monitor failed to start (non-fatal):', err)
+    }
+
+    // 18. Start checkpoint monitor (B10: auto git snapshots on task transitions)
+    let stopCheckpointMonitor: (() => void) | undefined
+    try {
+      const { startCheckpointMonitor, createCheckpoint } = await import('./swarm-checkpoints')
+      // Create initial checkpoint at swarm launch
+      await createCheckpoint(swarm.id, swarm.config.directory, 'swarm-launch')
+      stopCheckpointMonitor = startCheckpointMonitor(swarm.id, swarm.config.directory)
+    } catch (err) {
+      console.warn('[swarm] Checkpoint monitor failed to start (non-fatal):', err)
+    }
+
     // Store runtime state outside Zustand (not persisted)
     setSwarmRuntime(swarm.id, {
       injectorCleanup: stopInjector,
-      taskSyncInterval: taskSyncInterval as unknown as number,
+      taskSyncInterval: taskSyncInterval as ReturnType<typeof setInterval>,
+      conflictDetectorCleanup: stopConflictDetector,
+      selfHealCleanup: stopSelfHeal,
+      ciMonitorCleanup: stopCIMonitor,
+      checkpointMonitorCleanup: stopCheckpointMonitor,
     })
 
     setSwarmStatus(swarm.id, 'running')
@@ -676,21 +847,69 @@ export function resumeSwarmRuntime(swarmId: string): void {
 
   const swarmRoot = swarm.swarmRoot
 
-  // Restart message injector
-  const stopInjector = startMessageInjector(swarmId, swarmRoot)
+  void (async () => {
+    try {
+      await repairSwarmRuntimeFiles(swarmRoot)
+    } catch (err) {
+      console.error(`[swarm] Failed to repair runtime files for ${swarmId}:`, err)
+    }
 
-  // Restart task sync polling (same interval as launch)
-  const taskSyncInterval = setInterval(() => {
-    void syncTasksFromFile(swarmId, swarmRoot)
-  }, TASK_SYNC_INTERVAL_MS)
+    // Restart message injector
+    const stopInjector = startMessageInjector(swarmId, swarmRoot)
 
-  setSwarmRuntime(swarmId, {
-    injectorCleanup: stopInjector,
-    taskSyncInterval: taskSyncInterval as unknown as number,
-  })
+    // Restart task sync polling (same interval as launch)
+    const taskSyncInterval = setInterval(() => {
+      void syncTasksFromFile(swarmId, swarmRoot)
+    }, TASK_SYNC_INTERVAL_MS)
+
+    // Restart conflict detector
+    const stopConflictDetector = startConflictDetector(swarmId)
+
+    // Restart self-heal monitor
+    let stopSelfHeal: (() => void) | undefined
+    try {
+      const { startSelfHealMonitor } = await import('./swarm-self-heal')
+      stopSelfHeal = startSelfHealMonitor(swarmId, swarmRoot)
+    } catch (err) {
+      console.warn('[swarm] Self-heal monitor failed to restart (non-fatal):', err)
+    }
+
+    // Restart CI/CD feedback loop monitor
+    let stopCIMonitor: (() => void) | undefined
+    try {
+      const { startCIMonitor } = await import('./swarm-ci-runner')
+      stopCIMonitor = startCIMonitor(swarmId, swarm.config.directory)
+    } catch (err) {
+      console.warn('[swarm] CI monitor failed to restart (non-fatal):', err)
+    }
+
+    // Restart checkpoint monitor (B10)
+    let stopCheckpointMonitor: (() => void) | undefined
+    try {
+      const { startCheckpointMonitor } = await import('./swarm-checkpoints')
+      stopCheckpointMonitor = startCheckpointMonitor(swarmId, swarm.config.directory)
+    } catch (err) {
+      console.warn('[swarm] Checkpoint monitor failed to restart (non-fatal):', err)
+    }
+
+    setSwarmRuntime(swarmId, {
+      injectorCleanup: stopInjector,
+      taskSyncInterval: taskSyncInterval as ReturnType<typeof setInterval>,
+      conflictDetectorCleanup: stopConflictDetector,
+      selfHealCleanup: stopSelfHeal,
+      ciMonitorCleanup: stopCIMonitor,
+      checkpointMonitorCleanup: stopCheckpointMonitor,
+    })
+  })().catch((err) => console.error(`[swarm] Resume runtime failed for ${swarmId}:`, err))
 }
 
 // ─── Task Sync ──────────────────────────────────────────────────
+
+/** Cache of previous task statuses for detecting transitions (swarmId → taskId → status). */
+const prevTaskStatuses = new Map<string, Map<string, string>>()
+
+/** Cache of task assignment timestamps for duration tracking (swarmId → taskId → timestamp). */
+const taskAssignedAt = new Map<string, Map<string, number>>()
 
 function mapFileTaskStatus(status: string): 'open' | 'assigned' | 'planning' | 'building' | 'review' | 'done' {
   const validStatuses = ['open', 'assigned', 'planning', 'building', 'review', 'done']
@@ -733,14 +952,20 @@ async function syncTasksFromFile(swarmId: string, swarmRoot: string): Promise<vo
     const swarm = useSwarmStore.getState().getSwarm(swarmId)
     if (!swarm) return
 
-    for (const task of tasks) {
-      const agentState = swarm.agents.find(a => {
-        const rosterAgent = swarm.config.roster.find(r => r.id === a.rosterId)
-        if (!rosterAgent) return false
+    // Pre-compute label→agentState map to avoid O(n²) nested lookups
+    const agentByLabel = new Map<string, SwarmAgentState>()
+    const agentByRosterId = new Map<string, SwarmAgentState>()
+    for (const a of swarm.agents) {
+      const rosterAgent = swarm.config.roster.find(r => r.id === a.rosterId)
+      if (rosterAgent) {
         const idx = swarm.config.roster.indexOf(rosterAgent)
-        const label = rosterAgent.customName || `${getRoleDef(rosterAgent.role).label} ${idx + 1}`
-        return label === task.owner || rosterAgent.id === task.owner
-      })
+        agentByLabel.set(agentLabel(rosterAgent, swarm.config.roster, idx), a)
+        agentByRosterId.set(rosterAgent.id, a)
+      }
+    }
+
+    for (const task of tasks) {
+      const agentState = agentByLabel.get(task.owner) || agentByRosterId.get(task.owner)
 
       if (agentState?.agentId) {
         useActivityStore.getState().addTask(agentState.agentId, {
@@ -762,6 +987,41 @@ async function syncTasksFromFile(swarmId: string, swarmRoot: string): Promise<vo
           useSwarmStore.getState().setAgentStatus(swarmId, agentState.rosterId, newStatus)
         }
       }
+    }
+
+    // ── Performance tracking (A7) ────────────────────────────
+    // Track task transitions to 'done' for performance profiling.
+    if (!prevTaskStatuses.has(swarmId)) {
+      prevTaskStatuses.set(swarmId, new Map())
+    }
+    if (!taskAssignedAt.has(swarmId)) {
+      taskAssignedAt.set(swarmId, new Map())
+    }
+    const prevStatuses = prevTaskStatuses.get(swarmId)!
+    const assignedTimes = taskAssignedAt.get(swarmId)!
+
+    try {
+      const { trackTaskCompletion } = await import('./swarm-performance-tracker')
+
+      for (const task of tasks) {
+        const prevStatus = prevStatuses.get(task.id)
+
+        // Track when a task gets assigned (for duration measurement)
+        if (!assignedTimes.has(task.id) && task.status !== 'open') {
+          assignedTimes.set(task.id, Date.now())
+        }
+
+        // Detect transition to 'done'
+        if (task.status === 'done' && prevStatus !== 'done' && task.owner) {
+          const assignedTime = assignedTimes.get(task.id) || (Date.now() - 60000) // fallback 1min
+          const durationMs = Date.now() - assignedTime
+          trackTaskCompletion(swarmId, task.owner, task, durationMs, true)
+        }
+
+        prevStatuses.set(task.id, task.status)
+      }
+    } catch {
+      // Performance tracking is non-fatal
     }
   } catch {
     // File not ready yet or parse error — expected during early setup

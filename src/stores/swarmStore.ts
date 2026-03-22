@@ -13,16 +13,56 @@ import {
   SwarmWizardStep,
   SwarmCliProvider,
   SwarmAgentRole,
+  SwarmActivityEvent,
+  SwarmInterview,
+  SwarmFileConflict,
+  CIPipeline,
   SWARM_WIZARD_STEPS,
+  AGENT_HARD_CAP,
 } from '../lib/swarm-types'
+import type {
+  AgentPerformanceProfile,
+  ReACTReport,
+  AutonomyRule,
+  AutonomyLevel,
+  ApprovalRequest,
+  SwarmGitCheckpoint,
+  SimulationResult,
+  DebriefResult,
+} from '../lib/swarm-types'
+import type { MissionAnalysis, MissionPlannerStatus } from '../lib/mission-planner'
+import { getPersonasForRole } from '../lib/swarm-personas'
 import { getDefaultSkillIds } from '../lib/swarm-skills'
 import { electronStorage } from '../lib/electronStorage'
+import type { AgentRecoveryEvent } from '../lib/swarm-self-heal'
 
 // ─── Runtime State (outside Zustand — not persisted, no re-renders) ──
 
 interface SwarmRuntime {
   injectorCleanup?: () => void
-  taskSyncInterval?: number
+  taskSyncInterval?: ReturnType<typeof setInterval>
+  selfHealCleanup?: () => void
+  conflictDetectorCleanup?: () => void
+  ciMonitorCleanup?: () => void
+  checkpointMonitorCleanup?: () => void
+}
+
+// ─── Checkpoint Data (Tier 3.3) ──────────────────────────────
+
+export interface SwarmCheckpoint {
+  swarmId: string
+  timestamp: number
+  agentSnapshots: Array<{
+    rosterId: string
+    agentId?: string
+    terminalId?: string
+    status: SwarmAgentStatus
+    currentTask?: string
+    filesOwned: string[]
+    lastOutputLines?: string[]  // last N lines of output for context
+  }>
+  tasks: SwarmTaskItem[]
+  messages: SwarmMessage[]
 }
 
 const swarmRuntime = new Map<string, SwarmRuntime>()
@@ -41,6 +81,10 @@ export function clearSwarmRuntime(swarmId: string): void {
   if (runtime) {
     try { if (runtime.injectorCleanup) runtime.injectorCleanup() } catch { /* safe cleanup */ }
     try { if (runtime.taskSyncInterval) clearInterval(runtime.taskSyncInterval) } catch { /* safe cleanup */ }
+    try { if (runtime.selfHealCleanup) runtime.selfHealCleanup() } catch { /* safe cleanup */ }
+    try { if (runtime.conflictDetectorCleanup) runtime.conflictDetectorCleanup() } catch { /* safe cleanup */ }
+    try { if (runtime.ciMonitorCleanup) runtime.ciMonitorCleanup() } catch { /* safe cleanup */ }
+    try { if (runtime.checkpointMonitorCleanup) runtime.checkpointMonitorCleanup() } catch { /* safe cleanup */ }
     swarmRuntime.delete(swarmId)
   }
 }
@@ -56,6 +100,10 @@ interface WizardState {
   contextFiles: SwarmContextFile[]
   enabledSkills: string[]
   swarmName: string
+  missionAnalysis: MissionAnalysis | null
+  plannerStatus: MissionPlannerStatus
+  autonomyOverrides: Record<string, AutonomyLevel>
+  simulation: SimulationResult | null
 }
 
 // ─── Store Interface ──────────────────────────────────────────
@@ -65,14 +113,46 @@ interface SwarmState {
   swarms: Swarm[]
   activeSwarmId: string | null
 
+  // View mode: dashboard (full-width overview) vs terminals (classic terminal view)
+  swarmViewMode: 'dashboard' | 'terminals'
+
+  // Centralized tick counter (incremented every second by the dashboard)
+  tick: number
+
   // Health tracking
   agentHealth: Record<string, Record<string, { lastSeen: number; status: 'healthy' | 'stale' | 'dead' }>>
 
   // Operator messages
   operatorMessages: SwarmMessage[]
 
+  // Activity feed (real-time swarm events — not persisted)
+  activityFeed: SwarmActivityEvent[]
+
+  // Live agent interviews (volatile — not persisted)
+  interviews: SwarmInterview[]
+
+  // Conflict detection (volatile — not persisted)
+  conflicts: SwarmFileConflict[]
+
+  // Recovery events (volatile — not persisted)
+  recoveryEvents: AgentRecoveryEvent[]
+
+  // CI/CD pipelines per agent (volatile — not persisted)
+  ciPipelines: Record<string, CIPipeline>
+
+  // Autonomy gates (B11) — volatile, per-session
+  autonomyRules: AutonomyRule[]
+  approvalQueue: ApprovalRequest[]
+
   // Wizard state
   wizard: WizardState
+
+  // ── View mode ──
+  setSwarmViewMode: (mode: 'dashboard' | 'terminals') => void
+  toggleSwarmViewMode: () => void
+
+  // ── Tick ──
+  incrementTick: () => void
 
   // ── Wizard actions ──
   openWizard: () => void
@@ -86,6 +166,7 @@ interface SwarmState {
   addRosterAgent: (role: SwarmAgentRole, cliProvider: SwarmCliProvider) => void
   removeRosterAgent: (id: string) => void
   updateRosterAgent: (id: string, updates: Partial<SwarmRosterAgent>) => void
+  updateAllRosterProviders: (provider: SwarmCliProvider) => void
   setRosterFromPreset: (composition: Record<SwarmAgentRole, number>, defaultProvider: SwarmCliProvider) => void
   clearRoster: () => void
 
@@ -103,14 +184,29 @@ interface SwarmState {
   toggleSkill: (skillId: string) => void
   setEnabledSkills: (skills: string[]) => void
 
+  // Autonomy (wizard)
+  setWizardAutonomyOverrides: (overrides: Record<string, AutonomyLevel>) => void
+
   // Name
   setSwarmName: (name: string) => void
 
+  // Mission Analysis
+  setMissionAnalysis: (analysis: MissionAnalysis | null) => void
+  setPlannerStatus: (status: MissionPlannerStatus) => void
+
+  // Simulation
+  setSimulation: (sim: SimulationResult | null) => void
+
+  // Debrief
+  debriefResult: DebriefResult | null
+  setDebriefResult: (result: DebriefResult | null) => void
+
   // ── Swarm lifecycle ──
   launchSwarm: () => Swarm
-  pauseSwarm: (swarmId: string) => void
+  pauseSwarm: (swarmId: string) => Promise<void>
   resumeSwarm: (swarmId: string) => void
   completeSwarm: (swarmId: string) => void
+  markSwarmCompleted: (swarmId: string) => void
   removeSwarm: (swarmId: string) => void
   setActiveSwarm: (swarmId: string | null) => void
 
@@ -128,9 +224,55 @@ interface SwarmState {
   // ── Health tracking ──
   updateAgentHealth: (swarmId: string, agentName: string, health: { lastSeen: number; status: 'healthy' | 'stale' | 'dead' }) => void
 
+  // ── Activity feed ──
+  addActivityEvent: (event: SwarmActivityEvent) => void
+  addActivityEvents: (events: SwarmActivityEvent[]) => void
+  clearActivityFeed: (swarmId: string) => void
+
   // ── Operator inbox ──
   addOperatorMessage: (message: SwarmMessage) => void
   clearOperatorMessages: () => void
+
+  // ── Live agent interviews ──
+  addInterview: (interview: SwarmInterview) => void
+  updateInterview: (id: string, updates: Partial<SwarmInterview>) => void
+  clearInterviews: () => void
+
+  // ── Conflict detection ──
+  addConflict: (conflict: SwarmFileConflict) => void
+  resolveConflict: (id: string) => void
+  clearConflicts: (swarmId: string) => void
+
+  // ── Recovery events (Self-Heal) ──
+  addRecoveryEvent: (event: AgentRecoveryEvent) => void
+  updateRecoveryEvent: (agentLabel: string, updates: Partial<AgentRecoveryEvent>) => void
+
+  // ── CI/CD Pipelines (A5) ──
+  updateCIPipeline: (agentLabel: string, pipeline: CIPipeline) => void
+  clearCIPipelines: (swarmId: string) => void
+
+  // ── Autonomy Gates (B11) ──
+  setAutonomyRules: (rules: AutonomyRule[]) => void
+  addApprovalRequest: (request: ApprovalRequest) => void
+  resolveApproval: (id: string, approved: boolean) => void
+
+  // ── Checkpoint (Tier 3.3) ──
+  saveCheckpoint: (swarmId: string) => Promise<void>
+  loadCheckpoint: (swarmId: string) => Promise<SwarmCheckpoint | null>
+
+  // ── Performance Profiles (A7) ──
+  performanceProfiles: Record<string, AgentPerformanceProfile>  // keyed by agent label
+  updatePerformanceProfile: (profile: AgentPerformanceProfile) => void
+
+  // ── ReACT Report (A8) ──
+  reactReport: ReACTReport | null
+  setReACTReport: (report: ReACTReport | null) => void
+  updateReACTReport: (updates: Partial<ReACTReport>) => void
+
+  // ── Git Checkpoints (B10) ──
+  gitCheckpoints: SwarmGitCheckpoint[]
+  addGitCheckpoint: (checkpoint: SwarmGitCheckpoint) => void
+  clearGitCheckpoints: (swarmId: string) => void
 
   // ── Selectors ──
   getSwarm: (id: string) => Swarm | undefined
@@ -141,30 +283,39 @@ interface SwarmState {
 
 let nextRosterId = 1
 
-function createRosterAgent(role: SwarmAgentRole, cliProvider: SwarmCliProvider): SwarmRosterAgent {
+function createRosterAgent(role: SwarmAgentRole, cliProvider: SwarmCliProvider, personaId?: string): SwarmRosterAgent {
+  const id = `roster-${Date.now()}-${nextRosterId++}-${Math.random().toString(36).slice(2, 8)}`
   return {
-    id: `roster-${Date.now()}-${nextRosterId++}`,
+    id,
     role,
     cliProvider,
     autoApprove: false,
+    personaId,
   }
 }
 
 function defaultWizardState(): WizardState {
   return {
     isOpen: false,
-    currentStep: 'roster',
+    currentStep: 'mission',
     roster: [],
     mission: '',
     directory: '',
     contextFiles: [],
     enabledSkills: getDefaultSkillIds(),
     swarmName: '',
+    missionAnalysis: null,
+    plannerStatus: 'idle',
+    autonomyOverrides: {},
+    simulation: null,
   }
 }
 
 /** Max messages kept in swarm store (circular buffer) */
 const MAX_MESSAGES = 200
+
+/** Max activity feed events (circular buffer) */
+const MAX_ACTIVITY_EVENTS = 500
 
 // ─── Store ────────────────────────────────────────────────────
 
@@ -173,9 +324,35 @@ export const useSwarmStore = create<SwarmState>()(
     (set, get) => ({
       swarms: [],
       activeSwarmId: null,
+      swarmViewMode: 'dashboard',
+      tick: 0,
       agentHealth: {},
       operatorMessages: [],
+      activityFeed: [],
+      interviews: [],
+      conflicts: [],
+      recoveryEvents: [],
+      ciPipelines: {},
+      autonomyRules: [],
+      approvalQueue: [],
+      performanceProfiles: {},
+      reactReport: null,
+      gitCheckpoints: [],
+      debriefResult: null,
       wizard: defaultWizardState(),
+
+      // ── View mode ─────────────────────────────────────────────────
+
+      setSwarmViewMode: (mode) => set({ swarmViewMode: mode }),
+
+      toggleSwarmViewMode: () =>
+        set((state) => ({
+          swarmViewMode: state.swarmViewMode === 'dashboard' ? 'terminals' : 'dashboard',
+        })),
+
+      // ── Tick ─────────────────────────────────────────────────────
+
+      incrementTick: () => set((state) => ({ tick: state.tick + 1 })),
 
       // ── Wizard actions ──────────────────────────────────────────
 
@@ -213,16 +390,14 @@ export const useSwarmStore = create<SwarmState>()(
       canAdvance: () => {
         const { wizard } = get()
         switch (wizard.currentStep) {
-          case 'roster':
-            return wizard.roster.length > 0 && wizard.roster.length <= 15
           case 'mission':
-            return wizard.mission.trim().length > 0
-          case 'directory':
-            return wizard.directory.trim().length > 0
-          case 'context':
-            return true // optional step
-          case 'name':
-            return wizard.swarmName.trim().length > 0
+            return wizard.mission.trim().length > 0 && wizard.directory.trim().length > 0
+          case 'configure':
+            return wizard.roster.length > 0 && wizard.roster.length <= AGENT_HARD_CAP
+          case 'simulate':
+            return true // simulation is optional, always advanceable
+          case 'launch':
+            return true // name auto-generated, always launchable
           default:
             return false
         }
@@ -231,12 +406,21 @@ export const useSwarmStore = create<SwarmState>()(
       // ── Roster ──
 
       addRosterAgent: (role, cliProvider) =>
-        set((state) => ({
-          wizard: {
-            ...state.wizard,
-            roster: [...state.wizard.roster, createRosterAgent(role, cliProvider)],
-          },
-        })),
+        set((state) => {
+          if (state.wizard.roster.length >= AGENT_HARD_CAP) return state
+          // Auto-assign next persona in round-robin for this role
+          const personas = getPersonasForRole(role)
+          const existingCount = state.wizard.roster.filter((a) => a.role === role).length
+          const personaId = personas.length > 0
+            ? personas[existingCount % personas.length].id
+            : undefined
+          return {
+            wizard: {
+              ...state.wizard,
+              roster: [...state.wizard.roster, createRosterAgent(role, cliProvider, personaId)],
+            },
+          }
+        }),
 
       removeRosterAgent: (id) =>
         set((state) => ({
@@ -256,12 +440,28 @@ export const useSwarmStore = create<SwarmState>()(
           },
         })),
 
+      updateAllRosterProviders: (provider) =>
+        set((state) => ({
+          wizard: {
+            ...state.wizard,
+            roster: state.wizard.roster.map((a) => ({ ...a, cliProvider: provider })),
+          },
+        })),
+
       setRosterFromPreset: (composition, defaultProvider) =>
         set((state) => {
           const roster: SwarmRosterAgent[] = []
+          // Track per-role index for round-robin persona assignment
+          const roleCounters: Record<string, number> = {}
           for (const [role, count] of Object.entries(composition)) {
+            const personas = getPersonasForRole(role as SwarmAgentRole)
+            roleCounters[role] = 0
             for (let i = 0; i < count; i++) {
-              roster.push(createRosterAgent(role as SwarmAgentRole, defaultProvider))
+              const personaId = personas.length > 0
+                ? personas[roleCounters[role] % personas.length].id
+                : undefined
+              roleCounters[role]++
+              roster.push(createRosterAgent(role as SwarmAgentRole, defaultProvider, personaId))
             }
           }
           return { wizard: { ...state.wizard, roster } }
@@ -320,12 +520,53 @@ export const useSwarmStore = create<SwarmState>()(
           wizard: { ...state.wizard, enabledSkills: skills },
         })),
 
+      // ── Autonomy (wizard) ──
+
+      setWizardAutonomyOverrides: (overrides) =>
+        set((state) => ({
+          wizard: { ...state.wizard, autonomyOverrides: overrides },
+        })),
+
       // ── Name ──
 
       setSwarmName: (name) =>
         set((state) => ({
           wizard: { ...state.wizard, swarmName: name },
         })),
+
+      // ── Mission Analysis ──
+
+      setMissionAnalysis: (analysis) =>
+        set((state) => ({
+          wizard: { ...state.wizard, missionAnalysis: analysis },
+        })),
+
+      setPlannerStatus: (status) =>
+        set((state) => ({
+          wizard: { ...state.wizard, plannerStatus: status },
+        })),
+
+      // ── Simulation ──
+
+      setSimulation: (sim) =>
+        set((state) => ({
+          wizard: { ...state.wizard, simulation: sim },
+        })),
+
+      // ── Debrief ──
+
+      setDebriefResult: (result) => {
+        // Store both globally (for quick UI access) and per-swarm
+        const activeId = get().activeSwarmId
+        set((state) => ({
+          debriefResult: result,
+          swarms: activeId
+            ? state.swarms.map((s) =>
+                s.id === activeId ? { ...s, debriefResult: result || undefined } : s,
+              )
+            : state.swarms,
+        }))
+      },
 
       // ── Swarm lifecycle ─────────────────────────────────────────
 
@@ -341,6 +582,10 @@ export const useSwarmStore = create<SwarmState>()(
           contextFiles: [...wizard.contextFiles],
           skills: [...wizard.enabledSkills],
           createdAt: Date.now(),
+          missionAnalysis: wizard.missionAnalysis || undefined,
+          autonomyOverrides: Object.keys(wizard.autonomyOverrides).length > 0
+            ? { ...wizard.autonomyOverrides }
+            : undefined,
         }
 
         const agents: SwarmAgentState[] = wizard.roster.map((r) => ({
@@ -358,6 +603,7 @@ export const useSwarmStore = create<SwarmState>()(
           tasks: [],
           messages: [],
           startedAt: Date.now(),
+          simulation: wizard.simulation || undefined,
         }
 
         set((state) => ({
@@ -369,7 +615,13 @@ export const useSwarmStore = create<SwarmState>()(
         return swarm
       },
 
-      pauseSwarm: (swarmId) => {
+      pauseSwarm: async (swarmId) => {
+        // Save checkpoint before pausing (Tier 3.3)
+        try {
+          await get().saveCheckpoint(swarmId)
+        } catch (err) {
+          console.error('[SwarmStore] Failed to save checkpoint on pause:', err)
+        }
         set((state) => ({
           swarms: state.swarms.map((s) =>
             s.id === swarmId
@@ -391,6 +643,7 @@ export const useSwarmStore = create<SwarmState>()(
         })),
 
       completeSwarm: (swarmId) => {
+        const swarm = get().swarms.find(s => s.id === swarmId)
         set((state) => ({
           swarms: state.swarms.map((s) =>
             s.id === swarmId
@@ -400,6 +653,51 @@ export const useSwarmStore = create<SwarmState>()(
           activeSwarmId: state.activeSwarmId === swarmId ? null : state.activeSwarmId,
         }))
         clearSwarmRuntime(swarmId)
+
+        // Generate summary report asynchronously (non-blocking)
+        import('../lib/swarm-report-generator').then(({ generateSwarmReport }) => {
+          generateSwarmReport(swarmId).catch((err) =>
+            console.warn('[swarm] Report generation failed:', err),
+          )
+        }).catch(() => {})
+
+        // Save performance data on swarm completion (A7 — non-blocking)
+        if (swarm?.config.directory) {
+          import('../lib/swarm-performance-tracker').then(({ savePerformanceData }) => {
+            savePerformanceData(swarm.config.directory).catch((err) =>
+              console.warn('[swarm] Performance data save failed:', err),
+            )
+          }).catch(() => {})
+        }
+
+        // Trigger debrief orchestrator (non-blocking)
+        import('../lib/swarm-debrief-orchestrator').then(({ runDebrief }) => {
+          runDebrief(swarmId).catch((err) =>
+            console.warn('[swarm] Debrief failed:', err),
+          )
+        }).catch(() => {})
+      },
+
+      markSwarmCompleted: (swarmId) => {
+        set((state) => ({
+          swarms: state.swarms.map((s) =>
+            s.id === swarmId
+              ? {
+                  ...s,
+                  status: 'completed' as SwarmStatus,
+                  completedAt: s.completedAt || Date.now(),
+                }
+              : s,
+          ),
+        }))
+        clearSwarmRuntime(swarmId)
+
+        // Generate summary report asynchronously (non-blocking)
+        import('../lib/swarm-report-generator').then(({ generateSwarmReport }) => {
+          generateSwarmReport(swarmId).catch((err) =>
+            console.warn('[swarm] Report generation failed:', err),
+          )
+        }).catch(() => {})
       },
 
       removeSwarm: (swarmId) => {
@@ -492,9 +790,18 @@ export const useSwarmStore = create<SwarmState>()(
             s.id === swarmId
               ? {
                   ...s,
-                  tasks: s.tasks.map((t) =>
-                    t.id === taskId ? { ...t, ...updates } : t,
-                  ),
+                  tasks: s.tasks.map((t) => {
+                    if (t.id !== taskId) return t
+                    // Auto-set timestamps on status transitions
+                    const merged = { ...t, ...updates }
+                    if (updates.status === 'building' && !t.startedAt) {
+                      merged.startedAt = Date.now()
+                    }
+                    if (updates.status === 'done' && !t.completedAt) {
+                      merged.completedAt = Date.now()
+                    }
+                    return merged
+                  }),
                 }
               : s,
           ),
@@ -507,7 +814,7 @@ export const useSwarmStore = create<SwarmState>()(
               ? {
                   ...s,
                   messages: s.messages.length >= MAX_MESSAGES
-                    ? [...s.messages.slice(-MAX_MESSAGES + 1), message]
+                    ? [...s.messages.slice(-(MAX_MESSAGES - 1)), message]
                     : [...s.messages, message],
                 }
               : s,
@@ -527,6 +834,31 @@ export const useSwarmStore = create<SwarmState>()(
           },
         })),
 
+      // ── Activity feed ──────────────────────────────────────────
+
+      addActivityEvent: (event) =>
+        set((state) => ({
+          activityFeed: state.activityFeed.length >= MAX_ACTIVITY_EVENTS
+            ? [...state.activityFeed.slice(-(MAX_ACTIVITY_EVENTS - 1)), event]
+            : [...state.activityFeed, event],
+        })),
+
+      addActivityEvents: (events) =>
+        set((state) => {
+          if (events.length === 0) return state
+          const combined = [...state.activityFeed, ...events]
+          return {
+            activityFeed: combined.length > MAX_ACTIVITY_EVENTS
+              ? combined.slice(-MAX_ACTIVITY_EVENTS)
+              : combined,
+          }
+        }),
+
+      clearActivityFeed: (swarmId) =>
+        set((state) => ({
+          activityFeed: state.activityFeed.filter((e) => e.swarmId !== swarmId),
+        })),
+
       // ── Operator inbox ────────────────────────────────────────
 
       addOperatorMessage: (message) =>
@@ -537,6 +869,202 @@ export const useSwarmStore = create<SwarmState>()(
         })),
 
       clearOperatorMessages: () => set({ operatorMessages: [] }),
+
+      // ── Live agent interviews ──────────────────────────────────
+
+      addInterview: (interview) =>
+        set((state) => ({
+          interviews: [...state.interviews, interview],
+        })),
+
+      updateInterview: (id, updates) =>
+        set((state) => ({
+          interviews: state.interviews.map((iv) =>
+            iv.id === id ? { ...iv, ...updates } : iv,
+          ),
+        })),
+
+      clearInterviews: () => set({ interviews: [] }),
+
+      // ── Conflict detection ──────────────────────────────────
+
+      addConflict: (conflict) =>
+        set((state) => {
+          // Deduplicate: if a conflict for the same file+swarm is already active, update it
+          const existing = state.conflicts.find(
+            (c) => c.filePath === conflict.filePath && c.swarmId === conflict.swarmId && c.status === 'active',
+          )
+          if (existing) {
+            return {
+              conflicts: state.conflicts.map((c) =>
+                c.id === existing.id
+                  ? {
+                      ...c,
+                      agents: conflict.agents,
+                      severity: conflict.severity,
+                      detectedAt: conflict.detectedAt,
+                    }
+                  : c,
+              ),
+            }
+          }
+          return {
+            conflicts: [...state.conflicts.slice(-99), conflict],
+          }
+        }),
+
+      resolveConflict: (id) =>
+        set((state) => ({
+          conflicts: state.conflicts.map((c) =>
+            c.id === id ? { ...c, status: 'resolved' as const, resolvedAt: Date.now() } : c,
+          ),
+        })),
+
+      clearConflicts: (swarmId) =>
+        set((state) => ({
+          conflicts: state.conflicts.filter((c) => c.swarmId !== swarmId),
+        })),
+
+      // ── Recovery events (Self-Heal) ─────────────────────────
+
+      addRecoveryEvent: (event) =>
+        set((state) => ({
+          recoveryEvents: state.recoveryEvents.length >= 100
+            ? [...state.recoveryEvents.slice(-99), event]
+            : [...state.recoveryEvents, event],
+        })),
+
+      updateRecoveryEvent: (agentLabel, updates) =>
+        set((state) => ({
+          recoveryEvents: state.recoveryEvents.map((e) =>
+            e.agentLabel === agentLabel ? { ...e, ...updates } : e,
+          ),
+        })),
+
+      // ── CI/CD Pipelines (A5) ─────────────────────────────────
+
+      updateCIPipeline: (agentLabel, pipeline) =>
+        set((state) => ({
+          ciPipelines: {
+            ...state.ciPipelines,
+            [agentLabel]: pipeline,
+          },
+        })),
+
+      clearCIPipelines: (_swarmId) =>
+        set({ ciPipelines: {} }),
+
+      // ── Autonomy Gates (B11) ─────────────────────────────────
+
+      setAutonomyRules: (rules) =>
+        set({ autonomyRules: rules }),
+
+      addApprovalRequest: (request) =>
+        set((state) => ({
+          approvalQueue: state.approvalQueue.length >= 200
+            ? [...state.approvalQueue.slice(-199), request]
+            : [...state.approvalQueue, request],
+        })),
+
+      resolveApproval: (id, approved) =>
+        set((state) => ({
+          approvalQueue: state.approvalQueue.map((req) =>
+            req.id === id
+              ? {
+                  ...req,
+                  status: (approved ? 'approved' : 'denied'),
+                  resolvedAt: Date.now(),
+                  resolvedBy: 'operator',
+                }
+              : req,
+          ),
+        })),
+
+      // ── Checkpoint (Tier 3.3) ────────────────────────────────
+
+      saveCheckpoint: async (swarmId: string) => {
+        const swarm = get().swarms.find(s => s.id === swarmId)
+        if (!swarm?.swarmRoot) return
+
+        const checkpoint: SwarmCheckpoint = {
+          swarmId,
+          timestamp: Date.now(),
+          agentSnapshots: swarm.agents.map(a => ({
+            rosterId: a.rosterId,
+            agentId: a.agentId,
+            terminalId: a.terminalId,
+            status: a.status,
+            currentTask: a.currentTask,
+            filesOwned: [...a.filesOwned],
+          })),
+          tasks: [...swarm.tasks],
+          messages: swarm.messages.slice(-50), // Keep last 50 messages for context
+        }
+
+        try {
+          await window.ghostshell.fsCreateFile(
+            `${swarm.swarmRoot}/checkpoint.json`,
+            JSON.stringify(checkpoint, null, 2),
+          )
+        } catch (err) {
+          console.error('[SwarmStore] Failed to save checkpoint:', err)
+        }
+      },
+
+      loadCheckpoint: async (swarmId: string) => {
+        const swarm = get().swarms.find(s => s.id === swarmId)
+        if (!swarm?.swarmRoot) return null
+
+        try {
+          const result = await window.ghostshell.fsReadFile(`${swarm.swarmRoot}/checkpoint.json`)
+          if (!result.success || !result.content) return null
+          const parsed = JSON.parse(result.content)
+          // Validate checkpoint shape
+          if (!parsed || parsed.swarmId !== swarmId || !Array.isArray(parsed.agentSnapshots)) {
+            console.warn('[SwarmStore] Invalid checkpoint shape for', swarmId)
+            return null
+          }
+          return parsed as SwarmCheckpoint
+        } catch (err) {
+          console.warn('[SwarmStore] Failed to load checkpoint:', err)
+          return null
+        }
+      },
+
+      // ── Performance Profiles (A7) ──────────────────────────────
+
+      updatePerformanceProfile: (profile) =>
+        set((state) => ({
+          performanceProfiles: {
+            ...state.performanceProfiles,
+            [profile.agentLabel]: profile,
+          },
+        })),
+
+      // ── ReACT Report (A8) ─────────────────────────────────────
+
+      setReACTReport: (report) => set({ reactReport: report }),
+
+      updateReACTReport: (updates) =>
+        set((state) => ({
+          reactReport: state.reactReport
+            ? { ...state.reactReport, ...updates }
+            : null,
+        })),
+
+      // ── Git Checkpoints (B10) ────────────────────────────────
+
+      addGitCheckpoint: (checkpoint) =>
+        set((state) => ({
+          gitCheckpoints: state.gitCheckpoints.length >= 200
+            ? [...state.gitCheckpoints.slice(-199), checkpoint]
+            : [...state.gitCheckpoints, checkpoint],
+        })),
+
+      clearGitCheckpoints: (swarmId) =>
+        set((state) => ({
+          gitCheckpoints: state.gitCheckpoints.filter((c) => c.swarmId !== swarmId),
+        })),
 
       // ── Selectors ───────────────────────────────────────────────
 
@@ -561,6 +1089,16 @@ export const useSwarmStore = create<SwarmState>()(
         activeSwarmId: state.activeSwarmId,
         agentHealth: {},          // Reset on persist (volatile)
         operatorMessages: [],     // Reset on persist (volatile)
+        activityFeed: [],         // Reset on persist (volatile)
+        interviews: [],           // Reset on persist (volatile)
+        conflicts: [],            // Reset on persist (volatile)
+        recoveryEvents: [],       // Reset on persist (volatile)
+        ciPipelines: {},          // Reset on persist (volatile)
+        autonomyRules: [],        // Reset on persist (volatile)
+        approvalQueue: [],        // Reset on persist (volatile)
+        performanceProfiles: {},  // Reset on persist (volatile)
+        reactReport: null,        // Reset on persist (volatile)
+        gitCheckpoints: [],       // Reset on persist (volatile)
       }) as unknown as SwarmState,
     }
   )

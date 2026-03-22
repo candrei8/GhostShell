@@ -4,6 +4,7 @@ import type { EnrichedSwarmAgent } from './SwarmCoordinationBoard'
 import type { SwarmRosterAgent } from '../../lib/swarm-types'
 import { SwarmAgentRosterCard } from './SwarmAgentRosterCard'
 import { useTerminalStore } from '../../stores/terminalStore'
+import { useSwarmStore } from '../../stores/swarmStore'
 
 // ─── Props ──────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ interface SwarmAgentRosterProps {
 export default function SwarmAgentRoster({ agents, roster, agentHealth }: SwarmAgentRosterProps) {
   const handleAgentClick = (terminalId?: string) => {
     if (terminalId) {
+      // Switch to terminal view and activate the agent's session
+      useSwarmStore.getState().setSwarmViewMode('terminals')
       useTerminalStore.getState().setActiveSession(terminalId)
     }
   }
@@ -37,16 +40,23 @@ export default function SwarmAgentRoster({ agents, roster, agentHealth }: SwarmA
       {/* Agent Grid (1-column) */}
       <div className="grid grid-cols-1 gap-1.5">
         <AnimatePresence mode="popLayout">
-          {agents.map((agent, idx) => {
+          {agents.map((agent) => {
             const rosterAgent = roster.find((r) => r.id === agent.rosterId)
             if (!rosterAgent) return null
+
+            // Per-role index from roster position
+            const globalIdx = roster.indexOf(rosterAgent)
+            let roleIdx = 0
+            for (let j = 0; j < globalIdx; j++) {
+              if (roster[j].role === rosterAgent.role) roleIdx++
+            }
 
             return (
               <SwarmAgentRosterCard
                 key={agent.rosterId}
                 agent={agent}
                 rosterAgent={rosterAgent}
-                index={idx}
+                index={roleIdx}
                 health={agent.agentName ? agentHealth?.[agent.agentName] : undefined}
                 onClick={() => handleAgentClick(agent.terminalId)}
               />

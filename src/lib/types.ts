@@ -301,6 +301,7 @@ declare global {
       ptyWrite: (id: string, data: string) => void
       ptyResize: (id: string, cols: number, rows: number) => void
       ptyKill: (id: string) => void
+      ptyIsAlive: (id: string) => Promise<boolean>
       ptyGetCwd: (id: string) => Promise<string | null>
       ptyOnData: (id: string, callback: (data: string) => void) => () => void
       ptyOnExit: (id: string, callback: (exitCode: number) => void) => () => void
@@ -311,6 +312,9 @@ declare global {
       fsRename: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
       fsDelete: (targetPath: string) => Promise<{ success: boolean; error?: string }>
       gitStatus: (cwd: string) => Promise<GitStatus>
+      gitFileHotspots: (cwd: string) => Promise<Record<string, number>>
+      gitCreateCheckpoint: (cwd: string) => Promise<{ hash: string; clean: boolean; error?: string }>
+      gitRollback: (cwd: string, hash: string, isClean: boolean) => Promise<{ success: boolean; error?: string }>
       selectDirectory: () => Promise<string | null>
       shellGetHomedir: () => Promise<string>
       shellResolvePath: (input: string, basePath: string) => Promise<{ success: boolean; path?: string; error?: string }>
@@ -334,6 +338,11 @@ declare global {
       onUpdaterStatus: (cb: (status: Record<string, unknown>) => void) => () => void
       onBeforeClose: (callback: () => void) => () => void
       closeReady: () => void
+      // Swarm file locks
+      swarmAcquireLocks: (swarmRoot: string, taskId: string, agentName: string, files: string[]) => Promise<{ success: boolean; conflict?: string }>
+      swarmReleaseLocks: (swarmRoot: string, taskId: string) => Promise<{ success: boolean }>
+      swarmCheckLock: (swarmRoot: string, filePath: string) => Promise<{ taskId: string; agentName: string; acquiredAt: number; exclusive: boolean } | null>
+      swarmGetAllLocks: (swarmRoot: string) => Promise<Record<string, { taskId: string; agentName: string; acquiredAt: number; exclusive: boolean }>>
     }
   }
 }

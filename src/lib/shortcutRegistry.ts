@@ -457,6 +457,13 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
     defaultBinding: combo(true, false, true, '0'),
   },
   {
+    id: 'nav.swarmViewToggle',
+    category: 'navigation',
+    label: 'Toggle Swarm View',
+    description: 'Switch between dashboard and terminal view during a swarm',
+    defaultBinding: combo(true, false, true, 'd'),
+  },
+  {
     id: 'nav.toggleSidebar',
     category: 'navigation',
     label: 'Toggle Sidebar',

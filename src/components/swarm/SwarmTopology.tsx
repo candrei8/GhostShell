@@ -83,7 +83,7 @@ export function SwarmTopology({ agents, roster, messages = [] }: SwarmTopologyPr
     }
 
     // Group agents by role
-    const roleOrder = ['coordinator', 'scout', 'builder', 'reviewer', 'custom']
+    const roleOrder = ['coordinator', 'scout', 'builder', 'reviewer', 'analyst', 'custom']
     const grouped = new Map<string, { agent: SwarmAgentState; rosterAgent: SwarmRosterAgent }[]>()
     for (const a of agents) {
       const r = rosterMap.get(a.rosterId)

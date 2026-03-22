@@ -14,6 +14,7 @@ const api = {
   ptyWrite: (id: string, data: string) => ipcRenderer.send('pty:write', id, data),
   ptyResize: (id: string, cols: number, rows: number) => ipcRenderer.send('pty:resize', id, cols, rows),
   ptyKill: (id: string) => ipcRenderer.send('pty:kill', id),
+  ptyIsAlive: (id: string) => ipcRenderer.invoke('pty:isAlive', id) as Promise<boolean>,
   ptyGetCwd: (id: string) => ipcRenderer.invoke('pty:getCwd', id) as Promise<string | null>,
   ptyOnData: (id: string, callback: (data: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: string) => callback(data)
@@ -40,6 +41,13 @@ const api = {
 
   // Git
   gitStatus: (cwd: string) => ipcRenderer.invoke('git:status', cwd),
+  gitFileHotspots: (cwd: string) => ipcRenderer.invoke('git:fileHotspots', cwd) as Promise<Record<string, number>>,
+
+  // Git checkpoints (B10: Conversation-Aware Rollback)
+  gitCreateCheckpoint: (cwd: string) =>
+    ipcRenderer.invoke('git:createCheckpoint', cwd) as Promise<{ hash: string; clean: boolean; error?: string }>,
+  gitRollback: (cwd: string, hash: string, isClean: boolean) =>
+    ipcRenderer.invoke('git:rollback', cwd, hash, isClean) as Promise<{ success: boolean; error?: string }>,
 
   // Workspace
   workspaceSave: (name: string, data: unknown) => ipcRenderer.invoke('workspace:save', name, data),

@@ -1,246 +1,278 @@
-import { useMemo, useCallback, useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, Square, Clock, Users } from 'lucide-react'
+// SwarmDashboard — Command Center orchestrator
+// Composes CommandBar + AgentRail + MainViewport + RightPanel + SystemLog
+
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { Activity, Target, Clock, GitBranch } from 'lucide-react'
 import { useSwarmStore } from '../../stores/swarmStore'
-import type { SwarmStatus, SwarmAgentRole } from '../../lib/swarm-types'
-import { getRoleDef, SWARM_ROLES } from '../../lib/swarm-types'
-import { RoleIcon } from './swarm-icons'
-import { SwarmAgentCard } from './SwarmAgentCard'
-import { SwarmTaskBoard } from './SwarmTaskBoard'
-import { SwarmMessageLog } from './SwarmMessageLog'
-import { SwarmTopology } from './SwarmTopology'
-import SwarmMetrics from './SwarmMetrics'
+import { useTerminalStore } from '../../stores/terminalStore'
+import type { SwarmAgentRole, SwarmRosterAgent, Swarm } from '../../lib/swarm-types'
+import { getRoleDef } from '../../lib/swarm-types'
 
-// ─── Status Badge ────────────────────────────────────────────
+import { SwarmCommandBar, type CommandCenterViewMode } from './SwarmCommandBar'
+import { SwarmAgentRail } from './SwarmAgentRail'
+import { SwarmInteractiveGraph, type SelectedEdge } from './SwarmInteractiveGraph'
+import { SwarmLiveTimeline } from './SwarmLiveTimeline'
+import { SwarmTaskKanban } from './SwarmTaskKanban'
+import { SwarmRightPanel } from './SwarmRightPanel'
+import { SwarmSystemLog } from './SwarmSystemLog'
+import { SwarmSplitPane } from './SwarmSplitPane'
 
-const STATUS_STYLES: Record<SwarmStatus, { label: string; color: string; bg: string }> = {
-  configuring: { label: 'Configuring', color: 'text-ghost-text-dim', bg: 'bg-ghost-text-dim/10' },
-  launching: { label: 'Launching', color: 'text-blue-400', bg: 'bg-blue-400/10' },
-  running: { label: 'Running', color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
-  paused: { label: 'Paused', color: 'text-amber-400', bg: 'bg-amber-400/10' },
-  completed: { label: 'Completed', color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
-  error: { label: 'Error', color: 'text-rose-400', bg: 'bg-rose-400/10' },
-}
+// ─── Prediction Tracker ─────────────────────────────────────
 
-function StatusBadge({ status }: { status: SwarmStatus }) {
-  const meta = STATUS_STYLES[status] || STATUS_STYLES.configuring
+function PredictionTracker({ swarm }: { swarm: Swarm }) {
+  const tick = useSwarmStore((s) => s.tick)
+  const conflicts = useSwarmStore((s) => s.conflicts)
+
+  const sim = swarm.simulation
+  if (!sim) return null
+
+  const elapsed = swarm.startedAt ? (Date.now() - swarm.startedAt) / 60000 : 0
+  const actualMin = Math.round(elapsed * 10) / 10
+  const predictedMin = Math.round(sim.predictedDuration)
+  const accuracy = predictedMin > 0
+    ? Math.max(0, Math.round(100 - (Math.abs(predictedMin - actualMin) / predictedMin) * 100))
+    : 0
+
+  const predConflicts = sim.conflicts.length
+  const actualConflicts = conflicts.length
+
   return (
-    <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${meta.color} ${meta.bg}`}>
-      {(status === 'running' || status === 'launching') && (
-        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-      )}
-      {meta.label}
-    </span>
+    <div className="flex items-center gap-6 px-4 py-1.5 border-b border-white/5 bg-white/[0.01] shrink-0">
+      <div className="flex items-center gap-1.5">
+        <Target className="w-3 h-3 text-sky-400/60" />
+        <span className="font-mono text-[9px] uppercase tracking-wider text-white/40">Prediccion</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <Clock className="w-3 h-3 text-white/30" />
+        <span className="font-mono text-[10px] text-white/50">
+          PRED <span className="text-white/70">{predictedMin}m</span>
+        </span>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="font-mono text-[10px] text-white/50">
+          ACTUAL <span className="text-white/70">{actualMin}m</span>
+        </span>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className={`font-mono text-[10px] font-bold ${accuracy >= 70 ? 'text-emerald-400' : accuracy >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
+          {accuracy}%
+        </span>
+      </div>
+      <div className="w-px h-3 bg-white/10" />
+      <div className="flex items-center gap-1">
+        <GitBranch className="w-3 h-3 text-white/30" />
+        <span className="font-mono text-[10px] text-white/50">
+          Conflictos: <span className="text-white/70">{predConflicts}</span> pred / <span className="text-white/70">{actualConflicts}</span> real
+        </span>
+      </div>
+    </div>
   )
 }
 
-// ─── Elapsed Time (ticks every second) ───────────────────────
-
-function ElapsedTime({ startedAt }: { startedAt?: number }) {
-  const [now, setNow] = useState(Date.now())
-
-  useEffect(() => {
-    if (!startedAt) return
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [startedAt])
-
-  if (!startedAt) return null
-  const elapsed = Math.floor((now - startedAt) / 1000)
-  const mins = Math.floor(elapsed / 60)
-  const secs = elapsed % 60
-  return (
-    <span className="flex items-center gap-1 text-xs text-ghost-text-dim/50 tabular-nums">
-      <Clock className="w-3 h-3" />
-      {mins > 0 ? `${mins}m ${secs}s` : `${secs}s`}
-    </span>
-  )
-}
-
-// ─── Dashboard ───────────────────────────────────────────────
+// ─── Main Export ────────────────────────────────────────────
 
 export function SwarmDashboard() {
-  const activeSwarmId = useSwarmStore((s) => s.activeSwarmId)
   const activeSwarm = useSwarmStore((s) =>
-    s.activeSwarmId ? s.swarms.find((sw) => sw.id === s.activeSwarmId) : undefined,
+    s.activeSwarmId ? s.swarms.find((sw) => sw.id === s.activeSwarmId) : undefined
   )
   const pauseSwarm = useSwarmStore((s) => s.pauseSwarm)
   const resumeSwarm = useSwarmStore((s) => s.resumeSwarm)
   const completeSwarm = useSwarmStore((s) => s.completeSwarm)
+  const incrementTick = useSwarmStore((s) => s.incrementTick)
+  const setSwarmViewMode = useSwarmStore((s) => s.setSwarmViewMode)
 
+  // Local dashboard state
+  const [viewMode, setViewMode] = useState<CommandCenterViewMode>('split')
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [selectedEdge, setSelectedEdge] = useState<SelectedEdge | null>(null)
+  const [systemLogCollapsed, setSystemLogCollapsed] = useState(false)
+
+  // Coordinated selection: agent and edge are mutually exclusive
+  const handleSelectAgent = useCallback((id: string | null) => {
+    setSelectedAgentId(id)
+    if (id) setSelectedEdge(null)
+  }, [])
+
+  const handleSelectEdge = useCallback((edge: SelectedEdge | null) => {
+    setSelectedEdge(edge)
+    if (edge) setSelectedAgentId(null)
+  }, [])
+
+  // Tick timer (1s interval for timer re-renders)
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    const isActive = activeSwarm && (activeSwarm.status === 'running' || activeSwarm.status === 'launching')
+    if (isActive) tickRef.current = setInterval(incrementTick, 1000)
+    return () => { if (tickRef.current) clearInterval(tickRef.current) }
+  }, [activeSwarm?.status, incrementTick])
+
+  // Roster map
   const rosterMap = useMemo(() => {
-    if (!activeSwarm) return new Map()
+    if (!activeSwarm) return new Map<string, SwarmRosterAgent>()
     return new Map(activeSwarm.config.roster.map((r) => [r.id, r]))
   }, [activeSwarm])
 
-  // Group agents by role for structured display
-  const roleGroups = useMemo(() => {
+  // Sorted display agents
+  const displayAgents = useMemo(() => {
     if (!activeSwarm) return []
-    const groups = new Map<SwarmAgentRole, { agent: typeof activeSwarm.agents[0]; rosterAgent: typeof activeSwarm.config.roster[0]; index: number }[]>()
-    const roleOrder: SwarmAgentRole[] = ['coordinator', 'scout', 'builder', 'reviewer', 'custom']
-
-    activeSwarm.agents.forEach((agent, i) => {
-      const rosterAgent = rosterMap.get(agent.rosterId)
-      if (!rosterAgent) return
-      const role = rosterAgent.role
-      if (!groups.has(role)) groups.set(role, [])
-      groups.get(role)!.push({ agent, rosterAgent, index: i })
-    })
-
-    return roleOrder
-      .filter(role => groups.has(role))
-      .map(role => ({ role, agents: groups.get(role)! }))
+    const roleOrder: SwarmAgentRole[] = ['coordinator', 'scout', 'builder', 'reviewer', 'analyst', 'custom']
+    return [...activeSwarm.agents]
+      .sort((a, b) => {
+        const rA = rosterMap.get(a.rosterId)
+        const rB = rosterMap.get(b.rosterId)
+        const wA = rA ? roleOrder.indexOf(rA.role) : 99
+        const wB = rB ? roleOrder.indexOf(rB.role) : 99
+        return wA - wB
+      })
+      .map((agent) => ({ agent, rosterAgent: rosterMap.get(agent.rosterId)! }))
+      .filter((d) => d.rosterAgent)
   }, [activeSwarm, rosterMap])
 
-  const handlePause = useCallback(() => {
-    if (activeSwarm) pauseSwarm(activeSwarm.id)
-  }, [activeSwarm, pauseSwarm])
+  // Handle agent selection from label (used by Timeline)
+  const handleSelectByLabel = useCallback((label: string) => {
+    const found = displayAgents.find(({ rosterAgent }, idx) => {
+      const roleDef = getRoleDef(rosterAgent.role)
+      const agentLabel = rosterAgent.customName || `${roleDef.label} ${idx + 1}`
+      return agentLabel === label
+    })
+    if (found) handleSelectAgent(found.agent.rosterId)
+  }, [displayAgents, handleSelectAgent])
 
-  const handleResume = useCallback(() => {
-    if (activeSwarm) resumeSwarm(activeSwarm.id)
-  }, [activeSwarm, resumeSwarm])
+  // Handlers
+  const handleJumpToTerminal = useCallback((terminalId: string) => {
+    setSwarmViewMode('terminals')
+    useTerminalStore.getState().setActiveSession(terminalId)
+  }, [setSwarmViewMode])
 
-  const handleStop = useCallback(() => {
-    if (activeSwarm) completeSwarm(activeSwarm.id)
-  }, [activeSwarm, completeSwarm])
+  const handleBack = useCallback(() => {
+    setSwarmViewMode('terminals')
+  }, [setSwarmViewMode])
 
-  if (!activeSwarm) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-20">
-        <Users className="w-10 h-10 text-ghost-text-dim/20" />
-        <p className="text-sm text-ghost-text-dim/50">No active swarm</p>
-      </div>
-    )
-  }
+  // ─── Early return ───────────────────────────────────────
 
-  const isRunning = activeSwarm.status === 'running' || activeSwarm.status === 'launching'
-  const isPaused = activeSwarm.status === 'paused'
+  if (!activeSwarm) return null
+
+  // ─── Render ─────────────────────────────────────────────
 
   return (
-    <motion.div
-      className="flex flex-col gap-4"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
+    <div
+      className="flex flex-col h-full w-full overflow-hidden"
+      style={{ background: '#050505', color: 'white' }}
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 px-1">
-        <div>
-          <h2 className="text-sm font-semibold text-ghost-text uppercase tracking-[0.15em]">
-            {activeSwarm.config.name}
-          </h2>
-          <p className="text-xs text-ghost-text-dim/50 mt-0.5 max-w-md truncate">
-            {activeSwarm.config.mission}
-          </p>
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <ElapsedTime startedAt={activeSwarm.startedAt} />
-          <StatusBadge status={activeSwarm.status} />
-        </div>
-      </div>
-
-      {/* Controls */}
-      <div className="flex items-center gap-2">
-        {isRunning && (
-          <button
-            onClick={handlePause}
-            className="h-8 px-3 rounded-lg border border-white/10 bg-white/[0.02] text-xs font-semibold uppercase tracking-[0.1em] text-ghost-text-dim hover:text-ghost-text hover:border-amber-400/30 hover:bg-amber-400/8 transition-colors flex items-center gap-1.5"
-          >
-            <Pause className="w-3.5 h-3.5" />
-            Pause
-          </button>
-        )}
-        {isPaused && (
-          <button
-            onClick={handleResume}
-            className="h-8 px-3 rounded-lg border border-emerald-400/25 bg-emerald-400/8 text-xs font-semibold uppercase tracking-[0.1em] text-emerald-400 hover:bg-emerald-400/15 transition-colors flex items-center gap-1.5"
-          >
-            <Play className="w-3.5 h-3.5" />
-            Resume
-          </button>
-        )}
-        {(isRunning || isPaused) && (
-          <button
-            onClick={handleStop}
-            className="h-8 px-3 rounded-lg border border-white/10 bg-white/[0.02] text-xs font-semibold uppercase tracking-[0.1em] text-ghost-text-dim hover:text-rose-400 hover:border-rose-400/30 hover:bg-rose-400/8 transition-colors flex items-center gap-1.5"
-          >
-            <Square className="w-3.5 h-3.5" />
-            Stop
-          </button>
-        )}
-        <span className="ml-auto text-xs text-ghost-text-dim/40">
-          {activeSwarm.agents.length} agent{activeSwarm.agents.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-
-      {/* Metrics Dashboard (Tier 3.1) */}
-      {(isRunning || isPaused) && activeSwarmId && (
-        <SwarmMetrics swarmId={activeSwarmId} />
-      )}
-
-      {/* Topology Visualization */}
-      <SwarmTopology
-        agents={activeSwarm.agents}
-        roster={activeSwarm.config.roster}
+      {/* Command Bar — 44px */}
+      <SwarmCommandBar
+        swarm={activeSwarm}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        onBack={handleBack}
+        onPause={() => pauseSwarm(activeSwarm.id)}
+        onResume={() => resumeSwarm(activeSwarm.id)}
+        onStop={() => completeSwarm(activeSwarm.id)}
       />
 
-      {/* Role Composition Bar */}
-      <div className="flex items-center gap-2 px-1">
-        {SWARM_ROLES.filter(r => roleGroups.some(g => g.role === r.id)).map(r => {
-          const group = roleGroups.find(g => g.role === r.id)
-          if (!group) return null
-          const activeCount = group.agents.filter(
-            a => a.agent.status === 'building' || a.agent.status === 'planning' || a.agent.status === 'review'
-          ).length
-          return (
-            <div key={r.id} className="flex items-center gap-1.5 px-2 py-1 rounded border border-white/[0.06] bg-white/[0.02]">
-              <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: r.color }} />
-              <span className="text-[10px] font-mono text-white/50 uppercase tracking-widest">{group.agents.length} {r.label}{group.agents.length !== 1 ? 's' : ''}</span>
-              {activeCount > 0 && (
-                <span className="text-[9px] font-bold font-mono px-1 py-0.5 rounded bg-white/[0.06]" style={{ color: r.color }}>
-                  {activeCount} active
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {/* Prediction Tracker — only visible when simulation data exists */}
+      {activeSwarm.simulation && (
+        <PredictionTracker swarm={activeSwarm} />
+      )}
 
-      {/* Agent Cards — Grouped by Role */}
-      {roleGroups.map(({ role, agents: groupAgents }) => {
-        const roleDef = getRoleDef(role)
-        return (
-          <div key={role}>
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <RoleIcon iconName={roleDef.icon} className="w-3.5 h-3.5" color={roleDef.color} />
-              <h3 className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: roleDef.color + 'aa' }}>
-                {roleDef.label}{groupAgents.length > 1 ? 's' : ''}
-              </h3>
-              <span className="text-[10px] text-ghost-text-dim/40 font-mono">
-                {roleDef.description}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 gap-2">
-              <AnimatePresence>
-                {groupAgents.map(({ agent, rosterAgent, index }) => (
-                  <SwarmAgentCard
-                    key={agent.rosterId}
-                    agent={agent}
-                    rosterAgent={rosterAgent}
-                    index={index}
+      {/* Main body — fills remaining height */}
+      <div className="flex flex-1 min-h-0">
+        {/* Agent Rail — 48px left */}
+        <SwarmAgentRail
+          agents={displayAgents}
+          selectedAgentId={selectedAgentId}
+          onSelectAgent={handleSelectAgent}
+        />
+
+        {/* Center: Viewport + System Log */}
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* Main Viewport */}
+          <div className="flex-1 min-h-0 relative">
+            {viewMode === 'graph' && (
+              <SwarmInteractiveGraph
+                agents={displayAgents}
+                messages={activeSwarm.messages}
+                selectedAgentId={selectedAgentId}
+                selectedEdge={selectedEdge}
+                onSelectAgent={handleSelectAgent}
+                onSelectEdge={handleSelectEdge}
+                onDoubleClickAgent={handleJumpToTerminal}
+              />
+            )}
+
+            {viewMode === 'split' && (
+              <SwarmSplitPane
+                initialRatio={0.55}
+                top={
+                  <SwarmInteractiveGraph
+                    agents={displayAgents}
+                    messages={activeSwarm.messages}
+                    selectedAgentId={selectedAgentId}
+                    selectedEdge={selectedEdge}
+                    onSelectAgent={handleSelectAgent}
+                    onSelectEdge={handleSelectEdge}
+                    onDoubleClickAgent={handleJumpToTerminal}
                   />
-                ))}
-              </AnimatePresence>
-            </div>
+                }
+                bottom={
+                  <SwarmLiveTimeline
+                    messages={activeSwarm.messages}
+                    roster={activeSwarm.config.roster}
+                    onSelectAgent={handleSelectByLabel}
+                  />
+                }
+              />
+            )}
+
+            {viewMode === 'control' && (
+              <SwarmSplitPane
+                initialRatio={0.55}
+                top={
+                  <SwarmLiveTimeline
+                    messages={activeSwarm.messages}
+                    roster={activeSwarm.config.roster}
+                    onSelectAgent={handleSelectByLabel}
+                  />
+                }
+                bottom={
+                  <SwarmTaskKanban
+                    tasks={activeSwarm.tasks}
+                    roster={activeSwarm.config.roster}
+                  />
+                }
+              />
+            )}
+
+            {/* Empty state overlay */}
+            {activeSwarm.agents.length === 0 && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                <Activity className="w-5 h-5" style={{ color: 'rgba(255,255,255,0.1)' }} />
+                <p className="text-[10px] text-white/20 font-mono uppercase tracking-widest">
+                  Agents warming up...
+                </p>
+              </div>
+            )}
           </div>
-        )
-      })}
 
-      {/* Task Board */}
-      <SwarmTaskBoard tasks={activeSwarm.tasks} roster={activeSwarm.config.roster} />
+          {/* System Log — bottom */}
+          <SwarmSystemLog
+            swarmId={activeSwarm.id}
+            collapsed={systemLogCollapsed}
+            onToggleCollapse={() => setSystemLogCollapsed(!systemLogCollapsed)}
+          />
+        </div>
 
-      {/* Message Log */}
-      <SwarmMessageLog messages={activeSwarm.messages} roster={activeSwarm.config.roster} />
-    </motion.div>
+        {/* Right Panel — 260px */}
+        <SwarmRightPanel
+          swarm={activeSwarm}
+          agents={displayAgents}
+          selectedAgentId={selectedAgentId}
+          selectedEdge={selectedEdge}
+          onSelectAgent={handleSelectAgent}
+          onClearEdge={() => setSelectedEdge(null)}
+          onJumpToTerminal={handleJumpToTerminal}
+        />
+      </div>
+    </div>
   )
 }

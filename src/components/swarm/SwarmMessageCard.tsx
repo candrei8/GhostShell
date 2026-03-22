@@ -65,6 +65,18 @@ const TYPE_MAP: Record<SwarmMessage['type'], TypeMeta> = {
     badgeText: 'text-gray-400',
     barColor: 'bg-gray-400/40',
   },
+  interview: {
+    label: 'INTERVIEW',
+    badgeBg: 'bg-sky-400/10',
+    badgeText: 'text-sky-400',
+    barColor: 'bg-sky-400',
+  },
+  interview_response: {
+    label: 'IV REPLY',
+    badgeBg: 'bg-emerald-400/10',
+    badgeText: 'text-emerald-400',
+    barColor: 'bg-emerald-400',
+  },
 }
 
 // ─── Relative Time ──────────────────────────────────────────
