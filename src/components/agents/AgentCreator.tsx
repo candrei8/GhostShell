@@ -92,7 +92,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
         'gemini', geminiCfg,
       )
     } else if (templateProvider === 'codex') {
-      const codexCfg: CodexConfig = { model: resolveConfiguredModel(templateProvider), fullAuto: fullAutoMode, sandbox: codexSandbox }
+      const codexCfg: CodexConfig = { fullAuto: fullAutoMode, sandbox: codexSandbox }
       createAgent(
         template.name, template.avatar, template.avatar.color,
         {}, projectPath || undefined, template.id, selectedThread || undefined, true,
@@ -168,7 +168,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
             cwd: projectPath || undefined,
             templateId: template.id,
             provider: 'codex' as Provider,
-            codexConfig: { model: resolveConfiguredModel(templateProvider), fullAuto: fullAutoMode, sandbox: codexSandbox } as CodexConfig,
+            codexConfig: { fullAuto: fullAutoMode, sandbox: codexSandbox } as CodexConfig,
           }
         }
         return {
@@ -205,7 +205,7 @@ export function AgentCreator({ onClose }: AgentCreatorProps) {
         'gemini', geminiCfg,
       )
     } else if (provider === 'codex') {
-      const codexCfg: CodexConfig = { model: resolveConfiguredModel(provider), fullAuto: fullAutoMode, sandbox: codexSandbox }
+      const codexCfg: CodexConfig = { fullAuto: fullAutoMode, sandbox: codexSandbox }
       createAgent(
         name.trim(), selectedAvatar, selectedAvatar.color,
         {}, projectPath || undefined, undefined, selectedThread || undefined, true,

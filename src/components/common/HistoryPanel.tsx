@@ -14,7 +14,13 @@ export function HistoryPanel() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const filteredHistory = useMemo(
-    () => history.filter((entry) => entry.command.toLowerCase().includes(query.toLowerCase())),
+    () => history.filter((entry) => {
+      const normalizedQuery = query.toLowerCase()
+      return (
+        entry.command.toLowerCase().includes(normalizedQuery) ||
+        entry.cwd?.toLowerCase().includes(normalizedQuery)
+      )
+    }),
     [history, query],
   )
 
@@ -93,6 +99,7 @@ export function HistoryPanel() {
                   <p className="text-[11px] font-mono text-white/65 truncate group-hover:text-white/85">{entry.command}</p>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-white/20">
                     <span>{formatDuration(entry.timestamp)} ago</span>
+                    {entry.cwd && <span className="truncate max-w-[180px]">{entry.cwd}</span>}
                     {activeSessionId && (
                       <span className="rounded-md bg-[#38bdf8]/10 px-1 py-px text-[9px] text-[#38bdf8]/70 opacity-0 transition-opacity group-hover:opacity-100">
                         replay

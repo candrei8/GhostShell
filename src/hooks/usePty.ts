@@ -10,6 +10,8 @@ import { useSettingsStore, type NotificationTimingMode } from '../stores/setting
 import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel, getKnownContextWindow } from '../lib/providers'
 import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
 import { enhanceTerminalOutput } from '../lib/terminalOutputEnhancer'
+import { createTerminalImageLabelRegistry } from '../lib/terminalImageLabels'
+import { normalizeTerminalPasteText, shouldCaptureStructuredTextInsertion } from '../lib/terminalTextInput'
 import { SHORTCUT_EVENTS } from '../lib/shortcutEvents'
 import { Provider, SubAgentOutputLine } from '../lib/types'
 import { detectDomain } from '../lib/domain-detector'
@@ -59,7 +61,7 @@ const CLAUDE_WORKING_PATTERNS = [
   /\u2834/,
   /\u2826/,
   /\u2807/,
-  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
+  /\u280B|\u2819|\u2839|\u2838|\u283C|\u2834|\u2826|\u2827|\u2807|\u280F/,
   /Thinking/,
   /Reading/,
   /Writing/,
@@ -84,7 +86,7 @@ const GEMINI_AUTO_CONFIRM_PATTERNS = [
 ]
 
 const GEMINI_WORKING_PATTERNS = [
-  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,  // Braille spinner characters (reliable)
+  /\u280B|\u2819|\u2839|\u2838|\u283C|\u2834|\u2826|\u2827|\u2807|\u280F/, // Braille spinner characters (reliable)
   /\u280B|\u2819|\u2838|\u2834|\u2826|\u2807/, // More braille spinners
   /Generating\.\.\./,        // "Generating..." with ellipsis
   /Thinking\.\.\./,          // "Thinking..." with ellipsis
@@ -109,7 +111,7 @@ const CODEX_AUTO_CONFIRM_PATTERNS = [
 ]
 
 const CODEX_WORKING_PATTERNS = [
-  /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,  // Braille spinner characters
+  /\u280B|\u2819|\u2839|\u2838|\u283C|\u2834|\u2826|\u2827|\u2807|\u280F/, // Braille spinner characters
   /\u280B|\u2819|\u2838|\u2834|\u2826|\u2807/, // More braille spinners
   /Thinking/,
   /Reading/,
@@ -128,7 +130,7 @@ const NAMED_CLI_COMMAND_PROMPT = /(?:^|\n)(?:codex|gemini|claude)>\s*$/i
 const PLAIN_CLI_COMMAND_PROMPT = /(?:^|\n)>\s*$/
 const CONFIRMATION_CONTEXT_PATTERN = /\b(?:allow|deny|approve|permission|continue|proceed|confirm|bypass|fixed)\b/i
 
-// Detect "command not found" errors -- returns the binary name if matched, null otherwise
+// Detect "command not found" errors; returns the binary name if matched, null otherwise
 function detectCliNotFound(data: string): 'gemini' | 'claude' | 'codex' | null {
   // PowerShell patterns: "'gemini' is not recognized" / "'gemini' no se reconoce"
   const psMatch = data.match(/['"]?(gemini|claude|codex)['"]?\s*:\s*(?:.*(?:is not recognized|no se reconoce|CommandNotFoundException))/i)
@@ -337,6 +339,16 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     useCompanionStore.getState().initSession(sessionId)
     const cleanups: (() => void)[] = []
     const { setAgentStatus, getAgent, updateAgent } = useAgentStore.getState()
+    let cancelled = false
+    const hasLiveSession = () => !!useTerminalStore.getState().getSession(sessionId)
+    const withTerminal = (callback: (term: Terminal) => void) => {
+      if (cancelled) return
+      try {
+        callback(terminal)
+      } catch {
+        // Late PTY/xterm events can race with tab teardown.
+      }
+    }
 
     let lastDetectedCwd = cwd || ''
 
@@ -346,6 +358,15 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     const activityId = agentId || sessionId
     const agentName = agent?.name || session?.title || 'Terminal'
     let currentProvider: Provider = agent ? resolveProvider(agent) : session?.detectedProvider || 'claude'
+    const imageLabels = createTerminalImageLabelRegistry()
+
+    function quotePath(filePath: string): string {
+      return filePath.includes(' ') ? `"${filePath}"` : filePath
+    }
+
+    function isImagePath(filePath: string): boolean {
+      return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(filePath)
+    }
 
     function setStandaloneProvider(nextProvider: Provider) {
       if (agentId) return
@@ -376,6 +397,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     let completionCheckTimer: ReturnType<typeof setTimeout> | null = null
     let completionCandidateTail = ''
     let autoConfirmPendingUntil = 0
+    let nativeEnterSeenAt = 0
+    let plainEnterFallbackTimer: ReturnType<typeof setTimeout> | null = null
+    let suppressNextNativeEnter = false
+    let suppressNextNativeEnterUntil = 0
 
     function shortenCommand(command: string): string {
       const trimmed = command.trim().replace(/\s+/g, ' ')
@@ -427,6 +452,28 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         notifyCommandCompletion(completed)
       }
       return completed
+    }
+
+    function trackCommandSubmission(rawCommand: string) {
+      const command = rawCommand.trim()
+      if (!command) return
+
+      const detectedCommandProvider = detectProviderFromCommand(command)
+      if (detectedCommandProvider) {
+        setStandaloneProvider(detectedCommandProvider)
+      }
+
+      const sessionCwd =
+        useTerminalStore.getState().getSession(sessionId)?.cwd ||
+        lastDetectedCwd ||
+        cwd ||
+        ''
+
+      autoConfirmPendingUntil = 0
+      clearCompletionCheck()
+      registerPromptSubmission(sessionId, imageLabels.maskText(command), sessionCwd)
+      promptTail = ''
+      inputBuffer = ''
     }
 
     function scheduleCommandCompletionCheck(promptCandidate: string) {
@@ -663,18 +710,26 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
         // PTY -> Terminal
         const removeDataListener = window.ghostshell.ptyOnData(sessionId, (data) => {
+          if (cancelled || !hasLiveSession()) return
+
           clearCompletionCheck()
           // Report output for swarm heartbeat tracking + self-heal analysis
           reportAgentOutput(sessionId)
           feedAgentOutput(sessionId, data)
+          const maskedData = imageLabels.maskText(data)
           const outputEmphasis = useSettingsStore.getState().terminalOutputEmphasis
           const hasResolvedProvider = !!agentId || !!useTerminalStore.getState().getSession(sessionId)?.detectedProvider
-          const bypassOutputEnhancer = currentProvider === 'gemini'
+          const bypassOutputEnhancer = currentProvider === 'gemini' || currentProvider === 'codex'
           const displayData =
             outputEmphasis === 'off' || !hasResolvedProvider || bypassOutputEnhancer
-              ? data
-              : enhanceTerminalOutput(data, currentProvider, outputEmphasis)
-          const bufferBeforeWrite = terminal.buffer.active
+              ? maskedData
+              : enhanceTerminalOutput(maskedData, currentProvider, outputEmphasis)
+          let bufferBeforeWrite: Terminal['buffer']['active']
+          try {
+            bufferBeforeWrite = terminal.buffer.active
+          } catch {
+            return
+          }
           const savedViewportY = bufferBeforeWrite.viewportY
           const preserveViewport =
             currentProvider === 'gemini' &&
@@ -682,15 +737,24 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             bufferBeforeWrite.baseY - bufferBeforeWrite.viewportY > 1
 
           if (preserveViewport) {
-            terminal.write(displayData, () => {
-              const bufferAfterWrite = terminal.buffer.active
-              const targetViewportY = Math.min(savedViewportY, bufferAfterWrite.baseY)
-              if (bufferAfterWrite.viewportY !== targetViewportY) {
-                terminal.scrollToLine(targetViewportY)
-              }
+            withTerminal((term) => {
+              term.write(displayData, () => {
+                if (cancelled || !hasLiveSession()) return
+                try {
+                  const bufferAfterWrite = term.buffer.active
+                  const targetViewportY = Math.min(savedViewportY, bufferAfterWrite.baseY)
+                  if (bufferAfterWrite.viewportY !== targetViewportY) {
+                    term.scrollToLine(targetViewportY)
+                  }
+                } catch {
+                  // Ignore writes landing after tab teardown.
+                }
+              })
             })
           } else {
-            terminal.write(displayData)
+            withTerminal((term) => {
+              term.write(displayData)
+            })
           }
 
           // Buffer output for export
@@ -700,7 +764,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           }
           ;(window as unknown as Record<string, unknown>)[bufferKey] = outputBuffer
 
-          useCommandBlockStore.getState().appendOutput(sessionId, data)
+          useCommandBlockStore.getState().appendOutput(sessionId, maskedData)
           const normalizedForPrompt = stripAnsi(data)
             .replace(/\r\n/g, '\n')
             .replace(/\r/g, '\n')
@@ -713,11 +777,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           // Feed data to batch parser for activity detection
           batchParser.push(data)
 
-          accumulateCompanionOutput(data)
+          accumulateCompanionOutput(maskedData)
 
           // Accumulate output for active sub-agent
           if (lastSubAgentId) {
-            accumulateOutput(data)
+            accumulateOutput(maskedData)
           }
 
           // Track CWD from prompt output
@@ -782,11 +846,13 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               )
               if (agentId) {
                 setAgentStatus(agentId, 'error')
-                terminal.writeln('')
-                terminal.writeln(`\x1b[33m[GhostShell] ${label} CLI not found.\x1b[0m`)
-                terminal.writeln(`\x1b[33mRun this to install:\x1b[0m \x1b[36m${installCmd}\x1b[0m`)
-                terminal.writeln(`\x1b[33mOr go to Settings > AI Providers > Install\x1b[0m`)
-                terminal.writeln('')
+                withTerminal((term) => {
+                  term.writeln('')
+                  term.writeln(`\x1b[33m[GhostShell] ${label} CLI not found.\x1b[0m`)
+                  term.writeln(`\x1b[33mRun this to install:\x1b[0m \x1b[36m${installCmd}\x1b[0m`)
+                  term.writeln(`\x1b[33mOr go to Settings > AI Providers > Install\x1b[0m`)
+                  term.writeln('')
+                })
               }
             }
           }
@@ -844,6 +910,17 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           }
         }
 
+        const writeInjectedText = (text: string) => {
+          if (!text) return
+          const normalized = normalizeTerminalPasteText(text)
+          if (!normalized) return
+          if (terminal.modes.bracketedPasteMode) {
+            writeToPty(`\x1b[200~${normalized}\x1b[201~`, true)
+          } else {
+            writeToPty(normalized, true)
+          }
+        }
+
         const writeMultilineShortcutToSession = (targetSessionId: string): void => {
           const targetSession = useTerminalStore.getState().getSession(targetSessionId)
           const targetAgent = targetSession?.agentId
@@ -888,8 +965,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           }
 
           // Ctrl+V: Prevent xterm from sending \x16 (raw Ctrl+V control char) to PTY.
-          // Return false so the browser fires the native paste event, which our
-          // paste listener handles. This preserves Wispr Flow and OS-level paste tools.
+          // Return false so the browser fires the native paste event. Structured
+          // text insertion tools are handled separately via beforeinput/input.
           if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyV') {
             return false
           }
@@ -943,12 +1020,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           } else {
             navigator.clipboard.readText().then((text) => {
               if (text) {
-                const normalized = text.replace(/\r?\n/g, '\r')
-                if (terminal.modes.bracketedPasteMode) {
-                  writeToPty(`\x1b[200~${normalized}\x1b[201~`, true)
-                } else {
-                  writeToPty(normalized, true)
-                }
+                writeInjectedText(text)
               }
             }).catch(() => {})
           }
@@ -957,9 +1029,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           termEl.addEventListener('contextmenu', handleContextMenu)
           cleanups.push(() => termEl.removeEventListener('contextmenu', handleContextMenu))
 
-          // Paste event: intercept only for images, let text paste flow natively through xterm.
-          // This replaces the old Ctrl+V keydown interception that blocked Wispr Flow and
-          // similar tools that inject text via OS-level paste or input events.
+          // Paste event: images are handled by GhostShell, while text is still bridged
+          // through our PTY writer so bracketed paste stays consistent.
           const handlePaste = (e: ClipboardEvent) => {
             if (!e.clipboardData) return
             // Check for image data synchronously
@@ -976,37 +1047,114 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                     const buffer = await blob.arrayBuffer()
                     const filePath = await window.ghostshell.saveTempImage(buffer, mimeType)
                     if (filePath) {
-                      writeToPty(filePath, true)
-                      terminal.writeln(`\r\n\x1b[36m[Image saved: ${filePath}]\x1b[0m`)
+                      imageLabels.ensureLabel(filePath)
+                      writeToPty(quotePath(filePath), true)
                     }
                   } catch {
-                    // Silently fail -- clipboard permission may be denied
+                    // Silently fail; clipboard permission may be denied
                   }
                 })()
                 return
               }
             }
-            // Text paste: write to PTY manually and block xterm native handler.
-            // Normalize line endings (\r\n → \r, \n → \r) like xterm.js does internally
-            // in prepareTextForTerminal — terminals expect \r for Enter, not \r\n.
-            // Wrap with bracketed paste sequences when the application has enabled
-            // bracketed paste mode — this lets TUI apps (Claude CLI, Gemini CLI)
-            // know the input is a paste so they batch-process it instead of
-            // re-rendering character by character.
             const text = e.clipboardData.getData('text/plain')
             if (text) {
               e.preventDefault()
               e.stopPropagation()
-              const normalized = text.replace(/\r?\n/g, '\r')
-              if (terminal.modes.bracketedPasteMode) {
-                writeToPty(`\x1b[200~${normalized}\x1b[201~`, true)
-              } else {
-                writeToPty(normalized, true)
-              }
+              writeInjectedText(text)
             }
           }
           termEl.addEventListener('paste', handlePaste, true)
           cleanups.push(() => termEl.removeEventListener('paste', handlePaste, true))
+
+          const helperTextarea = termEl.querySelector('textarea')
+          let lastStructuredInsert = ''
+          let lastStructuredInsertAt = 0
+          const STRUCTURED_INSERT_DEDUPE_MS = 100
+          const ENTER_FALLBACK_DELAY_MS = 90
+
+          const handleStructuredInsert = (text: string) => {
+            if (!text) return
+            lastStructuredInsert = text
+            lastStructuredInsertAt = Date.now()
+            writeInjectedText(text)
+          }
+
+          const clearHelperTextarea = () => {
+            if (helperTextarea instanceof HTMLTextAreaElement) {
+              helperTextarea.value = ''
+            }
+          }
+
+          const handleBeforeInput = (e: Event) => {
+            if (!(e instanceof InputEvent)) return
+            const text = e.data || ''
+            if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) return
+
+            e.preventDefault()
+            e.stopPropagation()
+            e.stopImmediatePropagation()
+            clearHelperTextarea()
+            handleStructuredInsert(text)
+          }
+
+          const handleInput = (e: Event) => {
+            if (!(e instanceof InputEvent)) return
+            const fallbackText =
+              helperTextarea instanceof HTMLTextAreaElement
+                ? helperTextarea.value
+                : ''
+            const text = e.data || fallbackText
+            if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) return
+
+            const now = Date.now()
+            if (text === lastStructuredInsert && now - lastStructuredInsertAt < STRUCTURED_INSERT_DEDUPE_MS) {
+              e.stopPropagation()
+              e.stopImmediatePropagation()
+              clearHelperTextarea()
+              return
+            }
+
+            e.stopPropagation()
+            e.stopImmediatePropagation()
+            clearHelperTextarea()
+            handleStructuredInsert(text)
+          }
+
+          if (helperTextarea instanceof HTMLTextAreaElement) {
+            const handleHelperKeyDown = (e: KeyboardEvent) => {
+              if (e.isComposing) return
+              if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
+
+              const keydownAt = Date.now()
+              if (plainEnterFallbackTimer) {
+                clearTimeout(plainEnterFallbackTimer)
+              }
+
+              plainEnterFallbackTimer = setTimeout(() => {
+                plainEnterFallbackTimer = null
+                if (nativeEnterSeenAt >= keydownAt) return
+
+                // Fallback for cases where xterm's helper textarea receives Enter
+                // but onData never emits \r. This shows up as "typing still works,
+                // Enter stopped submitting" inside interactive CLIs.
+                const bufferedCommand = inputBuffer
+                trackCommandSubmission(bufferedCommand)
+                suppressNextNativeEnter = true
+                suppressNextNativeEnterUntil = Date.now() + 250
+                writeToPty('\r')
+              }, ENTER_FALLBACK_DELAY_MS)
+            }
+
+            helperTextarea.addEventListener('beforeinput', handleBeforeInput, true)
+            helperTextarea.addEventListener('input', handleInput, true)
+            helperTextarea.addEventListener('keydown', handleHelperKeyDown, true)
+            cleanups.push(() => {
+              helperTextarea.removeEventListener('beforeinput', handleBeforeInput, true)
+              helperTextarea.removeEventListener('input', handleInput, true)
+              helperTextarea.removeEventListener('keydown', handleHelperKeyDown, true)
+            })
+          }
 
           // Drag-and-drop: drop files/images onto terminal writes their path to PTY.
           // Handles OS files (have .path), web images (save to temp), and mixed drops.
@@ -1044,10 +1192,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               for (let i = 0; i < files.length; i++) {
                 const file = files[i] as File & { path?: string }
                 if (file.path) {
-                  // Electron file from OS -- has full system path
+                  // Electron file from OS; has full system path
                   paths.push(file.path)
                 } else if (file.type.startsWith('image/')) {
-                  // Web-dragged image (no OS path) -- save to temp
+                  // Web-dragged image (no OS path); save to temp
                   try {
                     const buffer = await file.arrayBuffer()
                     const savedPath = await window.ghostshell.saveTempImage(buffer, file.type)
@@ -1078,14 +1226,16 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               }
 
               if (paths.length > 0) {
-                // Quote paths with spaces, join with space
-                const text = paths.map((p) => p.includes(' ') ? `"${p}"` : p).join(' ')
-                writeToPty(text, true)
-                // Show feedback for saved images
-                const imageCount = paths.filter((p) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)).length
-                if (imageCount > 0) {
-                  terminal.writeln(`\r\n\x1b[36m[${imageCount} image${imageCount > 1 ? 's' : ''} dropped -> path${imageCount > 1 ? 's' : ''} sent to terminal]\x1b[0m`)
+                for (const path of paths) {
+                  if (isImagePath(path)) {
+                    imageLabels.ensureLabel(path)
+                  }
                 }
+
+                // Avoid writing local status lines into xterm. TUI CLIs like Codex
+                // render their own screen and can glitch if we inject extra output.
+                const text = paths.map((path) => quotePath(path)).join(' ')
+                writeToPty(text, true)
               }
             })()
           }
@@ -1108,23 +1258,20 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
           // Track command history on Enter
           if (data === '\r' || data === '\n') {
-            const command = inputBuffer.trim()
-            if (command) {
-              const detectedCommandProvider = detectProviderFromCommand(command)
-              if (detectedCommandProvider) {
-                setStandaloneProvider(detectedCommandProvider)
-              }
-              const sessionCwd =
-                useTerminalStore.getState().getSession(sessionId)?.cwd ||
-                lastDetectedCwd ||
-                cwd ||
-                ''
-              autoConfirmPendingUntil = 0
-              clearCompletionCheck()
-              registerPromptSubmission(sessionId, command, sessionCwd)
-              promptTail = ''
-              inputBuffer = ''
+            const now = Date.now()
+            nativeEnterSeenAt = now
+            if (plainEnterFallbackTimer) {
+              clearTimeout(plainEnterFallbackTimer)
+              plainEnterFallbackTimer = null
             }
+            if (suppressNextNativeEnter && now <= suppressNextNativeEnterUntil) {
+              suppressNextNativeEnter = false
+              suppressNextNativeEnterUntil = 0
+              return
+            }
+            suppressNextNativeEnter = false
+            suppressNextNativeEnterUntil = 0
+            trackCommandSubmission(inputBuffer)
           } else if (data === '\x7f') {
             inputBuffer = inputBuffer.slice(0, -1)
           } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
@@ -1156,9 +1303,15 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
         // Exit - set offline
         const removeExitListener = window.ghostshell.ptyOnExit(sessionId, (_exitCode) => {
-          terminal.writeln('\r\n\x1b[90m[Process exited]\x1b[0m')
-          flushCompanionOutput(true)
-          useCompanionStore.getState().addSystemMessage(sessionId, 'Process exited.', currentProvider)
+          if (cancelled) return
+
+          if (hasLiveSession()) {
+            withTerminal((term) => {
+              term.writeln('\r\n\x1b[90m[Process exited]\x1b[0m')
+            })
+            flushCompanionOutput(true)
+            useCompanionStore.getState().addSystemMessage(sessionId, 'Process exited.', currentProvider)
+          }
           finalizeActiveBlock('interrupted', false)
           cancelIdleCheck(activityId)
           lastWorkingPatternTime.delete(activityId)
@@ -1192,7 +1345,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
               const delays = [500, 1500, 3000]
               let attempt = 0
               const tryWrite = () => {
-                if (cancelled) return
+                if (cancelled || !hasLiveSession()) return
                 try {
                   window.ghostshell.ptyWrite(sessionId, cmd + '\r')
                   setAgentStatus(agentId, 'working')
@@ -1202,7 +1355,9 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                     setTimeout(tryWrite, delays[attempt] - delays[attempt - 1])
                   } else {
                     console.error('Auto-launch failed after retries:', err)
-                    terminal.writeln(`\r\n\x1b[33m[Auto-launch failed -- type the command manually: ${cmd}]\x1b[0m`)
+                    withTerminal((term) => {
+                      term.writeln(`\r\n\x1b[33m[Auto-launch failed - type the command manually: ${cmd}]\x1b[0m`)
+                    })
                   }
                 }
               }
@@ -1211,8 +1366,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           }
         }
       } catch (err) {
+        if (cancelled) return
         console.error('Failed to create PTY:', err)
-        terminal.writeln('\r\n\x1b[31m[Failed to create terminal process]\x1b[0m')
+        withTerminal((term) => {
+          term.writeln('\r\n\x1b[31m[Failed to create terminal process]\x1b[0m')
+        })
         useCompanionStore.getState().addSystemMessage(sessionId, 'Failed to create terminal process.', currentProvider)
         finalizeActiveBlock('error', false)
         if (agentId) {
@@ -1228,9 +1386,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     })
 
     // Defer PTY init to avoid double PTY creation in React StrictMode (dev mode).
-    // StrictMode unmounts immediately after first mount -- the cleanup cancels
+    // StrictMode unmounts immediately after first mount; the cleanup cancels
     // the timer before the PTY is ever created, so only the second mount wins.
-    let cancelled = false
     const initTimer = setTimeout(() => {
       if (!cancelled) init()
     }, 50)
@@ -1240,6 +1397,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       clearTimeout(initTimer)
       connectedRef.current = false
       clearCompletionCheck()
+      if (plainEnterFallbackTimer) {
+        clearTimeout(plainEnterFallbackTimer)
+        plainEnterFallbackTimer = null
+      }
       finalizeActiveBlock('interrupted', false)
       cancelIdleCheck(activityId)
       lastWorkingPatternTime.delete(activityId)

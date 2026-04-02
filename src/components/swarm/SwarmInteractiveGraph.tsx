@@ -6,6 +6,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } fr
 import type { SwarmAgentState, SwarmRosterAgent, SwarmMessage, SwarmAgentRole } from '../../lib/swarm-types'
 import { getRoleDef } from '../../lib/swarm-types'
 import { RoleIcon } from './swarm-icons'
+import { useSwarmStore } from '../../stores/swarmStore'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -233,6 +234,34 @@ export function SwarmInteractiveGraph({
   }, [messages, labelToRoster])
 
   const maxFlowCount = useMemo(() => Math.max(1, ...flows.map((f) => f.count)), [flows])
+
+  // ─── Activity halos (last activity per agent) ────────────
+
+  const activityFeed = useSwarmStore((s) => s.activityFeed)
+  const agentHalos = useMemo(() => {
+    const halos = new Map<string, { color: string; type: string }>()
+    // Look at last 50 events to find the most recent per agent
+    const recent = activityFeed.slice(-50)
+    for (const event of recent) {
+      const agentRosterId = agents.find(({ rosterAgent }, idx) => {
+        const roleDef = getRoleDef(rosterAgent.role)
+        const label = rosterAgent.customName || `${roleDef.label} ${idx + 1}`
+        return label === event.agentLabel
+      })?.agent.rosterId
+      if (!agentRosterId) continue
+      const haloColor =
+        event.type === 'file_write' || event.type === 'file_edit' ? '#f59e0b'
+        : event.type === 'file_read' ? '#38bdf8'
+        : event.type === 'command_run' ? '#34d399'
+        : event.type === 'tool_call' ? '#c084fc'
+        : event.type === 'search' ? '#8b5cf6'
+        : event.type === 'error' ? '#ef4444'
+        : event.type === 'thinking' ? 'rgba(255,255,255,0.15)'
+        : null
+      if (haloColor) halos.set(agentRosterId, { color: haloColor, type: event.type })
+    }
+    return halos
+  }, [activityFeed, agents])
 
   // ─── Initialize / update nodes ───────────────────────────
 
@@ -594,6 +623,28 @@ export function SwarmInteractiveGraph({
                   </circle>
                 )}
 
+                {/* Activity halo (shows what agent is currently doing) */}
+                {(() => {
+                  const halo = agentHalos.get(node.id)
+                  if (!halo || isActive) return null // don't double-render with pulse
+                  return (
+                    <circle
+                      r={node.radius + 5}
+                      fill="none"
+                      stroke={halo.color}
+                      strokeWidth={1}
+                      strokeDasharray="3 3"
+                      opacity={0.4}
+                    >
+                      <animate
+                        attributeName="opacity"
+                        values="0.4;0.1;0.4"
+                        dur="3s" repeatCount="indefinite"
+                      />
+                    </circle>
+                  )
+                })()}
+
                 {/* Selection / edge-highlight ring */}
                 {(isSelected || isEdgeNode) && (
                   <circle
@@ -765,6 +816,58 @@ export function SwarmInteractiveGraph({
           </div>
         ))}
       </div>
+
+      {/* Mini-map (top-right corner) */}
+      {nodes.length > 0 && (zoom !== 1 || pan.x !== 0 || pan.y !== 0) && (() => {
+        const MINI_W = 100
+        const MINI_H = 70
+        const minX = Math.min(...nodes.map((n) => n.x)) - 20
+        const maxX = Math.max(...nodes.map((n) => n.x)) + 40
+        const minY = Math.min(...nodes.map((n) => n.y)) - 20
+        const maxY = Math.max(...nodes.map((n) => n.y)) + 40
+        const rangeX = maxX - minX || 1
+        const rangeY = maxY - minY || 1
+        const scale = Math.min(MINI_W / rangeX, MINI_H / rangeY)
+
+        // Viewport rect in mini-map coords
+        const vpX = (-pan.x / zoom - minX) * scale
+        const vpY = (-pan.y / zoom - minY) * scale
+        const vpW = (dims.w / zoom) * scale
+        const vpH = (dims.h / zoom) * scale
+
+        return (
+          <div
+            className="absolute top-2 right-2"
+            style={{
+              width: MINI_W, height: MINI_H,
+              background: 'rgba(0,0,0,0.6)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 3,
+              overflow: 'hidden',
+              pointerEvents: 'none',
+            }}
+          >
+            <svg width={MINI_W} height={MINI_H}>
+              {/* Nodes as dots */}
+              {nodes.map((n) => (
+                <circle
+                  key={n.id}
+                  cx={(n.x - minX) * scale}
+                  cy={(n.y - minY) * scale}
+                  r={2}
+                  fill={getStatusColor(n.status)}
+                  opacity={0.7}
+                />
+              ))}
+              {/* Viewport rectangle */}
+              <rect
+                x={vpX} y={vpY} width={vpW} height={vpH}
+                fill="none" stroke="rgba(56,189,248,0.4)" strokeWidth={1}
+              />
+            </svg>
+          </div>
+        )
+      })()}
     </div>
   )
 }

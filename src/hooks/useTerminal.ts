@@ -40,6 +40,7 @@ export function useTerminal(
     matchBackground: '#94a3b830',
     activeMatchBackground: '#94a3b860',
   })
+  const appearanceProvider = provider === 'codex' ? undefined : provider
   const mounted = useRef(false)
   const fitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -141,7 +142,7 @@ export function useTerminal(
     const theme = settings.getTheme()
     const appearance = resolveAppearanceSafe(
       theme.terminalColors,
-      provider,
+      appearanceProvider,
       settings.cliVisualProfile,
       settings.cursorStyle,
       settings.cursorBlink,
@@ -296,7 +297,7 @@ export function useTerminal(
         const resolvedTheme = state.getTheme()
         const appearance = resolveAppearanceSafe(
           resolvedTheme.terminalColors,
-          provider,
+          appearanceProvider,
           state.cliVisualProfile,
           state.cursorStyle,
           state.cursorBlink,
@@ -338,7 +339,7 @@ export function useTerminal(
     const initialState = useSettingsStore.getState()
     const initialAppearance = resolveAppearanceSafe(
       initialState.getTheme().terminalColors,
-      provider,
+      appearanceProvider,
       initialState.cliVisualProfile,
       initialState.cursorStyle,
       initialState.cursorBlink,
@@ -354,7 +355,7 @@ export function useTerminal(
     try { terminal.refresh(0, terminal.rows - 1) } catch {}
 
     return unsub
-  }, [terminal, debouncedFit, provider])
+  }, [terminal, debouncedFit, appearanceProvider, provider])
 
   const searchNext = useCallback((query: string) => {
     const decorations = searchDecorationsRef.current

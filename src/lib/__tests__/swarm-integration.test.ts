@@ -547,23 +547,19 @@ describe('Mission Planner', () => {
     }
   })
 
-  it('falls back to local analysis when PTY creation fails', async () => {
-    // Mock PTY that never produces output
-    mockGhostshell.ptyCreate.mockResolvedValue({ success: true })
+  it('returns null analysis with error when PTY creation fails', async () => {
+    // Mock PTY that fails to create
+    mockGhostshell.ptyCreate.mockResolvedValue({ success: false, error: 'PTY creation failed' })
     mockGhostshell.ptyOnData.mockReturnValue(() => {})
     mockGhostshell.ptyOnExit.mockReturnValue(() => {})
     mockGhostshell.ptyWrite.mockImplementation(() => {})
 
-    // We cannot easily test the full timeout, so we test the failure path directly.
-    mockGhostshell.ptyCreate.mockResolvedValue({ success: false, error: 'PTY creation failed' })
-
     const { analyzeMission } = await import('../mission-planner')
     const result = await analyzeMission('Test', '/project')
 
-    expect(result.analysis).not.toBeNull()
+    expect(result.analysis).toBeNull()
     expect(result.error).toBeDefined()
-    expect(result.analysis?.source).toBe('fallback')
-    expect(result.analysis?.tasks.length).toBeGreaterThan(0)
+    expect(result.error).toContain('PTY')
   })
 
   it('PTY cleanup happens on success and failure', async () => {
@@ -575,6 +571,35 @@ describe('Mission Planner', () => {
     // ptyKill should be called during cleanup
     // (On creation failure, it may or may not be called depending on flow)
     // The key is no unhandled promise rejections
+  })
+
+  it('uses codex exec for codex mission analysis and finishes on command marker', async () => {
+    let dataCallback: ((data: string) => void) | null = null
+
+    mockGhostshell.ptyCreate.mockResolvedValue({ success: true })
+    mockGhostshell.ptyOnData.mockImplementation((_id: string, cb: (data: string) => void) => {
+      dataCallback = cb
+      return () => {}
+    })
+    mockGhostshell.ptyOnExit.mockReturnValue(() => {})
+    mockGhostshell.ptyWrite.mockImplementation(() => {
+      setTimeout(() => {
+        if (dataCallback) {
+          dataCallback('Error: config profile `hello` not found\n__GHOSTSHELL_MISSION_ANALYSIS_EXIT__1\n')
+        }
+      }, 10)
+    })
+
+    const { analyzeMission } = await import('../mission-planner')
+    const result = await analyzeMission('Analyze the swarm mission', '/project', undefined, 'codex')
+
+    expect(mockGhostshell.ptyWrite).toHaveBeenCalledTimes(1)
+    expect(mockGhostshell.ptyWrite.mock.calls[0][1]).toContain('codex')
+    expect(mockGhostshell.ptyWrite.mock.calls[0][1]).toContain(' exec -')
+    expect(mockGhostshell.ptyWrite.mock.calls[0][1]).not.toContain("codex' -p")
+    expect(result.analysis).toBeNull()
+    expect(result.error).toContain('CLI salio con codigo 1.')
+    expect(result.error).toContain('config profile')
   })
 })
 
@@ -1955,7 +1980,7 @@ describe('Swarm Types', () => {
     const { SWARM_WIZARD_STEPS } = await import('../swarm-types')
 
     expect(SWARM_WIZARD_STEPS).toEqual([
-      'mission', 'configure', 'launch',
+      'mission', 'configure', 'simulate', 'launch',
     ])
   })
 

@@ -321,16 +321,34 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
         }
       }
 
-      const previousIndex = currentWorkspaces.findIndex((w) => w.id === workspaceId)
-      const nextWorkspace = nextWorkspaces[Math.min(previousIndex, nextWorkspaces.length - 1)]
-      const nextSessionId = nextWorkspace.sessionIds[0] || null
+      let activeWorkspaceId = state.activeWorkspaceId
+      if (!activeWorkspaceId || activeWorkspaceId === workspaceId || !nextWorkspaces.some((w) => w.id === activeWorkspaceId)) {
+        const previousIndex = currentWorkspaces.findIndex(
+          (w) => w.id === state.activeWorkspaceId || w.id === workspaceId,
+        )
+        const fallbackIndex = previousIndex >= 0 ? Math.min(previousIndex, nextWorkspaces.length - 1) : nextWorkspaces.length - 1
+        activeWorkspaceId = nextWorkspaces[fallbackIndex].id
+      }
+
+      let activeSessionId = state.activeSessionId
+      if (!activeSessionId || removedIds.has(activeSessionId) || !sessions.some((s) => s.id === activeSessionId)) {
+        const activeWorkspace = activeWorkspaceId
+          ? nextWorkspaces.find((w) => w.id === activeWorkspaceId)
+          : undefined
+        activeSessionId = activeWorkspace?.sessionIds[0] || sessions[sessions.length - 1]?.id || null
+      } else if (activeWorkspaceId) {
+        const activeWorkspace = nextWorkspaces.find((w) => w.id === activeWorkspaceId)
+        if (activeWorkspace && !activeWorkspace.sessionIds.includes(activeSessionId)) {
+          activeSessionId = activeWorkspace.sessionIds[0] || activeSessionId
+        }
+      }
 
       return {
         sessions,
         groups,
-        activeWorkspaceId: nextWorkspace.id,
-        activeGroupId: getActiveGroupId(groups, nextWorkspace.id),
-        activeSessionId: nextSessionId,
+        activeWorkspaceId,
+        activeGroupId: getActiveGroupId(groups, activeWorkspaceId),
+        activeSessionId,
         maximizedSessionId: sessions.some((s) => s.id === state.maximizedSessionId)
           ? state.maximizedSessionId
           : null,

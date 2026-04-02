@@ -32,6 +32,7 @@ import type {
 } from '../lib/swarm-types'
 import type { MissionAnalysis, MissionPlannerStatus } from '../lib/mission-planner'
 import { getPersonasForRole } from '../lib/swarm-personas'
+import { createSnapshot } from '../lib/swarm-time-travel'
 import { getDefaultSkillIds } from '../lib/swarm-skills'
 import { electronStorage } from '../lib/electronStorage'
 import type { AgentRecoveryEvent } from '../lib/swarm-self-heal'
@@ -784,7 +785,7 @@ export const useSwarmStore = create<SwarmState>()(
           ),
         })),
 
-      updateTask: (swarmId, taskId, updates) =>
+      updateTask: (swarmId, taskId, updates) => {
         set((state) => ({
           swarms: state.swarms.map((s) =>
             s.id === swarmId
@@ -805,7 +806,15 @@ export const useSwarmStore = create<SwarmState>()(
                 }
               : s,
           ),
-        })),
+        }))
+        // Record time-travel snapshot on task status changes
+        if (updates.status) {
+          const swarm = get().swarms.find((s) => s.id === swarmId)
+          if (swarm) {
+            createSnapshot('task_change', swarm.agents, swarm.tasks, swarm.messages, get().conflicts, swarm.startedAt)
+          }
+        }
+      },
 
       addMessage: (swarmId, message) =>
         set((state) => ({
@@ -888,9 +897,11 @@ export const useSwarmStore = create<SwarmState>()(
 
       // ── Conflict detection ──────────────────────────────────
 
-      addConflict: (conflict) =>
+      addConflict: (conflict) => {
+        const wasNew = !get().conflicts.some(
+          (c) => c.filePath === conflict.filePath && c.swarmId === conflict.swarmId && c.status === 'active',
+        )
         set((state) => {
-          // Deduplicate: if a conflict for the same file+swarm is already active, update it
           const existing = state.conflicts.find(
             (c) => c.filePath === conflict.filePath && c.swarmId === conflict.swarmId && c.status === 'active',
           )
@@ -911,7 +922,15 @@ export const useSwarmStore = create<SwarmState>()(
           return {
             conflicts: [...state.conflicts.slice(-99), conflict],
           }
-        }),
+        })
+        // Snapshot on NEW conflict detection
+        if (wasNew) {
+          const swarm = get().swarms.find((s) => s.id === conflict.swarmId)
+          if (swarm) {
+            createSnapshot('conflict', swarm.agents, swarm.tasks, swarm.messages, get().conflicts, swarm.startedAt)
+          }
+        }
+      },
 
       resolveConflict: (id) =>
         set((state) => ({

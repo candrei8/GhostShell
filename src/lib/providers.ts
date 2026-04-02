@@ -8,6 +8,8 @@ export interface ModelDef {
   color: string
 }
 
+export const CODEX_CLI_DEFAULT_MODEL_ID = 'codex-cli-default'
+
 export const CLAUDE_MODELS: ModelDef[] = [
   { id: 'claude-opus-4-6', name: 'Opus 4.6', badge: 'Latest Known', color: '#f59e0b' },
   { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', badge: 'Stable', color: '#a855f7' },
@@ -22,11 +24,22 @@ export const GEMINI_MODELS: ModelDef[] = [
 ]
 
 export const CODEX_MODELS: ModelDef[] = [
-  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', badge: 'Recommended', color: '#10a37f' },
+  { id: CODEX_CLI_DEFAULT_MODEL_ID, name: 'Latest (CLI Default)', badge: 'Recommended', color: '#10a37f' },
+  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', badge: 'Legacy', color: '#0d8c6d' },
   { id: 'gpt-5.3-codex-spark', name: 'Codex Spark', badge: 'Fastest', color: '#19c37d' },
-  { id: 'codex-mini-latest', name: 'Codex Mini', badge: 'CLI Default', color: '#0d8c6d' },
+  { id: 'codex-mini-latest', name: 'Codex Mini', badge: 'Mini', color: '#0d8c6d' },
   { id: 'o3', name: 'o3', badge: 'Reasoning', color: '#6e44ff' },
 ]
+
+export function isCodexCliDefaultModel(modelId?: string): boolean {
+  if (!modelId) return false
+  const normalized = modelId.trim().toLowerCase()
+  return (
+    normalized === CODEX_CLI_DEFAULT_MODEL_ID
+    || normalized === 'auto'
+    || normalized === 'latest'
+  )
+}
 
 export function getModelsForProvider(provider: Provider): ModelDef[] {
   if (provider === 'gemini') return GEMINI_MODELS
@@ -48,6 +61,18 @@ export function resolveModelsForProvider(
   if (!trimmedSelectedModel) return baseModels
   if (baseModels.some((model) => model.id === trimmedSelectedModel)) return baseModels
 
+  if (provider === 'codex' && isCodexCliDefaultModel(trimmedSelectedModel)) {
+    return [
+      {
+        id: CODEX_CLI_DEFAULT_MODEL_ID,
+        name: 'Latest (CLI Default)',
+        badge: 'Recommended',
+        color: getProviderColor(provider),
+      },
+      ...baseModels,
+    ]
+  }
+
   return [
     {
       id: trimmedSelectedModel,
@@ -61,7 +86,7 @@ export function resolveModelsForProvider(
 
 export function getDefaultModel(provider: Provider): string {
   if (provider === 'gemini') return 'gemini-3-flash-preview'
-  if (provider === 'codex') return 'gpt-5.3-codex'
+  if (provider === 'codex') return CODEX_CLI_DEFAULT_MODEL_ID
   return 'claude-opus-4-6'
 }
 
@@ -164,10 +189,8 @@ export function buildCodexCommand(config: CodexConfig, resume?: boolean): string
   }
 
   const parts = [quoteCliToken(resolveCliCommand('codex'))]
-
-  if (config.model) {
-    parts.push('--model', config.model)
-  }
+  // Always let Codex CLI pick its default/latest model unless the user explicitly
+  // passes --model through customFlags.
 
   if (config.fullAuto) {
     parts.push('--full-auto')

@@ -1052,7 +1052,7 @@ function StepConfigure({ selectedProvider, setSelectedProvider }: { selectedProv
                     transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
                   />
                 </div>
-                <span className="font-mono text-[10px] text-white/30">Esto puede tomar hasta 90 segundos</span>
+                <span className="font-mono text-[10px] text-white/30">Esto suele tardar menos de 90 segundos</span>
               </div>
             )}
 

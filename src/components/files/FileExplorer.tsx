@@ -148,9 +148,7 @@ export function FileExplorer() {
   const addSession = useTerminalStore((s) => s.addSession)
   const {
     defaultProvider,
-    defaultModel,
     defaultGeminiModel,
-    defaultCodexModel,
     defaultSkipPermissions,
   } = useSettingsStore()
   const { createAgent } = useAgent()
@@ -302,7 +300,6 @@ export function FileExplorer() {
 
     if (defaultProvider === 'codex') {
       const codexConfig: CodexConfig = {
-        model: defaultCodexModel || getDefaultModel('codex'),
         fullAuto: defaultSkipPermissions,
         sandbox: 'workspace-write',
       }
@@ -338,9 +335,7 @@ export function FileExplorer() {
     )
   }, [
     createAgent,
-    defaultCodexModel,
     defaultGeminiModel,
-    defaultModel,
     defaultProvider,
     defaultSkipPermissions,
   ])

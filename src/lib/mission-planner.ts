@@ -26,6 +26,7 @@ export type MissionPlannerStatus = 'idle' | 'analyzing' | 'done' | 'error' | 'sk
 const ANALYSIS_TIMEOUT_MS = 300_000
 const GHOSTSWARM_DIR = '.ghostswarm'
 const PROMPT_FILENAME = 'mission-prompt.md'
+const COMMAND_COMPLETE_MARKER = '__GHOSTSHELL_MISSION_ANALYSIS_EXIT__'
 
 function buildAnalysisPrompt(mission: string, directory: string, codebaseContext?: string): string {
   const missionTrunc = mission.slice(0, 2000)
@@ -189,13 +190,55 @@ function quoteShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
 }
 
-function buildPromptCommand(promptAbsPath: string, cliCommand: string): string {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function extractCommandCompletion(output: string): { output: string; exitCode: number } | null {
+  const markerPattern = new RegExp(`${escapeRegExp(COMMAND_COMPLETE_MARKER)}(\\d+)`)
+  const match = markerPattern.exec(output)
+  if (!match) return null
+
+  const exitCode = Number.parseInt(match[1], 10)
+  if (Number.isNaN(exitCode)) return null
+
+  const cleaned = `${output.slice(0, match.index)}${output.slice(match.index + match[0].length)}`.trim()
+  return { output: cleaned, exitCode }
+}
+
+function buildProviderPromptInvocation(promptAbsPath: string, cliCommand: string, provider: Provider): string {
+  if (provider === 'claude') {
+    // -p is a boolean flag (print mode). The prompt goes as a positional argument,
+    // NOT via stdin pipe — piping to `claude -p` produces no output on Windows.
+    if (isWindows()) {
+      return `$p = Get-Content -Raw ${quotePowerShellLiteral(promptAbsPath)}; & ${quotePowerShellLiteral(cliCommand)} -p "$p"`
+    }
+    return `${quoteShellLiteral(cliCommand)} -p "$(cat ${quoteShellLiteral(promptAbsPath)})"`
+  }
+
+  if (provider === 'codex') {
+    if (isWindows()) {
+      return `Get-Content -Raw ${quotePowerShellLiteral(promptAbsPath)} | & ${quotePowerShellLiteral(cliCommand)} exec -`
+    }
+    return `cat ${quoteShellLiteral(promptAbsPath)} | ${quoteShellLiteral(cliCommand)} exec -`
+  }
+
   if (isWindows()) {
-    const npmGlobalBin = '$env:APPDATA + "\\npm"'
-    return `if (-not ($env:PATH -like "*npm*")) { $env:PATH = ${npmGlobalBin} + ";" + $env:PATH }; $p = Get-Content -Raw ${quotePowerShellLiteral(promptAbsPath)}; & ${quotePowerShellLiteral(cliCommand)} -p "$p"`
+    return `$p = Get-Content -Raw ${quotePowerShellLiteral(promptAbsPath)}; & ${quotePowerShellLiteral(cliCommand)} -p "$p"`
   }
 
   return `${quoteShellLiteral(cliCommand)} -p "$(cat ${quoteShellLiteral(promptAbsPath)})"`
+}
+
+function buildPromptCommand(promptAbsPath: string, cliCommand: string, provider: Provider): string {
+  const invocation = buildProviderPromptInvocation(promptAbsPath, cliCommand, provider)
+
+  if (isWindows()) {
+    const npmGlobalBin = '$env:APPDATA + "\\npm"'
+    return `if (-not ($env:PATH -like "*npm*")) { $env:PATH = ${npmGlobalBin} + ";" + $env:PATH }; $gsExit = 0; try { ${invocation}; if ($null -ne $LASTEXITCODE) { $gsExit = [int]$LASTEXITCODE } } catch { $gsExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 1 }; Write-Output ($_ | Out-String -Width 2000) }; Write-Output (${quotePowerShellLiteral(COMMAND_COMPLETE_MARKER)} + $gsExit)`
+  }
+
+  return `set +e; ${invocation}; gs_exit=$?; printf '%s%s\\n' ${quoteShellLiteral(COMMAND_COMPLETE_MARKER)} "$gs_exit"`
 }
 
 function normalizeMissionText(mission: string): string {
@@ -591,7 +634,7 @@ export async function analyzeMission(
   onStatus?.('analyzing')
 
   const fallback = (errorDetail?: string): AnalyzeResult => ({
-    analysis: buildFallbackAnalysis(mission, directory, codebaseContext),
+    analysis: null,
     error: errorDetail,
   })
 
@@ -612,20 +655,20 @@ export async function analyzeMission(
   try {
     const fileResult = await window.ghostshell.fsCreateFile(promptFilePath, prompt)
     if (fileResult && typeof fileResult === 'object' && 'success' in fileResult && !fileResult.success) {
-      onStatus?.('done')
+      onStatus?.('error')
       return fallback(`No se pudo escribir archivo de prompt: ${fileResult.error || 'Error desconocido'}`)
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[MissionPlanner] No se pudo escribir el archivo de prompt:', msg)
-    onStatus?.('done')
+    onStatus?.('error')
     return fallback(`No se pudo escribir archivo de prompt: ${msg}`)
   }
 
   try {
     const cliStatus = await window.ghostshell.cliGetVersion?.(configuredCliCommand)
     if (cliStatus && !cliStatus.installed) {
-      onStatus?.('done')
+      onStatus?.('error')
       return fallback(`CLI no disponible para ${effectiveProvider}: ${configuredCliCommand}`)
     }
   } catch {
@@ -654,7 +697,7 @@ export async function analyzeMission(
       const timeoutFallback = fallback(
         `Timeout tras ${elapsed}s esperando respuesta del CLI (limite: ${ANALYSIS_TIMEOUT_MS / 1000}s)`,
       )
-      finish(timeoutFallback.analysis, 'done', timeoutFallback.error)
+      finish(timeoutFallback.analysis, 'error', timeoutFallback.error)
     }, ANALYSIS_TIMEOUT_MS)
 
     const finishWithCleanup = (result: MissionAnalysis | null, status: MissionPlannerStatus, errorDetail?: string) => {
@@ -662,36 +705,53 @@ export async function analyzeMission(
       finish(result, status, errorDetail)
     }
 
-    const cliPromptCommand = buildPromptCommand(promptFilePath, configuredCliCommand)
+    const cliPromptCommand = buildPromptCommand(promptFilePath, configuredCliCommand, effectiveProvider)
 
-    const npmGlobalBin = isWindows()
-      ? `${(typeof process !== 'undefined' ? process.env?.APPDATA : '') || 'C:\\Users\\' + (typeof process !== 'undefined' ? process.env?.USERNAME : 'user') + '\\AppData\\Roaming'}\\npm`
-      : ''
-    const extraEnv: Record<string, string> = {}
-    if (npmGlobalBin) {
-      extraEnv.PATH = `${npmGlobalBin};${typeof process !== 'undefined' ? process.env?.PATH || '' : ''}`
-    }
-
+    // NOTE: Do NOT override env.PATH here — this runs in the renderer process
+    // where `process.env` is unavailable (contextIsolation: true). The PTY manager
+    // already inherits the full system PATH from the main process, and the
+    // PowerShell command includes an inline npm PATH fix as a safety net.
     void window.ghostshell.ptyCreate({
       id: ptyId,
       cwd: directory,
       cols: 200,
       rows: 50,
       provider: effectiveProvider,
-      env: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
     }).then((createResult) => {
       if (!createResult.success) {
         const ptyFallback = fallback(`No se pudo crear el PTY: ${createResult.error}`)
-        finishWithCleanup(ptyFallback.analysis, 'done', ptyFallback.error)
+        finishWithCleanup(ptyFallback.analysis, 'error', ptyFallback.error)
         return
       }
 
       cleanupData = window.ghostshell.ptyOnData(ptyId, (data: string) => {
         outputBuffer += data
-        const analysis = extractJsonFromOutput(stripAnsi(outputBuffer))
+        const stripped = stripAnsi(outputBuffer)
+        const analysis = extractJsonFromOutput(stripped)
         if (analysis) {
           finishWithCleanup(sanitizeAnalysis(analysis), 'done')
+          return
         }
+
+        const completion = extractCommandCompletion(stripped)
+        if (!completion) return
+
+        const completedAnalysis = extractJsonFromOutput(completion.output)
+        if (completedAnalysis) {
+          finishWithCleanup(sanitizeAnalysis(completedAnalysis), 'done')
+          return
+        }
+
+        const snippet = completion.output.trim().slice(0, 500)
+        let errorMsg = `CLI salio con codigo ${completion.exitCode}.`
+        if (snippet.length === 0) {
+          errorMsg += ` Sin salida. Comando enviado: ${cliPromptCommand}`
+        } else {
+          errorMsg += ` Salida: ${snippet}`
+        }
+
+        const completionFallback = fallback(errorMsg)
+        finishWithCleanup(completionFallback.analysis, 'error', completionFallback.error)
       })
 
       cleanupExit = window.ghostshell.ptyOnExit(ptyId, (exitCode: number) => {
@@ -713,14 +773,14 @@ export async function analyzeMission(
         }
 
         const exitFallback = fallback(errorMsg)
-        finishWithCleanup(exitFallback.analysis, 'done', exitFallback.error)
+        finishWithCleanup(exitFallback.analysis, 'error', exitFallback.error)
       })
 
       window.ghostshell.ptyWrite(ptyId, cliPromptCommand + '\r')
     }).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err)
       const createFallback = fallback(`Error al crear PTY: ${msg}`)
-      finishWithCleanup(createFallback.analysis, 'done', createFallback.error)
+      finishWithCleanup(createFallback.analysis, 'error', createFallback.error)
     })
   })
 }

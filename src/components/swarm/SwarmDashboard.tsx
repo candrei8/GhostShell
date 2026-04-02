@@ -13,9 +13,20 @@ import { SwarmAgentRail } from './SwarmAgentRail'
 import { SwarmInteractiveGraph, type SelectedEdge } from './SwarmInteractiveGraph'
 import { SwarmLiveTimeline } from './SwarmLiveTimeline'
 import { SwarmTaskKanban } from './SwarmTaskKanban'
+import { SwarmTaskPipeline } from './SwarmTaskPipeline'
 import { SwarmRightPanel } from './SwarmRightPanel'
 import { SwarmSystemLog } from './SwarmSystemLog'
 import { SwarmSplitPane } from './SwarmSplitPane'
+import { SwarmExecutionTimeline } from './SwarmExecutionTimeline'
+import { SwarmIntelligenceBar } from './SwarmIntelligenceBar'
+import { SwarmOperatorConsole } from './SwarmOperatorConsole'
+import { SwarmDeepInteraction } from './SwarmDeepInteraction'
+import { SwarmTimeTravelScrubber } from './SwarmTimeTravelScrubber'
+import { SwarmCostBreakdown } from './SwarmCostBreakdown'
+import { SwarmFileDiffViewer } from './SwarmFileDiffViewer'
+import { SwarmKnowledgeGraphView } from './SwarmKnowledgeGraphView'
+import { createSnapshot } from '../../lib/swarm-time-travel'
+import { loadGraph } from '../../lib/swarm-knowledge-graph'
 
 // ─── Prediction Tracker ─────────────────────────────────────
 
@@ -86,6 +97,12 @@ export function SwarmDashboard() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<SelectedEdge | null>(null)
   const [systemLogCollapsed, setSystemLogCollapsed] = useState(false)
+  const [knowledgeGraph, setKnowledgeGraph] = useState<Awaited<ReturnType<typeof loadGraph>> | null>(null)
+
+  // Load knowledge graph on mount (async, non-blocking)
+  useEffect(() => {
+    loadGraph().then(setKnowledgeGraph).catch(() => {})
+  }, [])
 
   // Coordinated selection: agent and edge are mutually exclusive
   const handleSelectAgent = useCallback((id: string | null) => {
@@ -98,13 +115,50 @@ export function SwarmDashboard() {
     if (edge) setSelectedAgentId(null)
   }, [])
 
-  // Tick timer (1s interval for timer re-renders)
+  // Tick timer (1s interval for timer re-renders + snapshot every 30s)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const tickCountRef = useRef(0)
   useEffect(() => {
     const isActive = activeSwarm && (activeSwarm.status === 'running' || activeSwarm.status === 'launching')
-    if (isActive) tickRef.current = setInterval(incrementTick, 1000)
+    if (isActive) {
+      tickRef.current = setInterval(() => {
+        incrementTick()
+        tickCountRef.current++
+        // Auto-snapshot every 30 ticks (30s)
+        if (tickCountRef.current % 30 === 0 && activeSwarm) {
+          createSnapshot(
+            'interval',
+            activeSwarm.agents,
+            activeSwarm.tasks,
+            activeSwarm.messages,
+            useSwarmStore.getState().conflicts,
+            activeSwarm.startedAt,
+          )
+        }
+      }, 1000)
+    }
     return () => { if (tickRef.current) clearInterval(tickRef.current) }
   }, [activeSwarm?.status, incrementTick])
+
+  // Auto-switch to 'deep' mode when swarm completes
+  const prevStatusRef = useRef(activeSwarm?.status)
+  useEffect(() => {
+    if (prevStatusRef.current !== 'completed' && activeSwarm?.status === 'completed') {
+      // Take final snapshot
+      if (activeSwarm) {
+        createSnapshot(
+          'task_change',
+          activeSwarm.agents,
+          activeSwarm.tasks,
+          activeSwarm.messages,
+          useSwarmStore.getState().conflicts,
+          activeSwarm.startedAt,
+        )
+      }
+      setViewMode('deep')
+    }
+    prevStatusRef.current = activeSwarm?.status
+  }, [activeSwarm?.status])
 
   // Roster map
   const rosterMap = useMemo(() => {
@@ -170,6 +224,9 @@ export function SwarmDashboard() {
         onStop={() => completeSwarm(activeSwarm.id)}
       />
 
+      {/* Intelligence Bar — always visible during execution */}
+      <SwarmIntelligenceBar swarm={activeSwarm} />
+
       {/* Prediction Tracker — only visible when simulation data exists */}
       {activeSwarm.simulation && (
         <PredictionTracker swarm={activeSwarm} />
@@ -226,25 +283,68 @@ export function SwarmDashboard() {
 
             {viewMode === 'control' && (
               <SwarmSplitPane
-                initialRatio={0.55}
+                initialRatio={0.45}
                 top={
-                  <SwarmLiveTimeline
+                  <SwarmExecutionTimeline
+                    agents={displayAgents}
                     messages={activeSwarm.messages}
-                    roster={activeSwarm.config.roster}
-                    onSelectAgent={handleSelectByLabel}
+                    tasks={activeSwarm.tasks}
+                    conflicts={useSwarmStore.getState().conflicts}
+                    simulation={activeSwarm.simulation}
+                    startedAt={activeSwarm.startedAt}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={handleSelectAgent}
                   />
                 }
                 bottom={
-                  <SwarmTaskKanban
+                  <SwarmTaskPipeline
                     tasks={activeSwarm.tasks}
                     roster={activeSwarm.config.roster}
+                    simulation={activeSwarm.simulation}
                   />
                 }
               />
             )}
 
+            {viewMode === 'timeline' && (
+              <div className="flex flex-col w-full h-full">
+                <div className="flex-1 min-h-0">
+                  <SwarmExecutionTimeline
+                    agents={displayAgents}
+                    messages={activeSwarm.messages}
+                    tasks={activeSwarm.tasks}
+                    conflicts={useSwarmStore.getState().conflicts}
+                    simulation={activeSwarm.simulation}
+                    startedAt={activeSwarm.startedAt}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={handleSelectAgent}
+                  />
+                </div>
+                <SwarmTimeTravelScrubber swarmStartedAt={activeSwarm.startedAt} />
+              </div>
+            )}
+
+            {viewMode === 'cost' && (
+              <SwarmCostBreakdown swarm={activeSwarm} />
+            )}
+
+            {viewMode === 'conflicts' && (
+              <SwarmFileDiffViewer
+                conflicts={useSwarmStore.getState().conflicts}
+                swarmId={activeSwarm.id}
+              />
+            )}
+
+            {viewMode === 'know' && (
+              <SwarmKnowledgeGraphView graph={knowledgeGraph} />
+            )}
+
+            {viewMode === 'deep' && (
+              <SwarmDeepInteraction swarm={activeSwarm} />
+            )}
+
             {/* Empty state overlay */}
-            {activeSwarm.agents.length === 0 && (
+            {activeSwarm.agents.length === 0 && viewMode !== 'deep' && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                 <Activity className="w-5 h-5" style={{ color: 'rgba(255,255,255,0.1)' }} />
                 <p className="text-[10px] text-white/20 font-mono uppercase tracking-widest">
@@ -254,15 +354,24 @@ export function SwarmDashboard() {
             )}
           </div>
 
-          {/* System Log — bottom */}
-          <SwarmSystemLog
-            swarmId={activeSwarm.id}
-            collapsed={systemLogCollapsed}
-            onToggleCollapse={() => setSystemLogCollapsed(!systemLogCollapsed)}
-          />
+          {/* Bottom: System Log + Operator Console */}
+          <div className="flex shrink-0" style={{ height: systemLogCollapsed ? 28 : 160, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+            <div className="flex-1 min-w-0">
+              <SwarmSystemLog
+                swarmId={activeSwarm.id}
+                collapsed={systemLogCollapsed}
+                onToggleCollapse={() => setSystemLogCollapsed(!systemLogCollapsed)}
+              />
+            </div>
+            {!systemLogCollapsed && (
+              <div className="shrink-0" style={{ width: 320, borderLeft: '1px solid rgba(255,255,255,0.04)' }}>
+                <SwarmOperatorConsole swarm={activeSwarm} agents={displayAgents} />
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Right Panel — 260px */}
+        {/* Right Panel — 300px */}
         <SwarmRightPanel
           swarm={activeSwarm}
           agents={displayAgents}

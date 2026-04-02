@@ -391,7 +391,7 @@ export function SwarmPlanStep() {
           <div className="text-center">
             <p className="text-[13px] text-white/80 font-mono font-bold mb-2">Analizando Mision...</p>
             <p className="text-[10px] text-white/40 font-mono">
-              Agente CLI temporal procesando la directiva. Esto puede tomar hasta 90 segundos.
+              Agente CLI temporal procesando la directiva. Esto suele tardar menos de 90 segundos.
             </p>
           </div>
 

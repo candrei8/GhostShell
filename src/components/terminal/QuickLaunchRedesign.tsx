@@ -545,7 +545,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
             const geminiConfig: GeminiConfig = { model, yolo }
             result = createAgent(name, avatar, avatar.color, {}, cwd, undefined, undefined, true, 'gemini', geminiConfig)
           } else if (p === 'codex') {
-            const codexConfig: CodexConfig = { model, fullAuto: yolo, sandbox: 'workspace-write' }
+            const codexConfig: CodexConfig = { fullAuto: yolo, sandbox: 'workspace-write' }
             result = createAgent(name, avatar, avatar.color, {}, cwd, undefined, undefined, true, 'codex', undefined, codexConfig)
           } else {
             const claudeConfig: ClaudeConfig = { dangerouslySkipPermissions: yolo }

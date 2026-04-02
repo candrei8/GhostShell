@@ -11,7 +11,7 @@ import type { Swarm } from '../../lib/swarm-types'
 import { SWARM_PIPELINE_STAGES } from '../../lib/swarm-types'
 import { deriveStage } from './SwarmPipeline'
 
-export type CommandCenterViewMode = 'graph' | 'split' | 'control'
+export type CommandCenterViewMode = 'graph' | 'split' | 'control' | 'timeline' | 'deep' | 'know' | 'cost' | 'conflicts'
 
 interface SwarmCommandBarProps {
   swarm: Swarm
@@ -28,10 +28,15 @@ const STAGE_LABELS: Record<string, string> = {
   monitor: 'MONITOR', report: 'REPORT', archive: 'ARCHIVE',
 }
 
-const VIEW_MODES: { id: CommandCenterViewMode; label: string }[] = [
+const VIEW_MODES: { id: CommandCenterViewMode; label: string; completedOnly?: boolean }[] = [
   { id: 'graph', label: 'GRAPH' },
   { id: 'split', label: 'SPLIT' },
   { id: 'control', label: 'CTRL' },
+  { id: 'timeline', label: 'TIME' },
+  { id: 'cost', label: 'COST' },
+  { id: 'conflicts', label: 'CONF' },
+  { id: 'know', label: 'KG' },
+  { id: 'deep', label: 'DEEP', completedOnly: true },
 ]
 
 export function SwarmCommandBar({
@@ -111,7 +116,9 @@ export function SwarmCommandBar({
 
       {/* CENTER: View Mode Toggle */}
       <div className="flex" style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' }}>
-        {VIEW_MODES.map((vm, i) => (
+        {VIEW_MODES
+          .filter((vm) => !vm.completedOnly || swarm.status === 'completed')
+          .map((vm, i) => (
           <button
             key={vm.id}
             onClick={() => onViewModeChange(vm.id)}
@@ -122,8 +129,8 @@ export function SwarmCommandBar({
               fontWeight: 700,
               fontFamily: 'monospace',
               textTransform: 'uppercase' as const,
-              background: viewMode === vm.id ? 'rgba(255,255,255,0.1)' : 'transparent',
-              color: viewMode === vm.id ? 'white' : 'rgba(255,255,255,0.3)',
+              background: viewMode === vm.id ? (vm.id === 'deep' ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.1)') : 'transparent',
+              color: viewMode === vm.id ? (vm.id === 'deep' ? '#c084fc' : 'white') : 'rgba(255,255,255,0.3)',
               border: 'none',
               borderLeft: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
               cursor: 'pointer',

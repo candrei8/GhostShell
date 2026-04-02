@@ -83,6 +83,7 @@ const PROVIDER_COLORS: Record<Provider, string> = {
   gemini: '#3b82f6',
   codex: '#10b981',
 }
+const CODEX_CLI_DEFAULT_MODEL_ID = 'codex-cli-default'
 
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
@@ -129,6 +130,22 @@ function pickOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
+function sanitizeCodexModel(value: unknown): string {
+  const trimmed = typeof value === 'string' ? value.trim() : ''
+  if (!trimmed) return CODEX_CLI_DEFAULT_MODEL_ID
+
+  const normalized = trimmed.toLowerCase()
+  if (
+    normalized === 'gpt-5.3-codex'
+    || normalized === 'auto'
+    || normalized === 'latest'
+  ) {
+    return CODEX_CLI_DEFAULT_MODEL_ID
+  }
+
+  return trimmed
+}
+
 function getFallbackAvatar(provider: Provider): AgentAvatarConfig {
   return {
     id: `preset-${provider}`,
@@ -140,7 +157,7 @@ function getFallbackAvatar(provider: Provider): AgentAvatarConfig {
 
 function getDefaultModelForProvider(provider: Provider): string {
   if (provider === 'gemini') return 'gemini-3-flash-preview'
-  if (provider === 'codex') return 'gpt-5.3-codex'
+  if (provider === 'codex') return CODEX_CLI_DEFAULT_MODEL_ID
   return 'claude-opus-4-6'
 }
 
@@ -263,7 +280,7 @@ function normalizePersistedSettings(persistedState: unknown) {
     geminiCliPath: pickTrimmedString(raw.geminiCliPath, 'gemini'),
     defaultGeminiModel: pickTrimmedString(raw.defaultGeminiModel, 'gemini-3-flash-preview'),
     codexCliPath: pickTrimmedString(raw.codexCliPath, 'codex'),
-    defaultCodexModel: pickTrimmedString(raw.defaultCodexModel, 'gpt-5.3-codex'),
+    defaultCodexModel: sanitizeCodexModel(raw.defaultCodexModel),
     lastAgentFolder: pickString(raw.lastAgentFolder, ''),
     restoreTabs: typeof raw.restoreTabs === 'boolean' ? raw.restoreTabs : true,
     muteNotifications: typeof raw.muteNotifications === 'boolean' ? raw.muteNotifications : false,
@@ -294,7 +311,7 @@ export const useSettingsStore = create<SettingsState>()(
       geminiCliPath: 'gemini',
       defaultGeminiModel: 'gemini-3-flash-preview',
       codexCliPath: 'codex',
-      defaultCodexModel: 'gpt-5.3-codex',
+      defaultCodexModel: CODEX_CLI_DEFAULT_MODEL_ID,
       lastAgentFolder: '',
       restoreTabs: true,
       muteNotifications: false,
@@ -347,7 +364,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'ghostshell-settings',
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => electronStorage),
       partialize: (state) => ({
         themeId: state.themeId,

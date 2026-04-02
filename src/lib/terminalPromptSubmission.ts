@@ -51,7 +51,7 @@ export function registerPromptSubmission(
   const sessionCwd = session?.cwd || fallbackCwd
   const agent = session?.agentId ? useAgentStore.getState().getAgent(session.agentId) : undefined
 
-  useHistoryStore.getState().addEntry(normalizedCommand, sessionId, agent?.name)
+  useHistoryStore.getState().addEntry(normalizedCommand, sessionId, agent?.name, sessionCwd)
   const blockId = useCommandBlockStore.getState().startBlock(sessionId, normalizedCommand, sessionCwd)
   useCompanionStore.getState().addUserMessage(sessionId, normalizedCommand)
   return blockId

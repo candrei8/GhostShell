@@ -6,6 +6,7 @@ import { useTerminalStore } from '../../stores/terminalStore'
 import { TerminalSearch } from './TerminalSearch'
 import { MultiLineInput } from './MultiLineInput'
 import { QuickLaunch } from './QuickLaunch'
+import { TerminalCommandBar } from './TerminalCommandBar'
 import { useAgentStore } from '../../stores/agentStore'
 import { useActivityStore } from '../../stores/activityStore'
 import { useCompanionStore } from '../../stores/companionStore'
@@ -63,6 +64,7 @@ export function TerminalPane({
   const [labelHovered, setLabelHovered] = useState(false)
   const [contextOpen, setContextOpen] = useState(outputViewMode === 'companion')
   const [multiLineOpen, setMultiLineOpen] = useState(false)
+  const showSmartInput = !session.agentId && session.sessionType !== 'ghostswarm'
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
   const providerColor = provider ? getProviderColor(provider) : '#e4e4e7'
@@ -461,28 +463,39 @@ export function TerminalPane({
 
       {/* Terminal Canvas */}
       <div className="flex min-h-0 flex-1 bg-transparent">
-        <div className="relative min-w-0 flex-1">
-          <div ref={setContainerEl} className="absolute inset-0" />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative min-h-0 flex-1">
+            <div ref={setContainerEl} className="absolute inset-0" />
 
-          {searchOpen && (
-            <div className="absolute top-2 right-4 z-20">
-              <TerminalSearch
-                isOpen={searchOpen}
-                onClose={handleSearchClose}
-                onSearchNext={searchNext}
-                onSearchPrev={searchPrev}
-                onClear={clearSearch}
+            {searchOpen && (
+              <div className="absolute top-2 right-4 z-20">
+                <TerminalSearch
+                  isOpen={searchOpen}
+                  onClose={handleSearchClose}
+                  onSearchNext={searchNext}
+                  onSearchPrev={searchPrev}
+                  onClear={clearSearch}
+                />
+              </div>
+            )}
+
+            {multiLineOpen && (
+              <MultiLineInput
+                onSubmit={handleMultiLineSubmit}
+                onClose={() => {
+                  setMultiLineOpen(false)
+                  setTimeout(() => terminal?.focus(), 50)
+                }}
               />
-            </div>
-          )}
+            )}
+          </div>
 
-          {multiLineOpen && (
-            <MultiLineInput
-              onSubmit={handleMultiLineSubmit}
-              onClose={() => {
-                setMultiLineOpen(false)
-                setTimeout(() => terminal?.focus(), 50)
-              }}
+          {showSmartInput && (
+            <TerminalCommandBar
+              sessionId={session.id}
+              cwd={session.cwd}
+              provider={provider}
+              isActive={!!isActive}
             />
           )}
         </div>

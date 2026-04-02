@@ -126,6 +126,16 @@ export function feedAgentOutput(terminalId: string, data: string): void {
   }
 }
 
+/**
+ * Get the last N lines of terminal output for a given terminal.
+ * Used by the Console tab in SwarmRightPanel for live output preview.
+ */
+export function getAgentOutputLines(terminalId: string, maxLines = 30): string[] {
+  const buffer = outputBuffers.get(terminalId)
+  if (!buffer) return []
+  return buffer.lines.slice(-maxLines)
+}
+
 // ─── Helpers ─────────────────────────────────────────────────
 
 function getAgentLabel(roster: SwarmRosterAgent[], globalIndex: number): string {
