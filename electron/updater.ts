@@ -83,13 +83,8 @@ function registerUpdaterListeners(): void {
     const message = error.message || String(error)
     log(`Update error: ${message}`)
 
-    if (isDownloading) {
-      isDownloading = false
-      send({ status: 'error', error: message, version: lastAvailableVersion })
-      return
-    }
-
-    send({ status: 'not-available' })
+    isDownloading = false
+    send({ status: 'error', error: message, version: lastAvailableVersion })
   })
 }
 
