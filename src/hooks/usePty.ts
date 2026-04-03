@@ -27,7 +27,10 @@ interface UsePtyOptions {
   shell?: string
   agentId?: string
   autoLaunch?: boolean
+  readOnly?: boolean
 }
+
+const SMART_INPUT_FOCUS_EVENT = 'ghostshell:focus-command-bar'
 
 // Detect CWD from PowerShell/bash prompt patterns
 const PS_CWD_REGEX = /PS\s+([A-Z]:\\[^\r\n>]*?)>/
@@ -236,6 +239,16 @@ function isLikelyPrompt(buffer: string, provider: Provider): boolean {
   return getCommandCompletionPromptPatterns(provider).some((pattern) => pattern.test(tail))
 }
 
+function isNativeShellPrompt(buffer: string): boolean {
+  const tail = buffer.replace(/\r/g, '').slice(-320)
+  if (!tail.trim()) return false
+  return POWERSHELL_COMMAND_PROMPT.test(tail) || POSIX_COMMAND_PROMPT.test(tail)
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 // Debounce timer for idle detection
 let idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
@@ -329,8 +342,13 @@ function cancelIdleCheck(activityId: string) {
   }
 }
 
-export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }: UsePtyOptions) {
+export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, readOnly = false }: UsePtyOptions) {
   const connectedRef = useRef(false)
+  const readOnlyRef = useRef(readOnly)
+
+  useEffect(() => {
+    readOnlyRef.current = readOnly
+  }, [readOnly])
 
   useEffect(() => {
     if (!terminal || connectedRef.current || !window.ghostshell) return
@@ -368,16 +386,21 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(filePath)
     }
 
-    function setStandaloneProvider(nextProvider: Provider) {
+    function setStandaloneProvider(nextProvider?: Provider) {
       if (agentId) return
       if (currentProvider === nextProvider && useTerminalStore.getState().getSession(sessionId)?.detectedProvider === nextProvider) {
         return
       }
-      currentProvider = nextProvider
+      currentProvider = nextProvider || 'claude'
       useTerminalStore.getState().updateSession(sessionId, { detectedProvider: nextProvider })
       useActivityStore.getState().updateContextMetrics(activityId, {
-        maxTokens: getKnownContextWindow(nextProvider),
+        maxTokens: nextProvider ? getKnownContextWindow(nextProvider) : 0,
       })
+    }
+
+    function isInteractiveProviderSession(): boolean {
+      if (agentId) return true
+      return !!useTerminalStore.getState().getSession(sessionId)?.detectedProvider
     }
 
     // Track active subagent IDs for completion detection
@@ -397,10 +420,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     let completionCheckTimer: ReturnType<typeof setTimeout> | null = null
     let completionCandidateTail = ''
     let autoConfirmPendingUntil = 0
-    let nativeEnterSeenAt = 0
-    let plainEnterFallbackTimer: ReturnType<typeof setTimeout> | null = null
-    let suppressNextNativeEnter = false
-    let suppressNextNativeEnterUntil = 0
+    let pendingDisplayEcho = ''
 
     function shortenCommand(command: string): string {
       const trimmed = command.trim().replace(/\s+/g, ' ')
@@ -415,6 +435,29 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         completionCheckTimer = null
       }
       completionCandidateTail = ''
+    }
+
+    function sanitizeReadOnlyDisplay(rawChunk: string): string {
+      if (!readOnlyRef.current || !rawChunk) return rawChunk
+
+      let nextChunk = rawChunk
+
+      if (pendingDisplayEcho) {
+        const echoPattern = new RegExp(
+          `(?:^|\\r?\\n)(?:PS [^\\n\\r>]*>\\s*|(?:codex|gemini|claude)>\\s*|>\\s*|(?:[^\\n\\r]+@[^:\\n\\r]+:)?[~\\/][^\\n\\r]*[$#]\\s*)?${escapeRegex(pendingDisplayEcho)}(?:\\r?\\n)?`,
+          'i',
+        )
+        const strippedEcho = nextChunk.replace(echoPattern, (match, offset) => (offset === 0 ? '' : '\n'))
+        if (strippedEcho !== nextChunk) {
+          nextChunk = strippedEcho
+          pendingDisplayEcho = ''
+        }
+      }
+
+      return nextChunk.replace(
+        /(?:\r?\n)?(?:PS [A-Z]:\\[^>\n\r]*>\s*|(?:[^\n\r]+@[^:\n\r]+:)?[~\/][^\n\r]*[$#]\s*|(?:codex|gemini|claude)>\s*|>\s*)$/i,
+        '',
+      )
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -447,6 +490,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
     ) {
       clearCompletionCheck()
       autoConfirmPendingUntil = 0
+      pendingDisplayEcho = ''
       const completed = useCommandBlockStore.getState().finishActiveBlock(sessionId, status)
       if (notify && completed) {
         notifyCommandCompletion(completed)
@@ -471,7 +515,9 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
       autoConfirmPendingUntil = 0
       clearCompletionCheck()
-      registerPromptSubmission(sessionId, imageLabels.maskText(command), sessionCwd)
+      const maskedCommand = imageLabels.maskText(command)
+      pendingDisplayEcho = maskedCommand.trim()
+      registerPromptSubmission(sessionId, maskedCommand, sessionCwd)
       promptTail = ''
       inputBuffer = ''
     }
@@ -717,13 +763,14 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           reportAgentOutput(sessionId)
           feedAgentOutput(sessionId, data)
           const maskedData = imageLabels.maskText(data)
+          const sanitizedDisplayData = sanitizeReadOnlyDisplay(maskedData)
           const outputEmphasis = useSettingsStore.getState().terminalOutputEmphasis
           const hasResolvedProvider = !!agentId || !!useTerminalStore.getState().getSession(sessionId)?.detectedProvider
           const bypassOutputEnhancer = currentProvider === 'gemini' || currentProvider === 'codex'
           const displayData =
             outputEmphasis === 'off' || !hasResolvedProvider || bypassOutputEnhancer
-              ? maskedData
-              : enhanceTerminalOutput(maskedData, currentProvider, outputEmphasis)
+              ? sanitizedDisplayData
+              : enhanceTerminalOutput(sanitizedDisplayData, currentProvider, outputEmphasis)
           let bufferBeforeWrite: Terminal['buffer']['active']
           try {
             bufferBeforeWrite = terminal.buffer.active
@@ -736,7 +783,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             !data.includes('\x1b') &&
             bufferBeforeWrite.baseY - bufferBeforeWrite.viewportY > 1
 
-          if (preserveViewport) {
+          if (displayData && preserveViewport) {
             withTerminal((term) => {
               term.write(displayData, () => {
                 if (cancelled || !hasLiveSession()) return
@@ -751,7 +798,7 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
                 }
               })
             })
-          } else {
+          } else if (displayData) {
             withTerminal((term) => {
               term.write(displayData)
             })
@@ -773,6 +820,13 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             setStandaloneProvider(detectedOutputProvider)
           }
           promptTail = (promptTail + normalizedForPrompt).slice(-320)
+
+          const standaloneProvider = !agentId
+            ? useTerminalStore.getState().getSession(sessionId)?.detectedProvider
+            : undefined
+          if (standaloneProvider && isNativeShellPrompt(promptTail)) {
+            setStandaloneProvider(undefined)
+          }
 
           // Feed data to batch parser for activity detection
           batchParser.push(data)
@@ -957,18 +1011,34 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
         }
 
         terminal.attachCustomKeyEventHandler((e) => {
-          // Shift+Enter: insert a new line via the provider's native multiline shortcut.
-          // Must block BOTH keydown AND keypress to prevent xterm from sending \r to the PTY.
-          if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
-            if (e.type === 'keydown') writeMultilineShortcut()
+          if (readOnlyRef.current) {
+            if (e.type !== 'keydown') return false
+
+            if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
+              const sel = terminal.getSelection()
+              if (sel) navigator.clipboard.writeText(sel)
+              return false
+            }
+
+            if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyC') {
+              const sel = terminal.getSelection()
+              if (sel) {
+                navigator.clipboard.writeText(sel)
+                terminal.clearSelection()
+              }
+              return false
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
+              terminal.selectAll()
+              return false
+            }
+
             return false
           }
 
-          // Claude and Codex occasionally stop emitting onData('\r') even though
-          // the helper textarea still receives Enter. Handle submit directly here
-          // so plain Enter remains reliable in those interactive CLIs.
           if (
-            (currentProvider === 'claude' || currentProvider === 'codex') &&
+            isInteractiveProviderSession() &&
             e.key === 'Enter' &&
             !e.shiftKey &&
             !e.ctrlKey &&
@@ -976,16 +1046,16 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             !e.metaKey
           ) {
             if (e.type === 'keydown' && !e.isComposing) {
-              nativeEnterSeenAt = Date.now()
-              if (plainEnterFallbackTimer) {
-                clearTimeout(plainEnterFallbackTimer)
-                plainEnterFallbackTimer = null
-              }
-              suppressNextNativeEnter = false
-              suppressNextNativeEnterUntil = 0
-              trackCommandSubmission(inputBuffer)
+              inputBuffer = ''
               writeToPty('\r')
             }
+            return false
+          }
+
+          // Shift+Enter: insert a new line via the provider's native multiline shortcut.
+          // Must block BOTH keydown AND keypress to prevent xterm from sending \r to the PTY.
+          if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'Enter') {
+            if (e.type === 'keydown') writeMultilineShortcut()
             return false
           }
 
@@ -1042,6 +1112,12 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           const sel = terminal.getSelection()
           if (sel) {
             navigator.clipboard.writeText(sel)
+          } else if (readOnlyRef.current) {
+            window.dispatchEvent(
+              new CustomEvent(SMART_INPUT_FOCUS_EVENT, {
+                detail: { sessionId },
+              }),
+            )
           } else {
             navigator.clipboard.readText().then((text) => {
               if (text) {
@@ -1057,6 +1133,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           // Paste event: images are handled by GhostShell, while text is still bridged
           // through our PTY writer so bracketed paste stays consistent.
           const handlePaste = (e: ClipboardEvent) => {
+            if (readOnlyRef.current) {
+              e.preventDefault()
+              e.stopPropagation()
+              return
+            }
             if (!e.clipboardData) return
             // Check for image data synchronously
             const items = e.clipboardData.items
@@ -1096,7 +1177,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           let lastStructuredInsert = ''
           let lastStructuredInsertAt = 0
           const STRUCTURED_INSERT_DEDUPE_MS = 100
-          const ENTER_FALLBACK_DELAY_MS = 90
 
           const handleStructuredInsert = (text: string) => {
             if (!text) return
@@ -1113,6 +1193,12 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
           const handleBeforeInput = (e: Event) => {
             if (!(e instanceof InputEvent)) return
+            if (readOnlyRef.current) {
+              e.preventDefault()
+              e.stopPropagation()
+              e.stopImmediatePropagation()
+              return
+            }
             const text = e.data || ''
             if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) return
 
@@ -1125,6 +1211,12 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
           const handleInput = (e: Event) => {
             if (!(e instanceof InputEvent)) return
+            if (readOnlyRef.current) {
+              e.stopPropagation()
+              e.stopImmediatePropagation()
+              clearHelperTextarea()
+              return
+            }
             const fallbackText =
               helperTextarea instanceof HTMLTextAreaElement
                 ? helperTextarea.value
@@ -1147,37 +1239,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           }
 
           if (helperTextarea instanceof HTMLTextAreaElement) {
-            const handleHelperKeyDown = (e: KeyboardEvent) => {
-              if (e.isComposing) return
-              if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
-
-              const keydownAt = Date.now()
-              if (plainEnterFallbackTimer) {
-                clearTimeout(plainEnterFallbackTimer)
-              }
-
-              plainEnterFallbackTimer = setTimeout(() => {
-                plainEnterFallbackTimer = null
-                if (nativeEnterSeenAt >= keydownAt) return
-
-                // Fallback for cases where xterm's helper textarea receives Enter
-                // but onData never emits \r. This shows up as "typing still works,
-                // Enter stopped submitting" inside interactive CLIs.
-                const bufferedCommand = inputBuffer
-                trackCommandSubmission(bufferedCommand)
-                suppressNextNativeEnter = true
-                suppressNextNativeEnterUntil = Date.now() + 250
-                writeToPty('\r')
-              }, ENTER_FALLBACK_DELAY_MS)
-            }
-
             helperTextarea.addEventListener('beforeinput', handleBeforeInput, true)
             helperTextarea.addEventListener('input', handleInput, true)
-            helperTextarea.addEventListener('keydown', handleHelperKeyDown, true)
             cleanups.push(() => {
               helperTextarea.removeEventListener('beforeinput', handleBeforeInput, true)
               helperTextarea.removeEventListener('input', handleInput, true)
-              helperTextarea.removeEventListener('keydown', handleHelperKeyDown, true)
             })
           }
 
@@ -1187,23 +1253,31 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
           let dragCounter = 0
           const paneEl = termEl.closest('[data-terminal-pane]') as HTMLElement | null
           const handleDragEnter = (e: DragEvent) => {
+            if (readOnlyRef.current) return
             e.preventDefault()
             e.stopPropagation()
             dragCounter++
             if (dragCounter === 1 && paneEl) paneEl.classList.add('drop-target')
           }
           const handleDragOver = (e: DragEvent) => {
+            if (readOnlyRef.current) return
             e.preventDefault()
             e.stopPropagation()
             if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
           }
           const handleDragLeave = (e: DragEvent) => {
+            if (readOnlyRef.current) return
             e.preventDefault()
             e.stopPropagation()
             dragCounter--
             if (dragCounter === 0 && paneEl) paneEl.classList.remove('drop-target')
           }
           const handleDrop = (e: DragEvent) => {
+            if (readOnlyRef.current) {
+              e.preventDefault()
+              e.stopPropagation()
+              return
+            }
             e.preventDefault()
             e.stopPropagation()
             dragCounter = 0
@@ -1279,24 +1353,17 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
 
         // Terminal -> PTY (with sync support + history tracking)
         const onDataDisposable = terminal.onData((data) => {
+          if (readOnlyRef.current) return
           const { syncInputsMode, sessions } = useTerminalStore.getState()
+          const shouldTrackShellPromptSubmission = !isInteractiveProviderSession()
 
           // Track command history on Enter
           if (data === '\r' || data === '\n') {
-            const now = Date.now()
-            nativeEnterSeenAt = now
-            if (plainEnterFallbackTimer) {
-              clearTimeout(plainEnterFallbackTimer)
-              plainEnterFallbackTimer = null
+            if (shouldTrackShellPromptSubmission) {
+              trackCommandSubmission(inputBuffer)
+            } else {
+              inputBuffer = ''
             }
-            if (suppressNextNativeEnter && now <= suppressNextNativeEnterUntil) {
-              suppressNextNativeEnter = false
-              suppressNextNativeEnterUntil = 0
-              return
-            }
-            suppressNextNativeEnter = false
-            suppressNextNativeEnterUntil = 0
-            trackCommandSubmission(inputBuffer)
           } else if (data === '\x7f') {
             inputBuffer = inputBuffer.slice(0, -1)
           } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
@@ -1422,10 +1489,6 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
       clearTimeout(initTimer)
       connectedRef.current = false
       clearCompletionCheck()
-      if (plainEnterFallbackTimer) {
-        clearTimeout(plainEnterFallbackTimer)
-        plainEnterFallbackTimer = null
-      }
       finalizeActiveBlock('interrupted', false)
       cancelIdleCheck(activityId)
       lastWorkingPatternTime.delete(activityId)

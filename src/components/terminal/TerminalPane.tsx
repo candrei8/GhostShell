@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
+import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { X, Terminal as TerminalIcon } from 'lucide-react'
 import { useTerminal } from '../../hooks/useTerminal'
 import { usePty } from '../../hooks/usePty'
@@ -18,6 +18,8 @@ import { ContextGauge } from '../agents/ContextGauge'
 import { TerminalContextPanel } from './TerminalContextPanel'
 import { hasContextMetrics } from '../../lib/contextMetrics'
 import { SHORTCUT_EVENTS } from '../../lib/shortcutEvents'
+
+const SMART_INPUT_FOCUS_EVENT = 'ghostshell:focus-command-bar'
 
 interface TerminalPaneProps {
   session: TerminalSession
@@ -59,12 +61,24 @@ export function TerminalPane({
 
   const sessionProvider = session.detectedProvider
   const provider = agent ? resolveProvider(agent) : sessionProvider
-  const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(containerEl, isActive, provider)
+  const showSmartInput = !session.agentId && session.sessionType !== 'ghostswarm' && !session.detectedProvider
+  const focusSmartInput = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent(SMART_INPUT_FOCUS_EVENT, {
+        detail: { sessionId: session.id },
+      }),
+    )
+  }, [session.id])
+  const { terminal, searchNext, searchPrev, clearSearch } = useTerminal(
+    containerEl,
+    isActive,
+    provider,
+    showSmartInput,
+  )
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const [labelHovered, setLabelHovered] = useState(false)
   const [contextOpen, setContextOpen] = useState(outputViewMode === 'companion')
   const [multiLineOpen, setMultiLineOpen] = useState(false)
-  const showSmartInput = !session.agentId && session.sessionType !== 'ghostswarm'
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
   const providerColor = provider ? getProviderColor(provider) : '#e4e4e7'
@@ -137,6 +151,7 @@ export function TerminalPane({
     shell: session.shell,
     agentId: session.agentId,
     autoLaunch: !!session.agentId && !session.skipAutoLaunch,
+    readOnly: showSmartInput,
   })
 
   const handleToggleSearch = useCallback(() => {
@@ -226,6 +241,10 @@ export function TerminalPane({
     }
 
     const handleFocusTerminal = () => {
+      if (showSmartInput) {
+        focusSmartInput()
+        return
+      }
       terminal.focus()
     }
 
@@ -246,7 +265,7 @@ export function TerminalPane({
       window.removeEventListener(SHORTCUT_EVENTS.copyPath, handleCopyPath as EventListener)
       window.removeEventListener(SHORTCUT_EVENTS.focusTerminal, handleFocusTerminal as EventListener)
     }
-  }, [isActive, terminal, session.cwd])
+  }, [focusSmartInput, isActive, session.cwd, showSmartInput, terminal])
 
   const handleMultiLineSubmit = useCallback(
     (text: string) => {
@@ -275,27 +294,47 @@ export function TerminalPane({
       }
       // Final Enter to submit
       window.ghostshell.ptyWrite(session.id, '\r')
-      // Re-focus terminal
-      setTimeout(() => terminal?.focus(), 50)
+      setTimeout(() => {
+        if (showSmartInput) {
+          focusSmartInput()
+        } else {
+          terminal?.focus()
+        }
+      }, 50)
     },
-    [session.id, terminal, agent, session.detectedProvider],
+    [session.id, terminal, agent, session.detectedProvider, showSmartInput, focusSmartInput],
   )
 
   const paneStyle = useMemo(() => ({
     background: '#0a0e18',
   }), [])
 
-  const handleQuickLaunchComplete = useCallback(() => {
+  const handleQuickLaunchComplete = () => {
     updateSession(session.id, { showQuickLaunch: false })
-  }, [session.id, updateSession])
+  }
+
+  const handleTerminalCanvasMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!showSmartInput) return
+    const target = event.target as HTMLElement | null
+    if (!target?.closest('.xterm')) return
+    event.preventDefault()
+    focusSmartInput()
+  }
 
   // If this session should show QuickLaunch, render it instead of terminal
   if (session.showQuickLaunch) {
     return (
       <div
         data-terminal-pane
-        className="relative flex h-full flex-col overflow-hidden bg-ghost-bg"
-        onClick={onClick}
+        data-smart-input-active={showSmartInput ? 'true' : undefined}
+        className="terminal-pane relative flex h-full flex-col overflow-hidden bg-ghost-bg"
+        onClick={(event) => {
+          onClick?.()
+          const target = event.target as HTMLElement | null
+          if (showSmartInput && !target?.closest('button,input,textarea,a,[role="button"]')) {
+            focusSmartInput()
+          }
+        }}
       >
         <QuickLaunch sessionId={session.id} onLaunched={handleQuickLaunchComplete} />
       </div>
@@ -305,9 +344,16 @@ export function TerminalPane({
   return (
     <div
       data-terminal-pane
-      className="relative flex h-full flex-col overflow-hidden"
+      data-smart-input-active={showSmartInput ? 'true' : undefined}
+      className="terminal-pane relative flex h-full flex-col overflow-hidden"
       style={paneStyle}
-      onClick={onClick}
+      onClick={(event) => {
+        onClick?.()
+        const target = event.target as HTMLElement | null
+        if (showSmartInput && !target?.closest('button,input,textarea,a,[role="button"]')) {
+          focusSmartInput()
+        }
+      }}
       onMouseEnter={() => setLabelHovered(true)}
       onMouseLeave={() => setLabelHovered(false)}
     >
@@ -464,7 +510,11 @@ export function TerminalPane({
       {/* Terminal Canvas */}
       <div className="flex min-h-0 flex-1 bg-transparent">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="relative min-h-0 flex-1">
+          <div
+            className="relative min-h-0 flex-1"
+            onMouseDownCapture={handleTerminalCanvasMouseDown}
+            onDoubleClickCapture={handleTerminalCanvasMouseDown}
+          >
             <div ref={setContainerEl} className="absolute inset-0" />
 
             {searchOpen && (
@@ -484,9 +534,19 @@ export function TerminalPane({
                 onSubmit={handleMultiLineSubmit}
                 onClose={() => {
                   setMultiLineOpen(false)
-                  setTimeout(() => terminal?.focus(), 50)
+                  setTimeout(() => {
+                    if (showSmartInput) {
+                      focusSmartInput()
+                    } else {
+                      terminal?.focus()
+                    }
+                  }, 50)
                 }}
               />
+            )}
+
+            {showSmartInput && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-14 bg-gradient-to-t from-[#0a0e18] to-transparent" />
             )}
           </div>
 

@@ -27,6 +27,7 @@ export function useTerminal(
   containerElement: HTMLDivElement | null,
   isActive?: boolean,
   provider?: Provider,
+  readOnly = false,
 ) {
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -166,6 +167,7 @@ export function useTerminal(
       minimumContrastRatio: 1,
       rightClickSelectsWord: true,
       scrollOnUserInput: true,
+      disableStdin: false,
     })
 
     const fitAddon = new FitAddon()
@@ -269,10 +271,19 @@ export function useTerminal(
         safeFit(true)
         // Force re-render all lines (fixes WebGL blank canvas after visibility change)
         try { terminal.refresh(0, terminal.rows - 1) } catch {}
-        // Focus terminal so keyboard input works immediately after tab switch
-        // Only steal focus if no input element is focused (respect search bar, rename input, etc.)
-        const active = document.activeElement
-        if (!active || active === document.body || active.closest('[data-terminal-pane]')) {
+        if (readOnly) return
+
+        // Focus terminal only when the pane doesn't already contain an editable control.
+        const pane = containerElement?.closest('[data-terminal-pane]') || null
+        const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const activeInsidePane = !!(pane && active && pane.contains(active))
+        const activeIsEditable = !!active && (
+          active instanceof HTMLInputElement ||
+          active instanceof HTMLTextAreaElement ||
+          active.isContentEditable
+        )
+
+        if (!active || active === document.body || (activeInsidePane && !activeIsEditable)) {
           try { terminal.focus() } catch {}
         }
       }))
@@ -282,7 +293,7 @@ export function useTerminal(
       rafs.forEach((r) => cancelAnimationFrame(r))
       timers.forEach((t) => clearTimeout(t))
     }
-  }, [isActive, terminal, safeFit])
+  }, [containerElement, isActive, readOnly, terminal, safeFit])
 
   // Live-sync settings changes to the terminal
   useEffect(() => {

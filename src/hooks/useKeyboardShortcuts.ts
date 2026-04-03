@@ -26,7 +26,7 @@ interface KeyboardShortcutsOptions {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
-  if (target.closest('.xterm')) return false
+  if (target.closest('.xterm')) return true
   if (target.closest('[data-allow-global-shortcuts="true"]')) return false
   if (target.closest('[contenteditable="true"]')) return true
 

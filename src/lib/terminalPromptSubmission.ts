@@ -25,6 +25,28 @@ function getNativeMultilineSequence(provider: Provider): string {
   return '\n'
 }
 
+function detectProviderFromCommand(command: string): Provider | null {
+  const tokens = command.trim().match(/"[^"]+"|'[^']+'|\S+/g)
+  if (!tokens || tokens.length === 0) return null
+
+  const candidates: string[] = []
+  if (/^(?:npx|pnpm|bunx|yarn)$/i.test(tokens[0]) && tokens[1]) {
+    candidates.push(tokens[1])
+  }
+  candidates.push(tokens[0])
+
+  for (const token of candidates) {
+    const normalized = token.replace(/^['"]|['"]$/g, '')
+    const base = normalized.split(/[\\/]/).pop() || normalized
+    const match = /^(claude|gemini|codex)(?:\.cmd|\.exe)?$/i.exec(base)
+    if (match) {
+      return match[1].toLowerCase() as Provider
+    }
+  }
+
+  return null
+}
+
 function writePrompt(sessionId: string, command: string, provider: Provider): void {
   const lines = command.split('\n')
 
@@ -50,6 +72,11 @@ export function registerPromptSubmission(
   const session = useTerminalStore.getState().getSession(sessionId)
   const sessionCwd = session?.cwd || fallbackCwd
   const agent = session?.agentId ? useAgentStore.getState().getAgent(session.agentId) : undefined
+  const detectedProvider = !agent ? detectProviderFromCommand(normalizedCommand) : null
+
+  if (!agent && detectedProvider) {
+    useTerminalStore.getState().updateSession(sessionId, { detectedProvider })
+  }
 
   useHistoryStore.getState().addEntry(normalizedCommand, sessionId, agent?.name, sessionCwd)
   const blockId = useCommandBlockStore.getState().startBlock(sessionId, normalizedCommand, sessionCwd)

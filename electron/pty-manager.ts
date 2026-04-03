@@ -134,10 +134,10 @@ export class PtyManager {
     }
 
     if (platform() === 'win32') {
-      pushPlan(preferredShell, preferredCwd, { useConpty: true })
       pushPlan(preferredShell, preferredCwd, { useConpty: false })
-      pushPlan(fallbackShell, fallbackCwd, { useConpty: true })
+      pushPlan(preferredShell, preferredCwd, { useConpty: true })
       pushPlan(fallbackShell, fallbackCwd, { useConpty: false })
+      pushPlan(fallbackShell, fallbackCwd, { useConpty: true })
       return plans
     }
 

@@ -65,6 +65,20 @@
   flex: 1;
 }
 
+.terminal-pane[data-smart-input-active='true'] .xterm-helper-textarea,
+.terminal-pane[data-smart-input-active='true'] .xterm-helpers textarea {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.terminal-pane[data-smart-input-active='true'] .xterm-cursor-layer {
+  opacity: 0;
+}
+
+.terminal-pane[data-smart-input-active='true'] .xterm-screen {
+  cursor: default;
+}
+
 /* Drop zone indicator */
 [data-terminal-pane].drop-target {
   position: relative;

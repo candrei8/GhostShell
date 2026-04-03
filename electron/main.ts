@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { promises as fs, rmSync } from 'fs'
+import { mkdirSync, promises as fs, rmSync } from 'fs'
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { isAbsolute, join, normalize, resolve as pathResolve } from 'path'
@@ -43,13 +43,28 @@ app.commandLine.appendSwitch('enable-zero-copy')
 app.commandLine.appendSwitch('high-dpi-support', '1')
 app.commandLine.appendSwitch('force-device-scale-factor', '1')
 
-// Fix GPU disk cache "Access denied" errors on Windows.
-// Chromium tries to move/rename the old cache dir on startup; stale lock files
-// from a previous process cause EPERM (0x5).  Purging the directory synchronously
-// before GPU init avoids the error entirely.
-const gpuCacheDir = join(app.getPath('userData'), 'GPUCache')
+// Keep Chromium cache/session data in a dedicated location.
+// In dev on Windows, Chromium can fail to move the default cache when a prior
+// helper process still holds a lock. A per-process sessionData directory avoids
+// that contention and removes the noisy GPU cache access-denied errors.
+const sessionDataDir = is.dev
+  ? join(app.getPath('temp'), 'GhostShell-dev', `session-${process.pid}`)
+  : join(app.getPath('userData'), 'session-data')
+const diskCacheDir = join(sessionDataDir, 'Cache')
+const gpuCacheDir = join(sessionDataDir, 'GPUCache')
+try {
+  mkdirSync(sessionDataDir, { recursive: true })
+} catch {
+  // Best effort only.
+}
+
+if (is.dev) {
+  try { rmSync(diskCacheDir, { recursive: true, force: true }) } catch {}
+  try { rmSync(gpuCacheDir, { recursive: true, force: true }) } catch {}
+}
 try { rmSync(gpuCacheDir, { recursive: true, force: true }) } catch { /* may be locked by current process — harmless */ }
-app.commandLine.appendSwitch('disk-cache-dir', join(app.getPath('userData'), 'Cache'))
+app.setPath('sessionData', sessionDataDir)
+app.commandLine.appendSwitch('disk-cache-dir', diskCacheDir)
 app.commandLine.appendSwitch('gpu-disk-cache-dir', gpuCacheDir)
 
 function isProvider(value: string): value is Provider {

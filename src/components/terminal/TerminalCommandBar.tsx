@@ -6,7 +6,6 @@ import {
   GitBranch,
   Package2,
   Search,
-  Sparkles,
   TerminalSquare,
 } from 'lucide-react'
 import { smartTruncatePath } from '../../lib/formatUtils'
@@ -65,6 +64,7 @@ const RECOMMENDED_SCRIPT_CANDIDATES = [
   'check-types',
 ] as const
 const EMPTY_COMMAND_BLOCKS: CommandBlock[] = []
+const SMART_INPUT_FOCUS_EVENT = 'ghostshell:focus-command-bar'
 
 function quoteShellPath(path: string): string {
   if (!/[\s"]/u.test(path)) return path
@@ -359,6 +359,41 @@ function filterSuggestionItems(items: SuggestionItem[], query: string, limit: nu
     .map((entry) => entry.item)
 }
 
+function dedupeSuggestionItems(items: SuggestionItem[]): SuggestionItem[] {
+  const seen = new Set<string>()
+
+  return items.filter((item) => {
+    const key = item.insertValue.trim().toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function findPrefixSuggestion(items: SuggestionItem[], input: string): SuggestionItem | null {
+  const normalizedInput = input.trim()
+  if (!normalizedInput) return null
+
+  const lowerInput = normalizedInput.toLowerCase()
+
+  return items.find((item) => {
+    const candidate = item.insertValue.trim()
+    return candidate.length > normalizedInput.length && candidate.toLowerCase().startsWith(lowerInput)
+  }) || null
+}
+
+function getSuggestionBadgeLabel(item: SuggestionItem | null): string {
+  if (!item) return ''
+  if (item.kind === 'command') return 'history'
+  return item.tag || item.kind
+}
+
+function getSuggestionSuffix(suggestion: SuggestionItem | null, input: string): string {
+  if (!suggestion) return ''
+  if (!input) return suggestion.insertValue
+  return suggestion.insertValue.slice(input.length)
+}
+
 function buildPathSuggestion(
   pathEntry: PathHistoryEntry,
   input: string,
@@ -398,10 +433,75 @@ function buildFsPathSuggestion(
   }
 }
 
+function buildStaticPathSuggestion(
+  id: string,
+  title: string,
+  subtitle: string,
+  preview: string,
+  insertValue: string,
+): SuggestionItem {
+  return {
+    id,
+    kind: 'path',
+    title,
+    subtitle,
+    preview,
+    insertValue,
+    tag: 'path',
+  }
+}
+
+async function resolvePathBase(fragment: string, cwd: string): Promise<string | null> {
+  const api = getGhostshellApi()
+  const normalizedFragment = fragment.trim() || '.'
+
+  if (api?.shellResolvePath) {
+    try {
+      const resolved = await api.shellResolvePath(normalizedFragment, cwd)
+      if (resolved.success && resolved.path) return resolved.path
+    } catch {
+      // Fall back to a lightweight renderer-side resolution.
+    }
+  }
+
+  if (normalizedFragment === '.') return cwd
+  if (normalizedFragment === '..') return getParentDirectory(cwd) || cwd
+
+  if (normalizedFragment === '~' || normalizedFragment.startsWith('~/') || normalizedFragment.startsWith('~\\')) {
+    try {
+      const homeDir = await api?.shellGetHomedir?.()
+      if (!homeDir) return cwd
+      if (normalizedFragment === '~') return homeDir
+      return joinPath(homeDir, normalizedFragment.slice(2))
+    } catch {
+      return cwd
+    }
+  }
+
+  if (normalizedFragment.startsWith('../') || normalizedFragment.startsWith('..\\')) {
+    let remaining = normalizedFragment
+    let basePath = cwd
+
+    while (remaining.startsWith('../') || remaining.startsWith('..\\')) {
+      basePath = getParentDirectory(basePath) || basePath
+      remaining = remaining.slice(3)
+    }
+
+    return remaining ? joinPath(basePath, remaining) : basePath
+  }
+
+  if (normalizedFragment.startsWith('./') || normalizedFragment.startsWith('.\\')) {
+    return joinPath(cwd, normalizedFragment.slice(2))
+  }
+
+  if (isAbsolutePath(normalizedFragment)) return normalizedFragment
+  return joinPath(cwd, normalizedFragment)
+}
+
 async function resolvePathSuggestions(input: string, cwd: string): Promise<FileEntry[]> {
   const command = detectPathCommand(input)
   const api = getGhostshellApi()
-  if (!command || !api?.shellResolvePath || !api.fsReadDir) return []
+  if (!command || !api?.fsReadDir) return []
 
   const rawQuery = getPathQuery(input)
   const normalizedQuery = rawQuery.replace(/\\/g, '/')
@@ -415,10 +515,10 @@ async function resolvePathSuggestions(input: string, cwd: string): Promise<FileE
   const partial = endsWithSlash ? '' : lastSlash >= 0 ? normalizedQuery.slice(lastSlash + 1) : normalizedQuery
 
   try {
-    const resolvedParent = await api.shellResolvePath(parentFragment || '.', cwd)
-    if (!resolvedParent.success || !resolvedParent.path) return []
+    const resolvedParentPath = await resolvePathBase(parentFragment || '.', cwd)
+    if (!resolvedParentPath) return []
 
-    const entries = await api.fsReadDir(resolvedParent.path)
+    const entries = await api.fsReadDir(resolvedParentPath)
     return entries
       .filter((entry) => (command.toLowerCase() === 'cd' ? entry.isDirectory : true))
       .filter((entry) => {
@@ -527,21 +627,14 @@ export function TerminalCommandBar({
   const [mode, setMode] = useState<CommandBarMode>('none')
   const [fsPathSuggestions, setFsPathSuggestions] = useState<FileEntry[]>([])
   const [repoContext, setRepoContext] = useState<RepoContext | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const restoreInputRef = useRef('')
 
   const isHistoryMode = mode === 'history'
   const isPaletteMode = mode === 'palette'
   const isSearchMode = mode !== 'none'
-
-  const recentCommands = useMemo(
-    () => getCommandSuggestions('', cwd, 3),
-    [cwd, getCommandSuggestions],
-  )
-  const recentPaths = useMemo(
-    () => getRecentPaths('', 3).filter((entry) => entry.path !== cwd),
-    [cwd, getRecentPaths],
-  )
+  const hasPathCommand = !!detectPathCommand(input)
+  const pathQuery = useMemo(() => getPathQuery(input), [input])
 
   const historySuggestions = useMemo(
     () => getCommandSuggestions(input, cwd, isHistoryMode ? 12 : input.trim() ? 6 : 4).map(buildCommandSuggestion),
@@ -549,16 +642,51 @@ export function TerminalCommandBar({
   )
 
   const storedPathSuggestions = useMemo(() => {
-    if (isSearchMode) return []
-    return getRecentPaths(getPathQuery(input).toLowerCase(), input.trim() ? 5 : 3)
+    if (isSearchMode || !hasPathCommand) return []
+    return getRecentPaths(pathQuery.toLowerCase(), input.trim() ? 5 : 3)
       .filter((entry) => entry.path !== cwd)
       .map((entry) => buildPathSuggestion(entry, input, cwd))
-  }, [cwd, getRecentPaths, input, isSearchMode])
+  }, [cwd, getRecentPaths, hasPathCommand, input, isSearchMode, pathQuery])
 
   const liveFsSuggestions = useMemo(() => {
-    if (isSearchMode) return []
+    if (isSearchMode || !hasPathCommand) return []
     return fsPathSuggestions.map((entry) => buildFsPathSuggestion(entry, input, cwd))
-  }, [cwd, fsPathSuggestions, input, isSearchMode])
+  }, [cwd, fsPathSuggestions, hasPathCommand, input, isSearchMode])
+
+  const fallbackPathSuggestions = useMemo(() => {
+    if (isSearchMode || !hasPathCommand || pathQuery.trim()) return []
+
+    const pathCommand = detectPathCommand(input) || 'cd'
+    const suggestions: SuggestionItem[] = []
+    const parentDirectory = getParentDirectory(cwd)
+
+    if (parentDirectory && !pathsEqual(parentDirectory, cwd)) {
+      suggestions.push(
+        buildStaticPathSuggestion(
+          `path-parent-${cwd}`,
+          '../',
+          'parent directory',
+          parentDirectory,
+          `${pathCommand} ..`,
+        ),
+      )
+    }
+
+    if (repoContext?.packageRoot && !pathsEqual(repoContext.packageRoot, cwd)) {
+      const relativeRoot = relativePath(cwd, repoContext.packageRoot)
+      suggestions.push(
+        buildStaticPathSuggestion(
+          `path-root-${repoContext.packageRoot}`,
+          smartTruncatePath(repoContext.packageRoot, 44),
+          'project root',
+          repoContext.packageRoot,
+          `${pathCommand} ${quoteShellPath(relativeRoot === '.' ? './' : relativeRoot)}`,
+        ),
+      )
+    }
+
+    return suggestions
+  }, [cwd, hasPathCommand, input, isSearchMode, pathQuery, repoContext])
 
   const repoRecommendations = useMemo(
     () => buildRepoRecommendations(repoContext, cwd),
@@ -590,29 +718,62 @@ export function TerminalCommandBar({
     [blocksForSession, input],
   )
 
-  const suggestions = useMemo(() => {
-    const seen = new Set<string>()
+  const searchSuggestions = useMemo(() => {
     const candidates = isPaletteMode
       ? [...paletteRecommendationSuggestions, ...blockSuggestions, ...historySuggestions, ...palettePathSuggestions]
       : isHistoryMode
         ? historySuggestions
-        : [...historySuggestions, ...liveFsSuggestions, ...storedPathSuggestions]
+        : []
 
-    return candidates.filter((item) => {
-      if (seen.has(item.insertValue)) return false
-      seen.add(item.insertValue)
-      return true
-    })
+    return dedupeSuggestionItems(candidates)
   }, [
     blockSuggestions,
     historySuggestions,
     isHistoryMode,
     isPaletteMode,
-    liveFsSuggestions,
     palettePathSuggestions,
     paletteRecommendationSuggestions,
+  ])
+
+  const inlineCompletionSuggestions = useMemo(() => {
+    if (isSearchMode || !input.trim()) return []
+
+    const candidates = hasPathCommand
+      ? pathQuery.trim()
+        ? [...liveFsSuggestions, ...storedPathSuggestions]
+        : [...storedPathSuggestions, ...liveFsSuggestions, ...fallbackPathSuggestions]
+      : filterSuggestionItems(
+          [...repoRecommendations.map(buildRepoSuggestionItem), ...historySuggestions],
+          input,
+          6,
+        )
+
+    return dedupeSuggestionItems(candidates)
+  }, [
+    hasPathCommand,
+    historySuggestions,
+    input,
+    isSearchMode,
+    fallbackPathSuggestions,
+    liveFsSuggestions,
+    pathQuery,
+    repoRecommendations,
     storedPathSuggestions,
   ])
+
+  const activeInlineSuggestion = useMemo(
+    () => {
+      if (hasPathCommand && !pathQuery.trim()) {
+        return inlineCompletionSuggestions[0] || null
+      }
+      return findPrefixSuggestion(inlineCompletionSuggestions, input)
+    },
+    [hasPathCommand, inlineCompletionSuggestions, input, pathQuery],
+  )
+  const activeInlineSuffix = useMemo(
+    () => getSuggestionSuffix(activeInlineSuggestion, input),
+    [activeInlineSuggestion, input],
+  )
 
   useEffect(() => {
     setSelectedIndex(0)
@@ -655,21 +816,29 @@ export function TerminalCommandBar({
   }, [cwd])
 
   useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.style.height = '0px'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`
-  }, [input])
-
-  useEffect(() => {
     if (!isActive) return
-    const textarea = textareaRef.current
-    if (!textarea) return
+    const field = inputRef.current
+    if (!field) return
     const timer = window.setTimeout(() => {
-      textarea.focus()
+      field.focus()
     }, 80)
     return () => window.clearTimeout(timer)
   }, [isActive])
+
+  useEffect(() => {
+    const handleFocusRequest = (event: Event) => {
+      const detail = event instanceof CustomEvent
+        ? (event.detail as { sessionId?: string } | undefined)
+        : undefined
+
+      if (detail?.sessionId && detail.sessionId !== sessionId) return
+      inputRef.current?.focus()
+    }
+
+    window.addEventListener(SMART_INPUT_FOCUS_EVENT, handleFocusRequest as EventListener)
+    return () =>
+      window.removeEventListener(SMART_INPUT_FOCUS_EVENT, handleFocusRequest as EventListener)
+  }, [sessionId])
 
   useEffect(() => {
     if (isActive || mode === 'none') return
@@ -684,11 +853,11 @@ export function TerminalCommandBar({
   const insertSuggestion = (value: string) => {
     setInput(value)
     window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current
-      if (!textarea) return
-      textarea.focus()
+      const field = inputRef.current
+      if (!field) return
+      field.focus()
       const length = value.length
-      textarea.setSelectionRange(length, length)
+      field.setSelectionRange(length, length)
     })
   }
 
@@ -699,11 +868,11 @@ export function TerminalCommandBar({
     if (options?.restoreInput) {
       setInput(restoreValue)
       window.requestAnimationFrame(() => {
-        const textarea = textareaRef.current
-        if (!textarea) return
-        textarea.focus()
+        const field = inputRef.current
+        if (!field) return
+        field.focus()
         const length = restoreValue.length
-        textarea.setSelectionRange(length, length)
+        field.setSelectionRange(length, length)
       })
     }
   }
@@ -720,7 +889,7 @@ export function TerminalCommandBar({
     }
 
     setMode(nextMode)
-    window.requestAnimationFrame(() => textareaRef.current?.focus())
+    window.requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const acceptSuggestion = (value: string) => {
@@ -736,12 +905,12 @@ export function TerminalCommandBar({
     setInput('')
     setSelectedIndex(0)
     exitSearchMode()
-    window.requestAnimationFrame(() => textareaRef.current?.focus())
+    window.requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const handleSubmit = () => {
     if (isSearchMode) {
-      const selectedSuggestion = suggestions[selectedIndex]
+      const selectedSuggestion = searchSuggestions[selectedIndex]
       const typedCommand = input.trim()
 
       if (typedCommand && (!selectedSuggestion || selectedSuggestion.insertValue.trim() === typedCommand)) {
@@ -755,279 +924,329 @@ export function TerminalCommandBar({
       return
     }
 
-    const fallbackSuggestion = !input.trim() ? suggestions[selectedIndex] : null
-    const nextCommand = input.trim() || fallbackSuggestion?.insertValue || ''
+    const nextCommand = input.trim()
     if (!nextCommand) return
 
     submitTypedCommand(nextCommand)
   }
 
-  const showSuggestions = isFocused || input.trim().length > 0 || isSearchMode
+  const footerLabel = isSearchMode
+    ? isHistoryMode
+      ? 'History mode: Enter loads, arrows move, Esc closes.'
+      : 'Palette mode: search repo actions, blocks, and command history.'
+    : activeInlineSuggestion
+      ? activeInlineSuggestion.insertValue
+      : 'Tab autocomplete · Ctrl+R history · Ctrl+K palette'
+
+  const footerStatus = isSearchMode
+    ? `${searchSuggestions.length} results`
+    : activeInlineSuggestion
+      ? getSuggestionBadgeLabel(activeInlineSuggestion)
+      : input.trim()
+        ? 'ready'
+        : hasPathCommand
+          ? 'paths'
+          : 'idle'
+  const footerText = footerLabel.replaceAll('Ã‚Â·', '·')
+
+  const displayFooterText = isSearchMode || activeInlineSuggestion
+    ? footerLabel
+    : 'Tab or -> autocomplete | Ctrl+R history | Ctrl+K palette'
 
   return (
-    <div className="shrink-0 border-t border-white/[0.06] bg-[#0b1322]/92 backdrop-blur-xl">
-      <div className="px-3 pt-2.5">
-        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-white/30">
-          <span className="inline-flex items-center gap-1 rounded-full border border-[#38bdf8]/20 bg-[#38bdf8]/10 px-2 py-0.5 text-[#7dd3fc]">
-            <Sparkles className="h-2.5 w-2.5" />
-            Smart Input
+    <div
+      className="shrink-0 border-t backdrop-blur-xl"
+      style={{
+        borderColor: 'color-mix(in srgb, var(--ghost-border) 72%, rgba(255,255,255,0.04))',
+        background: 'linear-gradient(180deg, color-mix(in srgb, var(--ghost-bg) 88%, rgba(255,255,255,0.02)) 0%, color-mix(in srgb, var(--ghost-sidebar) 94%, rgba(255,255,255,0.015)) 100%)',
+      }}
+    >
+      <div className="px-3 pb-2 pt-2">
+        <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-white/24">
+          <span>
+            {isHistoryMode
+              ? 'History Search'
+              : isPaletteMode
+                ? 'Command Palette'
+                : provider
+                  ? `${provider} command line`
+                  : 'Command line'}
           </span>
-          {provider && <span>{provider}</span>}
-          {repoContext?.gitStatus?.isRepo && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-white/35">
-              <GitBranch className="h-2.5 w-2.5" />
-              {repoContext.gitStatus.branch || 'repo'}
-            </span>
-          )}
-          {repoContext?.packageRoot && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-white/35">
-              <Package2 className="h-2.5 w-2.5" />
-              {repoContext.packageName || repoContext.packageManager}
-            </span>
-          )}
-          {isHistoryMode && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-2 py-0.5 text-amber-200">
-              <Search className="h-2.5 w-2.5" />
-              Ctrl+R
-            </span>
-          )}
-          {isPaletteMode && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-fuchsia-300/20 bg-fuchsia-300/10 px-2 py-0.5 text-fuchsia-100">
-              <Sparkles className="h-2.5 w-2.5" />
-              Ctrl+K
-            </span>
-          )}
-          <span className="ml-auto truncate text-white/20">{smartTruncatePath(cwd || '.', 34)}</span>
+          <span className="truncate text-white/18">{smartTruncatePath(cwd || '.', 38)}</span>
+          <span className="ml-auto shrink-0 text-white/16">
+            {isHistoryMode ? 'Ctrl+R' : isPaletteMode ? 'Ctrl+K' : 'Tab'}
+          </span>
         </div>
-
-        {!input.trim() && !isSearchMode && (
-          <div className="mt-2 space-y-2">
-            {repoRecommendations.length > 0 && (
-              <div>
-                <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-white/22">Recommended</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {repoRecommendations.map((recommendation) => (
-                    <button
-                      key={recommendation.id}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => insertSuggestion(recommendation.command)}
-                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition-colors ${recommendation.kind === 'git' ? 'border-sky-400/15 bg-sky-400/8 text-sky-100 hover:border-sky-300/30 hover:bg-sky-300/12' : 'border-amber-300/15 bg-amber-300/8 text-amber-100 hover:border-amber-200/30 hover:bg-amber-200/12'}`}
-                      title={recommendation.subtitle}
-                    >
-                      {recommendation.kind === 'git'
-                        ? <GitBranch className="h-3 w-3 opacity-80" />
-                        : <Package2 className="h-3 w-3 opacity-80" />}
-                      <span className="max-w-[220px] truncate font-mono">{recommendation.command}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(recentCommands.length > 0 || recentPaths.length > 0) && (
-              <div>
-                <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-white/22">Recent</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {recentCommands.map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => insertSuggestion(entry.command)}
-                      className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/45 transition-colors hover:border-[#38bdf8]/20 hover:bg-[#38bdf8]/8 hover:text-white/80"
-                    >
-                      <Clock3 className="h-3 w-3 text-white/30" />
-                      <span className="max-w-[180px] truncate font-mono">{entry.command}</span>
-                    </button>
-                  ))}
-
-                  {recentPaths.map((entry) => (
-                    <button
-                      key={entry.path}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => insertSuggestion(buildPathSuggestion(entry, input, cwd).insertValue)}
-                      className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/45 transition-colors hover:border-emerald-400/20 hover:bg-emerald-400/8 hover:text-white/80"
-                    >
-                      <Folder className="h-3 w-3 text-white/30" />
-                      <span className="max-w-[200px] truncate">{smartTruncatePath(entry.path, 28)}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      <div className="px-3 pb-3 pt-2">
-        <div className={`overflow-hidden rounded-2xl border transition-colors ${isFocused ? 'border-[#38bdf8]/30 bg-[#09111d]' : 'border-white/[0.08] bg-black/20'}`}>
-          <div className="flex items-start gap-3 px-3 py-2.5">
-            <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-white/[0.04] text-[#7dd3fc]">
-              {isSearchMode ? <Search className="h-3.5 w-3.5" /> : <TerminalSquare className="h-3.5 w-3.5" />}
-            </div>
-
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => window.setTimeout(() => setIsFocused(false), 120)}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r') {
-                  event.preventDefault()
-                  activateMode('history')
-                  return
-                }
-
-                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-                  event.preventDefault()
-                  activateMode('palette')
-                  return
-                }
-
-                if (event.key === 'ArrowDown' && suggestions.length > 0) {
-                  event.preventDefault()
-                  setSelectedIndex((current) => (current + 1) % suggestions.length)
-                  return
-                }
-
-                if (event.key === 'ArrowUp' && suggestions.length > 0) {
-                  event.preventDefault()
-                  setSelectedIndex((current) => (current - 1 + suggestions.length) % suggestions.length)
-                  return
-                }
-
-                if (event.key === 'Tab' && suggestions.length > 0) {
-                  event.preventDefault()
-                  insertSuggestion(suggestions[selectedIndex].insertValue)
-                  return
-                }
-
-                if (event.key === 'Escape') {
-                  event.preventDefault()
-                  if (isSearchMode) {
-                    exitSearchMode({ restoreInput: true })
-                    return
-                  }
-                  if (input) {
-                    setInput('')
-                  } else {
-                    textareaRef.current?.blur()
-                  }
-                  return
-                }
-
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  handleSubmit()
-                }
+      <div className="px-3 pb-3">
+        <div className="relative">
+          {isSearchMode && searchSuggestions.length > 0 && (
+            <div
+              className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-[20px] border shadow-2xl"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
+                background: 'color-mix(in srgb, var(--ghost-sidebar) 94%, rgba(255,255,255,0.025))',
+                boxShadow: '0 24px 48px rgba(0, 0, 0, 0.42)',
               }}
-              placeholder={isHistoryMode
-                ? 'Search command history and press Enter to load the result...'
-                : isPaletteMode
-                  ? 'Search commands, blocks, repo actions, and recent paths...'
-                  : 'Type a command, use repo suggestions, autocomplete paths, or press Ctrl+K...'}
-              className="min-h-[28px] flex-1 resize-none bg-transparent pt-0.5 font-mono text-[13px] leading-6 text-white/90 outline-none placeholder:text-white/22"
-              style={{ maxHeight: 140 }}
-            />
-
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={handleSubmit}
-              disabled={!input.trim() && suggestions.length === 0}
-              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl bg-[#38bdf8] px-3 text-[11px] font-semibold text-[#06101c] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:brightness-100"
             >
-              <CornerDownLeft className="h-3.5 w-3.5" />
-              {isSearchMode ? 'Load' : 'Run'}
-            </button>
-          </div>
+              {searchSuggestions.map((item, index) => {
+                const isSelected = index === selectedIndex
 
-          <div className="flex items-center justify-between border-t border-white/[0.06] px-3 py-1.5 text-[10px] text-white/25">
-            <span>
-              {isHistoryMode
-                ? 'Ctrl+R toggle | Enter load | Up/Down navigate'
-                : isPaletteMode
-                  ? 'Ctrl+K toggle | Enter load | Search repo + blocks + history'
-                  : 'Tab autocomplete | Ctrl+R history | Ctrl+K palette | Shift+Enter newline'}
-            </span>
-            <span>
-              {isSearchMode
-                ? `${suggestions.length} matches`
-                : input.trim()
-                  ? `${input.trim().split(/\s+/).length} tokens`
-                  : repoRecommendations.length > 0
-                    ? 'repo + history ready'
-                    : 'history + paths ready'}
-            </span>
-          </div>
-        </div>
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => acceptSuggestion(item.insertValue)}
+                    className={`flex h-14 w-full items-center gap-3 border-b px-3 text-left transition-colors last:border-b-0 ${
+                      isSelected ? 'text-white' : 'text-white/72 hover:text-white'
+                    }`}
+                    style={{
+                      borderColor: 'color-mix(in srgb, var(--ghost-border) 74%, rgba(255,255,255,0.04))',
+                      background: isSelected
+                        ? 'color-mix(in srgb, var(--ghost-accent) 10%, rgba(255,255,255,0.02))'
+                        : 'transparent',
+                    }}
+                  >
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+                      style={{
+                        background: isSelected
+                          ? 'color-mix(in srgb, var(--ghost-accent) 16%, transparent)'
+                          : 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
+                        color: item.kind === 'path'
+                          ? 'var(--ghost-success)'
+                          : item.kind === 'recommendation'
+                            ? 'var(--ghost-accent)'
+                            : item.kind === 'block'
+                              ? 'var(--ghost-accent-2)'
+                              : 'color-mix(in srgb, var(--ghost-text-dim) 84%, white)',
+                      }}
+                    >
+                      {item.kind === 'path'
+                        ? <Folder className="h-4 w-4" />
+                        : item.kind === 'recommendation'
+                          ? item.tag === 'git'
+                            ? <GitBranch className="h-4 w-4" />
+                            : <Package2 className="h-4 w-4" />
+                          : item.kind === 'block'
+                            ? <TerminalSquare className="h-4 w-4" />
+                            : <Clock3 className="h-4 w-4" />}
+                    </div>
 
-        {showSuggestions && suggestions.length > 0 && (
-          <div className="mt-2 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a101b]/96">
-            {suggestions.map((item, index) => {
-              const isSelected = index === selectedIndex
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate font-mono text-[12px]">{item.title}</p>
+                        <span
+                          className="rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-[0.18em]"
+                          style={{
+                            background: isSelected
+                              ? 'color-mix(in srgb, var(--ghost-accent) 14%, transparent)'
+                              : 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
+                            color: 'color-mix(in srgb, var(--ghost-text-dim) 82%, white)',
+                          }}
+                        >
+                          {getSuggestionBadgeLabel(item)}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-[10px] text-white/34">{item.subtitle}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
-              return (
+          <div
+            className="overflow-hidden rounded-[20px] border transition-colors"
+            style={{
+              borderColor: isFocused
+                ? 'color-mix(in srgb, var(--ghost-accent) 28%, rgba(255,255,255,0.08))'
+                : 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
+              background: isFocused
+                ? 'color-mix(in srgb, var(--ghost-sidebar) 90%, rgba(255,255,255,0.018))'
+                : 'color-mix(in srgb, var(--ghost-bg) 90%, rgba(255,255,255,0.014))',
+              boxShadow: isFocused
+                ? '0 14px 30px rgba(0, 0, 0, 0.28)'
+                : '0 10px 24px rgba(0, 0, 0, 0.22)',
+            }}
+          >
+            <div className="flex h-14 items-center gap-3 px-3">
+              <div
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+                style={{
+                  background: 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
+                  color: isSearchMode
+                    ? 'var(--ghost-accent-2)'
+                    : 'color-mix(in srgb, var(--ghost-accent) 78%, white)',
+                }}
+              >
+                {isSearchMode ? <Search className="h-3.5 w-3.5" /> : <TerminalSquare className="h-3.5 w-3.5" />}
+              </div>
+
+              <div className="relative flex h-full flex-1 items-center">
+                {activeInlineSuffix && !isSearchMode && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 flex items-center overflow-hidden font-mono text-[13px]"
+                  >
+                    <span className="whitespace-pre text-transparent">{input}</span>
+                    <span className="whitespace-pre text-white/24">{activeInlineSuffix}</span>
+                  </div>
+                )}
+
+                <input
+                  ref={inputRef}
+                  value={input}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(event) => setInput(event.target.value)}
+                  onFocus={() => setIsFocused(true)}
+                  onBlur={() => window.setTimeout(() => setIsFocused(false), 120)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r') {
+                      event.preventDefault()
+                      activateMode('history')
+                      return
+                    }
+
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+                      event.preventDefault()
+                      activateMode('palette')
+                      return
+                    }
+
+                    if (event.key === 'ArrowDown' && isSearchMode && searchSuggestions.length > 0) {
+                      event.preventDefault()
+                      setSelectedIndex((current) => (current + 1) % searchSuggestions.length)
+                      return
+                    }
+
+                    if (event.key === 'ArrowUp' && isSearchMode && searchSuggestions.length > 0) {
+                      event.preventDefault()
+                      setSelectedIndex((current) => (current - 1 + searchSuggestions.length) % searchSuggestions.length)
+                      return
+                    }
+
+                    if (event.key === 'Tab' && isSearchMode && searchSuggestions.length > 0) {
+                      event.preventDefault()
+                      insertSuggestion(searchSuggestions[selectedIndex].insertValue)
+                      return
+                    }
+
+                    if (event.key === 'Tab' && activeInlineSuggestion) {
+                      event.preventDefault()
+                      insertSuggestion(activeInlineSuggestion.insertValue)
+                      return
+                    }
+
+                    const caretAtEnd = event.currentTarget.selectionStart === input.length
+                      && event.currentTarget.selectionEnd === input.length
+
+                    if (event.key === 'ArrowRight' && !isSearchMode && activeInlineSuggestion && caretAtEnd) {
+                      event.preventDefault()
+                      insertSuggestion(activeInlineSuggestion.insertValue)
+                      return
+                    }
+
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      if (isSearchMode) {
+                        exitSearchMode({ restoreInput: true })
+                        return
+                      }
+                      if (input) {
+                        setInput('')
+                      } else {
+                        inputRef.current?.blur()
+                      }
+                      return
+                    }
+
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      handleSubmit()
+                    }
+                  }}
+                  placeholder={isHistoryMode
+                    ? 'Search command history and press Enter to load the result...'
+                    : isPaletteMode
+                      ? 'Search commands, blocks, repo actions, and recent paths...'
+                      : 'Type a command or path. Press Tab to complete.'}
+                  className="relative z-10 h-full flex-1 bg-transparent font-mono text-[13px] text-white/92 outline-none placeholder:text-white/22"
+                />
+              </div>
+
+              {activeInlineSuggestion && !isSearchMode && (
                 <button
-                  key={item.id}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => acceptSuggestion(item.insertValue)}
-                  className={`flex w-full items-start gap-3 border-b border-white/[0.04] px-3 py-2.5 text-left transition-colors last:border-b-0 ${isSelected ? 'bg-[#38bdf8]/10 text-white' : 'text-white/70 hover:bg-white/[0.03]'}`}
+                  onClick={() => insertSuggestion(activeInlineSuggestion.insertValue)}
+                  className="hidden h-8 items-center rounded-lg border px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42 md:inline-flex"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
+                    background: 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
+                  }}
                 >
-                  <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ${
-                    item.kind === 'path'
-                      ? 'bg-emerald-400/10 text-emerald-300'
-                      : item.kind === 'recommendation'
-                        ? item.tag === 'git'
-                          ? 'bg-sky-400/10 text-sky-300'
-                          : 'bg-amber-300/10 text-amber-200'
-                        : item.kind === 'block'
-                          ? 'bg-fuchsia-300/10 text-fuchsia-200'
-                          : 'bg-white/[0.04] text-[#7dd3fc]'
-                  }`}>
-                    {item.kind === 'path'
-                      ? <Folder className="h-3.5 w-3.5" />
-                      : item.kind === 'recommendation'
-                        ? item.tag === 'git'
-                          ? <GitBranch className="h-3.5 w-3.5" />
-                          : <Package2 className="h-3.5 w-3.5" />
-                        : item.kind === 'block'
-                          ? <TerminalSquare className="h-3.5 w-3.5" />
-                          : <Clock3 className="h-3.5 w-3.5" />}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate font-mono text-[12px]">{item.title}</p>
-                      <span className={`rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-[0.18em] ${
-                        item.kind === 'path'
-                          ? 'bg-emerald-400/10 text-emerald-300/80'
-                          : item.kind === 'recommendation'
-                            ? item.tag === 'git'
-                              ? 'bg-sky-400/10 text-sky-300/80'
-                              : 'bg-amber-300/10 text-amber-200/80'
-                            : item.kind === 'block'
-                              ? 'bg-fuchsia-300/10 text-fuchsia-100/80'
-                              : 'bg-white/[0.05] text-white/35'
-                      }`}>
-                        {item.tag || item.kind}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 truncate text-[10px] text-white/35">{item.subtitle}</p>
-                    {item.preview && item.preview !== item.title && (
-                      <p className="mt-1 truncate text-[10px] text-white/22">{item.preview}</p>
-                    )}
-                  </div>
+                  Tab
                 </button>
-              )
-            })}
+              )}
+
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={handleSubmit}
+                disabled={!input.trim() && !activeInlineSuggestion}
+                className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-all disabled:cursor-not-allowed disabled:opacity-35"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
+                  background: isFocused
+                    ? 'color-mix(in srgb, var(--ghost-accent) 18%, rgba(255,255,255,0.02))'
+                    : 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
+                  color: isFocused
+                    ? 'color-mix(in srgb, var(--ghost-accent) 82%, white)'
+                    : 'color-mix(in srgb, var(--ghost-text-dim) 80%, white)',
+                }}
+              >
+                <CornerDownLeft className="h-3.5 w-3.5" />
+                {isSearchMode ? 'Load' : 'Run'}
+              </button>
+            </div>
+
+            <div
+              className="flex h-8 items-center justify-between border-t px-3 text-[10px]"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--ghost-border) 74%, rgba(255,255,255,0.04))',
+                color: 'color-mix(in srgb, var(--ghost-text-dim) 70%, white)',
+              }}
+            >
+              <div className="min-w-0 flex items-center gap-2 overflow-hidden">
+                {activeInlineSuggestion && !isSearchMode ? (
+                  <>
+                    <span
+                      className="inline-flex h-5 items-center rounded-md border px-1.5 font-semibold uppercase tracking-[0.16em]"
+                      style={{
+                        borderColor: 'color-mix(in srgb, var(--ghost-border) 84%, rgba(255,255,255,0.1))',
+                        background: 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
+                      }}
+                    >
+                      Tab
+                    </span>
+                    <span className="truncate font-mono text-white/58">{displayFooterText}</span>
+                  </>
+                ) : (
+                  <span className="truncate">{displayFooterText}</span>
+                )}
+              </div>
+
+              <span className="ml-3 shrink-0 uppercase tracking-[0.16em] text-white/20">
+                {footerStatus}
+              </span>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

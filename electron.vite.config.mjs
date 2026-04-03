@@ -13,10 +13,10 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'electron/main.ts')
-        }
-      }
-    }
+          index: resolve(import.meta.dirname, 'electron/main.ts'),
+        },
+      },
+    },
   },
   preload: {
     resolve: {
@@ -26,29 +26,29 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'electron/preload.ts')
-        }
-      }
-    }
+          index: resolve(import.meta.dirname, 'electron/preload.ts'),
+        },
+      },
+    },
   },
   renderer: {
     root: 'src',
-    publicDir: resolve(__dirname, 'public'),
+    publicDir: resolve(import.meta.dirname, 'public'),
     resolve: {
       preserveSymlinks: true,
     },
     build: {
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/index.html')
-        }
-      }
+          index: resolve(import.meta.dirname, 'src/index.html'),
+        },
+      },
     },
     plugins: [react()],
     css: {
       postcss: {
-        plugins: [tailwindcss(), autoprefixer()]
-      }
-    }
-  }
+        plugins: [tailwindcss(), autoprefixer()],
+      },
+    },
+  },
 })
