@@ -64,6 +64,7 @@ const RECOMMENDED_SCRIPT_CANDIDATES = [
   'type-check',
   'check-types',
 ] as const
+const EMPTY_COMMAND_BLOCKS: CommandBlock[] = []
 
 function quoteShellPath(path: string): string {
   if (!/[\s"]/u.test(path)) return path
@@ -517,7 +518,9 @@ export function TerminalCommandBar({
 }: TerminalCommandBarProps) {
   const getCommandSuggestions = useHistoryStore((state) => state.getCommandSuggestions)
   const getRecentPaths = useHistoryStore((state) => state.getRecentPaths)
-  const blocksForSession = useCommandBlockStore((state) => state.blocksBySession[sessionId] || [])
+  const blocksForSession = useCommandBlockStore(
+    (state) => state.blocksBySession[sessionId] ?? EMPTY_COMMAND_BLOCKS,
+  )
   const [input, setInput] = useState('')
   const [isFocused, setIsFocused] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)

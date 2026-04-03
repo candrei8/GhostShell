@@ -1,6 +1,6 @@
 {
   "name": "ghostshell",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "author": "GhostShell Team",
   "description": "GhostShell - Terminal for VibeCoders",
   "main": "./out/main/index.js",
