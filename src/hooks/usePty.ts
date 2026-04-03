@@ -964,6 +964,31 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch }:
             return false
           }
 
+          // Claude and Codex occasionally stop emitting onData('\r') even though
+          // the helper textarea still receives Enter. Handle submit directly here
+          // so plain Enter remains reliable in those interactive CLIs.
+          if (
+            (currentProvider === 'claude' || currentProvider === 'codex') &&
+            e.key === 'Enter' &&
+            !e.shiftKey &&
+            !e.ctrlKey &&
+            !e.altKey &&
+            !e.metaKey
+          ) {
+            if (e.type === 'keydown' && !e.isComposing) {
+              nativeEnterSeenAt = Date.now()
+              if (plainEnterFallbackTimer) {
+                clearTimeout(plainEnterFallbackTimer)
+                plainEnterFallbackTimer = null
+              }
+              suppressNextNativeEnter = false
+              suppressNextNativeEnterUntil = 0
+              trackCommandSubmission(inputBuffer)
+              writeToPty('\r')
+            }
+            return false
+          }
+
           // Ctrl+V: Prevent xterm from sending \x16 (raw Ctrl+V control char) to PTY.
           // Return false so the browser fires the native paste event. Structured
           // text insertion tools are handled separately via beforeinput/input.
