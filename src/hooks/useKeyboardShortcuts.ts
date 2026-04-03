@@ -26,7 +26,7 @@ interface KeyboardShortcutsOptions {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
-  if (target.closest('.xterm')) return true
+  if (target.closest('.xterm')) return false
   if (target.closest('[data-allow-global-shortcuts="true"]')) return false
   if (target.closest('[contenteditable="true"]')) return true
 
@@ -84,12 +84,7 @@ export function useKeyboardShortcuts({
 
       if (
         run('terminal.new', () => {
-          const currentPath = useWorkspaceStore.getState().currentPath
-          useTerminalStore.getState().addSession({
-            id: `term-standalone-${Date.now()}`,
-            title: 'Terminal',
-            cwd: currentPath,
-          })
+          window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.newTerminal))
         })
       ) {
         return

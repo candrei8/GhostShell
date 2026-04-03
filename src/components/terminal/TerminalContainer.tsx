@@ -37,18 +37,33 @@ export function TerminalContainer() {
   }, [])
 
   useEffect(() => {
+    const handleNewTerminalRequest = () => {
+      const cwd = useWorkspaceStore.getState().currentPath
+      useTerminalStore.getState().addSession({
+        id: `term-standalone-${Date.now()}`,
+        title: 'Terminal',
+        cwd,
+      })
+    }
+
     const handleSplitRequest = () => {
       const currentSessionId = useTerminalStore.getState().activeSessionId
       if (!currentSessionId) return
       useTerminalStore.getState().duplicateSession(currentSessionId)
     }
 
+    window.addEventListener(SHORTCUT_EVENTS.newTerminal, handleNewTerminalRequest as EventListener)
     window.addEventListener(SHORTCUT_EVENTS.splitSession, handleSplitRequest as EventListener)
-    return () =>
+    return () => {
+      window.removeEventListener(
+        SHORTCUT_EVENTS.newTerminal,
+        handleNewTerminalRequest as EventListener,
+      )
       window.removeEventListener(
         SHORTCUT_EVENTS.splitSession,
         handleSplitRequest as EventListener,
       )
+    }
   }, [])
 
   const hasNoSessions = sessions.length === 0

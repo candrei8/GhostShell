@@ -1093,6 +1093,9 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
 
           // Ctrl+T: New terminal tab (intercept so xterm doesn't send \x14 to PTY)
           if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyT') {
+            if (e.type === 'keydown') {
+              window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.newTerminal))
+            }
             return false
           }
 

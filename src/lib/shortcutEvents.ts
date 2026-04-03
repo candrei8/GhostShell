@@ -1,4 +1,5 @@
 export const SHORTCUT_EVENTS = {
+  newTerminal: 'ghostshell:shortcut-new-terminal',
   renameTab: 'ghostshell:shortcut-rename-tab',
   splitSession: 'ghostshell:shortcut-split-session',
   toggleTerminalSearch: 'ghostshell:shortcut-terminal-search',
