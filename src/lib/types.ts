@@ -325,6 +325,7 @@ declare global {
       fsReadFile: (filePath: string) => Promise<{ success: boolean; content: string; error?: string }>
       fsIsDirectory: (dirPath: string) => Promise<boolean>
       saveTempImage: (buffer: ArrayBuffer, mimeType: string) => Promise<string>
+      getPathForFile: (file: File) => string | null
       showNotification: (title: string, body?: string) => void
       getVersion: () => Promise<string>
       storageGet: (key: string) => Promise<unknown | null>

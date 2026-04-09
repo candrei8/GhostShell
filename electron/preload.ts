@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 const api = {
   // Window controls
@@ -79,6 +79,13 @@ const api = {
   // Save clipboard image to temp file
   saveTempImage: (buffer: ArrayBuffer, mimeType: string) =>
     ipcRenderer.invoke('file:saveTempImage', buffer, mimeType) as Promise<string>,
+  getPathForFile: (file: File) => {
+    try {
+      return webUtils.getPathForFile(file) || null
+    } catch {
+      return null
+    }
+  },
 
   // CLI model discovery
   cliDiscoverModels: (provider: 'claude' | 'gemini' | 'codex', command?: string) =>

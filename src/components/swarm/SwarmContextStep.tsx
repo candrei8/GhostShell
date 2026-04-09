@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BookOpen, Plus, X, FileIcon } from 'lucide-react'
 import { useSwarmStore } from '../../stores/swarmStore'
+import { resolveDroppedFilePathFromBridge } from '../../lib/fileDrop'
 import type { SwarmContextFile } from '../../lib/swarm-types'
 
 // ─── File Size Formatter ─────────────────────────────────────
@@ -57,25 +58,29 @@ export function SwarmContextStep() {
   const removeContextFile = useSwarmStore((s) => s.removeContextFile)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const createContextFile = useCallback(
+    (file: File): SwarmContextFile => ({
+      id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: file.name,
+      path: resolveDroppedFilePathFromBridge(file) ?? file.name,
+      size: file.size,
+    }),
+    [],
+  )
+
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files
       if (!files) return
 
       for (const f of Array.from(files)) {
-        const contextFile: SwarmContextFile = {
-          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: f.name,
-          path: (f as any).path || f.name,
-          size: f.size,
-        }
-        addContextFile(contextFile)
+        addContextFile(createContextFile(f))
       }
 
       // Reset input so same file can be re-selected
       if (fileInputRef.current) fileInputRef.current.value = ''
     },
-    [addContextFile],
+    [addContextFile, createContextFile],
   )
 
   const handleDrop = useCallback(
@@ -85,16 +90,10 @@ export function SwarmContextStep() {
       if (!files) return
 
       for (const f of Array.from(files)) {
-        const contextFile: SwarmContextFile = {
-          id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: f.name,
-          path: (f as any).path || f.name,
-          size: f.size,
-        }
-        addContextFile(contextFile)
+        addContextFile(createContextFile(f))
       }
     },
-    [addContextFile],
+    [addContextFile, createContextFile],
   )
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

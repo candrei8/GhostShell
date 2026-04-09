@@ -34,6 +34,7 @@ import {
   getSmartProviderDefaults,
   getProviderRoleTooltip,
 } from '../../lib/swarm-provider-intelligence'
+import { resolveDroppedFilePathFromBridge } from '../../lib/fileDrop'
 
 const FUNCTIONAL_PROVIDERS = SWARM_CLI_PROVIDERS.filter((p) => p.coreProvider)
 const ACCENT = '#38bdf8' // Sky-400
@@ -563,7 +564,12 @@ function StepMission() {
     const files = e.dataTransfer.files
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
-      addContextFile({ id: `ctx-${Date.now()}-${i}`, name: file.name, path: (file as any).path || file.name, size: file.size })
+      addContextFile({
+        id: `ctx-${Date.now()}-${i}`,
+        name: file.name,
+        path: resolveDroppedFilePathFromBridge(file) ?? file.name,
+        size: file.size,
+      })
     }
   }, [addContextFile])
 

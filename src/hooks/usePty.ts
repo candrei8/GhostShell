@@ -19,6 +19,7 @@ import { reportAgentOutput } from '../lib/swarm-message-injector'
 import { feedAgentOutput } from '../lib/swarm-self-heal'
 import { registerPromptSubmission } from '../lib/terminalPromptSubmission'
 import { emitSwarmActivity } from '../lib/swarm-activity-emitter'
+import { resolveDroppedFilePathFromBridge } from '../lib/fileDrop'
 
 interface UsePtyOptions {
   sessionId: string
@@ -1293,9 +1294,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
 
               for (let i = 0; i < files.length; i++) {
                 const file = files[i] as File & { path?: string }
-                if (file.path) {
-                  // Electron file from OS; has full system path
-                  paths.push(file.path)
+                const nativePath = resolveDroppedFilePathFromBridge(file)
+                if (nativePath) {
+                  // Electron file from OS; resolve absolute path via preload bridge.
+                  paths.push(nativePath)
                 } else if (file.type.startsWith('image/')) {
                   // Web-dragged image (no OS path); save to temp
                   try {
@@ -1334,22 +1336,27 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
                   }
                 }
 
-                // Avoid writing local status lines into xterm. TUI CLIs like Codex
-                // render their own screen and can glitch if we inject extra output.
-                const text = paths.map((path) => quotePath(path)).join(' ')
-                writeToPty(text, true)
+                // Use writeInjectedText so bracketed-paste mode is respected.
+                // TUI CLIs (Claude, Codex, Gemini) enable bracketed paste and
+                // may ignore raw PTY writes that aren't wrapped in bracket seqs.
+                const text = paths.map((p) => quotePath(p)).join(' ')
+                writeInjectedText(text)
               }
             })()
           }
-          termEl.addEventListener('dragenter', handleDragEnter)
-          termEl.addEventListener('dragover', handleDragOver)
-          termEl.addEventListener('dragleave', handleDragLeave)
-          termEl.addEventListener('drop', handleDrop)
+          // Listen on paneEl (the [data-terminal-pane] wrapper) so events are
+          // caught even if xterm's internal canvas/WebGL overlay prevents
+          // bubbling from terminal.element. Falls back to termEl if no pane.
+          const dropTarget = paneEl || termEl
+          dropTarget.addEventListener('dragenter', handleDragEnter)
+          dropTarget.addEventListener('dragover', handleDragOver)
+          dropTarget.addEventListener('dragleave', handleDragLeave)
+          dropTarget.addEventListener('drop', handleDrop)
           cleanups.push(() => {
-            termEl.removeEventListener('dragenter', handleDragEnter)
-            termEl.removeEventListener('dragover', handleDragOver)
-            termEl.removeEventListener('dragleave', handleDragLeave)
-            termEl.removeEventListener('drop', handleDrop)
+            dropTarget.removeEventListener('dragenter', handleDragEnter)
+            dropTarget.removeEventListener('dragover', handleDragOver)
+            dropTarget.removeEventListener('dragleave', handleDragLeave)
+            dropTarget.removeEventListener('drop', handleDrop)
             if (paneEl) paneEl.classList.remove('drop-target')
           })
         }
