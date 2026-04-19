@@ -25,6 +25,11 @@
   --ghost-success: #34d399;
   --ghost-warning: #fbbf24;
   --ghost-error: #fb7185;
+
+  /* RGB triplets — lets Tailwind apply opacity modifiers (ghost-accent/10).
+     applyTheme() in themes.ts keeps these in sync with the hex tokens above. */
+  --ghost-accent-rgb: 56 189 248;
+  --ghost-text-rgb: 255 255 255;
 }
 
 * {

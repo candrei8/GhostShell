@@ -11,15 +11,14 @@ export function shouldCaptureStructuredTextInsertion(
 
   if (!normalizedData) return false
 
-  if (
-    normalizedType === 'insertFromPaste' ||
-    normalizedType === 'insertFromDrop' ||
-    normalizedType === 'insertReplacementText'
-  ) {
-    return true
-  }
-
-  // Voice dictation / text expansion tools often inject full phrases as one insertText.
+  // Voice dictation / text expansion tools (Wispr Flow, etc.) inject full
+  // phrases as a single insertText event. We intercept these so they hit the
+  // PTY as one atomic write instead of being typed character by character.
+  //
+  // We deliberately do NOT intercept `insertFromPaste` — xterm.js handles
+  // clipboard pastes natively via its own textarea listener, wrapping text in
+  // bracketed-paste and firing onData. Intercepting here caused double writes
+  // that Claude's CLI registered as multiple paste blocks.
   if (normalizedType === 'insertText' && normalizedData.length > 1) {
     return true
   }

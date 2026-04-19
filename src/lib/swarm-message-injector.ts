@@ -293,8 +293,11 @@ async function pollInbox(
 
     // Verify deliveries via ACK files and retry/DLQ as needed
     await verifyAndRetryDeliveries(swarmId, swarmRoot)
-  } catch {
-    // Inbox might not exist yet or permission error
+  } catch (err) {
+    // Inbox might not exist yet, permission error, or a malformed swarmRoot
+    // path. Logging is essential here — silent failures left the dashboard
+    // stuck on placeholder text with no diagnostic trail.
+    console.error(`[MessageInjector] pollInbox failed for ${swarmId} (${swarmRoot}):`, err)
   }
 }
 

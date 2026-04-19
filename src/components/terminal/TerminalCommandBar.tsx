@@ -6,6 +6,7 @@ import {
   GitBranch,
   Package2,
   Search,
+  Square,
   TerminalSquare,
 } from 'lucide-react'
 import { smartTruncatePath } from '../../lib/formatUtils'
@@ -621,6 +622,17 @@ export function TerminalCommandBar({
   const blocksForSession = useCommandBlockStore(
     (state) => state.blocksBySession[sessionId] ?? EMPTY_COMMAND_BLOCKS,
   )
+  const hasActiveBlock = useCommandBlockStore(
+    (state) => !!state.activeBlockBySession[sessionId],
+  )
+
+  const sendInterrupt = () => {
+    try {
+      window.ghostshell.ptyWrite(sessionId, '\x03')
+    } catch {
+      // PTY may not be ready yet
+    }
+  }
   const [input, setInput] = useState('')
   const [isFocused, setIsFocused] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -828,11 +840,27 @@ export function TerminalCommandBar({
   useEffect(() => {
     const handleFocusRequest = (event: Event) => {
       const detail = event instanceof CustomEvent
-        ? (event.detail as { sessionId?: string } | undefined)
+        ? (event.detail as { sessionId?: string; text?: string } | undefined)
         : undefined
 
       if (detail?.sessionId && detail.sessionId !== sessionId) return
-      inputRef.current?.focus()
+      const field = inputRef.current
+      field?.focus()
+
+      // Inject pasted text (from xterm paste event when in readOnly/smart-input mode).
+      // Append at current caret position so Ctrl+V / Wispr Flow / context-menu paste
+      // all land in the command bar instead of being silently dropped.
+      if (detail?.text && field) {
+        const start = field.selectionStart ?? field.value.length
+        const end = field.selectionEnd ?? field.value.length
+        const next = field.value.slice(0, start) + detail.text + field.value.slice(end)
+        setInput(next)
+        window.requestAnimationFrame(() => {
+          const caret = start + detail.text!.length
+          field.setSelectionRange(caret, caret)
+          field.focus()
+        })
+      }
     }
 
     window.addEventListener(SMART_INPUT_FOCUS_EVENT, handleFocusRequest as EventListener)
@@ -1106,6 +1134,28 @@ export function TerminalCommandBar({
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => window.setTimeout(() => setIsFocused(false), 120)}
                   onKeyDown={(event) => {
+                    // Ctrl+C without a selection → send SIGINT to the PTY so
+                    // users can interrupt a running process (e.g. npm run dev)
+                    // from the Smart Input, just like a normal terminal.
+                    if (
+                      (event.ctrlKey || event.metaKey) &&
+                      !event.shiftKey &&
+                      !event.altKey &&
+                      event.key.toLowerCase() === 'c'
+                    ) {
+                      const target = event.currentTarget
+                      const hasSelection =
+                        target.selectionStart !== null &&
+                        target.selectionEnd !== null &&
+                        target.selectionStart !== target.selectionEnd
+                      if (!hasSelection) {
+                        event.preventDefault()
+                        sendInterrupt()
+                        return
+                      }
+                      // With an active selection, let the browser copy it.
+                    }
+
                     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r') {
                       event.preventDefault()
                       activateMode('history')
@@ -1191,6 +1241,24 @@ export function TerminalCommandBar({
                   }}
                 >
                   Tab
+                </button>
+              )}
+
+              {hasActiveBlock && !isSearchMode && (
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={sendInterrupt}
+                  title="Send Ctrl+C to running process"
+                  className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-all"
+                  style={{
+                    borderColor: 'color-mix(in srgb, rgb(244, 63, 94) 48%, rgba(255,255,255,0.08))',
+                    background: 'color-mix(in srgb, rgb(244, 63, 94) 16%, rgba(255,255,255,0.02))',
+                    color: 'color-mix(in srgb, rgb(244, 63, 94) 86%, white)',
+                  }}
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Stop
                 </button>
               )}
 

@@ -158,7 +158,16 @@ function checkCommand(argv) {
 
   var agentInbox = path.join(INBOX_DIR, agentName);
   if (!fs.existsSync(agentInbox) || !fs.statSync(agentInbox).isDirectory()) {
-    if (!inject) console.log('No inbox found for ' + agentName);
+    // Self-heal: create the inbox so subsequent senders/checks see a real
+    // dir instead of racing on existence. Then report "No messages" rather
+    // than the alarming "No inbox found for X" that confuses LLM agents.
+    try { fs.mkdirSync(agentInbox, { recursive: true }); } catch (e) {}
+    if (inject) {
+      console.log('\\n--- GhostSwarm Inbox (0 messages) ---');
+      console.log('--- End Inbox (0 delivered) ---');
+    } else {
+      console.log('No messages');
+    }
     process.exit(0);
   }
 

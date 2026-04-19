@@ -622,6 +622,13 @@ export function getTheme(id: string): Theme {
   return themes.find(t => t.id === id) || themes[0]
 }
 
+function hexToRgbTriplet(hex: string): string | null {
+  const m = /^#?([a-f\d]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`
+}
+
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement
   const c = theme.colors
@@ -637,4 +644,10 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty('--ghost-success', c.success)
   root.style.setProperty('--ghost-warning', c.warning)
   root.style.setProperty('--ghost-error', c.error)
+
+  // RGB triplets used by Tailwind for opacity modifiers (ghost-accent/10).
+  const accentRgb = hexToRgbTriplet(c.accent)
+  if (accentRgb) root.style.setProperty('--ghost-accent-rgb', accentRgb)
+  const textRgb = hexToRgbTriplet(c.text)
+  if (textRgb) root.style.setProperty('--ghost-text-rgb', textRgb)
 }

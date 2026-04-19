@@ -757,16 +757,38 @@ export const useSwarmStore = create<SwarmState>()(
 
       linkAgentToStore: (swarmId, rosterId, agentId, terminalId) =>
         set((state) => ({
-          swarms: state.swarms.map((s) =>
-            s.id === swarmId
-              ? {
-                  ...s,
-                  agents: s.agents.map((a) =>
-                    a.rosterId === rosterId ? { ...a, agentId, terminalId } : a,
-                  ),
-                }
-              : s,
-          ),
+          swarms: state.swarms.map((s) => {
+            if (s.id !== swarmId) return s
+            // Idempotent: update if the SwarmAgentState for this rosterId already
+            // exists (the normal case — launchSwarm pre-creates them), otherwise
+            // append a fresh one. This prevents agents from going invisible when
+            // a checkpoint restore arrives without pre-seeded agent slots, which
+            // would otherwise leave the dashboard stuck on "Agents warming up..."
+            // forever even though the PTYs are alive.
+            const existing = s.agents.findIndex((a) => a.rosterId === rosterId)
+            if (existing >= 0) {
+              return {
+                ...s,
+                agents: s.agents.map((a, i) =>
+                  i === existing ? { ...a, agentId, terminalId } : a,
+                ),
+              }
+            }
+            return {
+              ...s,
+              agents: [
+                ...s.agents,
+                {
+                  rosterId,
+                  agentId,
+                  terminalId,
+                  status: 'waiting' as const,
+                  filesOwned: [],
+                  messagesCount: 0,
+                },
+              ],
+            }
+          }),
         })),
 
       addTask: (swarmId, task) =>

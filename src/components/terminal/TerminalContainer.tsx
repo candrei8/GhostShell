@@ -112,23 +112,18 @@ export function TerminalContainer() {
       ? (isVisible ? 'absolute inset-0' : 'absolute inset-0 hidden')
       : 'absolute inset-0'
 
-    if (workspaceSessions.length === 1 && viewMode === 'tabs') {
-      const session = workspaceSessions[0]
-      return (
-        <div key={workspaceId} className={wrapperClassName} aria-hidden={!isVisible}>
-          <TerminalPane
-            session={session}
-            isActive={isVisible}
-            onClose={() => removeSession(session.id)}
-            onClick={() => setActiveSession(session.id)}
-            showPaneLabel={true}
-          />
-        </div>
-      )
-    }
+    // In tabs mode, use the first session id as the wrapper key so that the
+    // React subtree stays mounted when a singleton workspace is promoted to
+    // a group after a split (workspace id changes from session.id to
+    // group.id, but the first session id stays the same). This prevents
+    // TerminalPane from remounting — which would dispose xterm and kill the
+    // PTY, losing all context.
+    const stableKey =
+      viewMode === 'tabs' ? (workspaceSessions[0]?.id ?? workspaceId) : workspaceId
+    const isSingle = workspaceSessions.length === 1 && viewMode === 'tabs'
 
     return (
-      <div key={workspaceId} className={wrapperClassName} aria-hidden={!isVisible}>
+      <div key={stableKey} className={wrapperClassName} aria-hidden={!isVisible}>
         <BentoLayout
           sessions={workspaceSessions}
           maximizedSessionId={maximizedSessionId}
@@ -144,7 +139,7 @@ export function TerminalContainer() {
             >
               <TerminalPane
                 session={session}
-                isActive={isVisible && session.id === activeSessionId}
+                isActive={isVisible && (isSingle || session.id === activeSessionId)}
                 onClose={() => removeSession(session.id)}
                 onClick={() => setActiveSession(session.id)}
                 showPaneLabel={true}

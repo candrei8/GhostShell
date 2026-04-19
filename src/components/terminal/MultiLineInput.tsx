@@ -47,7 +47,13 @@ export function MultiLineInput({ onSubmit, onClose }: MultiLineInputProps) {
   const lineCount = value.split('\n').length
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col border-t border-white/[0.1] bg-[var(--ghost-surface)]/95 backdrop-blur-xl">
+    <div
+      className="absolute inset-x-0 bottom-0 z-30 flex flex-col border-t backdrop-blur-xl"
+      style={{
+        borderColor: 'color-mix(in srgb, var(--ghost-border) 90%, transparent)',
+        background: 'color-mix(in srgb, var(--ghost-sidebar) 92%, transparent)',
+      }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-2 text-[11px] text-white/50">
@@ -57,7 +63,13 @@ export function MultiLineInput({ onSubmit, onClose }: MultiLineInputProps) {
           <span className="text-white/30">{lineCount} {lineCount === 1 ? 'line' : 'lines'}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-white/40">
+          <span
+            className="rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+            style={{
+              background: 'color-mix(in srgb, var(--ghost-accent) 14%, transparent)',
+              color: 'color-mix(in srgb, var(--ghost-accent) 85%, var(--ghost-text))',
+            }}
+          >
             Ctrl+Enter to send
           </span>
           <button
@@ -78,8 +90,22 @@ export function MultiLineInput({ onSubmit, onClose }: MultiLineInputProps) {
           onKeyDown={handleKeyDown}
           rows={4}
           placeholder="Type multi-line text here... Enter for new lines, Ctrl+Enter to send"
-          className="w-full resize-y rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-[13px] leading-relaxed text-white/90 placeholder:text-white/25 focus:border-white/[0.15] focus:outline-none focus:ring-1 focus:ring-white/[0.06]"
-          style={{ minHeight: 80, maxHeight: 300 }}
+          className="w-full resize-y rounded-lg border px-3 py-2 font-mono text-[13px] leading-relaxed placeholder:text-white/25 focus:outline-none focus:ring-1"
+          style={{
+            minHeight: 80,
+            maxHeight: 300,
+            borderColor: 'color-mix(in srgb, var(--ghost-border) 80%, transparent)',
+            background: 'color-mix(in srgb, var(--ghost-bg) 75%, transparent)',
+            color: 'var(--ghost-text)',
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--ghost-accent) 55%, transparent)'
+            e.currentTarget.style.boxShadow = '0 0 0 1px color-mix(in srgb, var(--ghost-accent) 25%, transparent)'
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--ghost-border) 80%, transparent)'
+            e.currentTarget.style.boxShadow = 'none'
+          }}
         />
         <button
           onClick={handleSubmit}

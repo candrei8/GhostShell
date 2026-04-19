@@ -15,14 +15,16 @@ interface TerminalTabsProps {
 
 function getTabBackground(color: string | undefined, isActive: boolean) {
     if (!color || !color.startsWith('#')) {
-        return isActive ? '#38bdf8' : 'rgba(255, 255, 255, 0.03)'
+        return isActive
+            ? 'color-mix(in srgb, var(--ghost-accent) 22%, transparent)'
+            : 'color-mix(in srgb, var(--ghost-surface) 100%, transparent)'
     }
     if (isActive) return color;
     const r = parseInt(color.slice(1, 3), 16)
     const g = parseInt(color.slice(3, 5), 16)
     const b = parseInt(color.slice(5, 7), 16)
     if (isNaN(r) || isNaN(g) || isNaN(b)) {
-        return 'rgba(255, 255, 255, 0.03)';
+        return 'color-mix(in srgb, var(--ghost-surface) 100%, transparent)';
     }
     return `rgba(${r}, ${g}, ${b}, 0.12)`
 }
@@ -157,7 +159,13 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
     }
 
     return (
-        <div className="tabs-bar relative z-20 flex h-11 w-full shrink-0 items-center bg-[#0D0F15] overflow-hidden">
+        <div
+            className="tabs-bar relative z-20 flex h-11 w-full shrink-0 items-center overflow-hidden border-b"
+            style={{
+                background: 'color-mix(in srgb, var(--ghost-sidebar) 96%, rgba(255,255,255,0.02))',
+                borderColor: 'color-mix(in srgb, var(--ghost-border) 70%, transparent)',
+            }}
+        >
             {contextMenu && (
                 <ContextMenu
                     items={getContextMenuItems()}
@@ -169,7 +177,10 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
             <div className="flex h-full items-center gap-4 px-4 pr-6 shrink-0">
                 <button
                     onClick={() => window.dispatchEvent(new CustomEvent('ghostshell:open-settings'))}
-                    className="text-white/40 hover:text-white/80 transition-colors"
+                    className="transition-colors"
+                    style={{ color: 'var(--ghost-text-dim)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--ghost-accent)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ghost-text-dim)' }}
                     title="Ajustes"
                 >
                     <Settings className="w-[18px] h-[18px]" />
@@ -210,10 +221,11 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                                 e.preventDefault()
                                 setContextMenu({ id: ws.id, x: e.clientX, y: e.clientY })
                             }}
-                            className={`group flex h-full min-w-[140px] max-w-[240px] shrink-0 cursor-pointer items-center justify-between px-4 transition-colors duration-150 border-r border-white/5 ${isActive ? 'text-white shadow-lg' : 'text-white/90 hover:text-white'
+                            className={`group flex h-full min-w-[140px] max-w-[240px] shrink-0 cursor-pointer items-center justify-between px-4 transition-colors duration-150 border-r ${isActive ? 'text-white' : 'text-white/90 hover:text-white'
                                 }`}
                             style={{
-                                backgroundColor: getTabBackground(tabColor, isActive)
+                                backgroundColor: getTabBackground(tabColor, isActive),
+                                borderRightColor: 'color-mix(in srgb, var(--ghost-border) 45%, transparent)',
                             }}
                         >
                             <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -231,7 +243,11 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                                             if (e.key === 'Enter') handleSaveTitle(ws.id)
                                             if (e.key === 'Escape') setEditingId(null)
                                         }}
-                                        className="w-full bg-black/40 px-1 py-0.5 rounded text-[13px] font-medium leading-none outline-none text-white selection:bg-white/30"
+                                        className="w-full px-1 py-0.5 rounded text-[13px] font-medium leading-none outline-none selection:bg-white/30"
+                                        style={{
+                                            background: 'color-mix(in srgb, var(--ghost-bg) 70%, transparent)',
+                                            color: 'var(--ghost-text)',
+                                        }}
                                         onClick={(e) => e.stopPropagation()}
                                     />
                                 ) : (
@@ -276,17 +292,18 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                     onClick={switchToTabs}
                     disabled={viewMode === 'tabs'}
                     aria-pressed={viewMode === 'tabs'}
-                    className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default ${viewMode === 'tabs'
-                        ? 'text-white/80'
-                        : 'text-white/25 hover:text-white/50 hover:bg-white/5'
-                        }`}
+                    className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default"
+                    style={{
+                        color: viewMode === 'tabs' ? 'var(--ghost-accent)' : 'var(--ghost-text-dim)',
+                    }}
                     title="Vista de Pestañas"
                 >
                     {viewMode === 'tabs' && (
                         <motion.span
                             layoutId="terminal-view-pill"
                             transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                            className="absolute inset-0 rounded-md bg-white/[0.08]"
+                            className="absolute inset-0 rounded-md"
+                            style={{ background: 'color-mix(in srgb, var(--ghost-accent) 18%, transparent)' }}
                         />
                     )}
                     <AppWindow className="relative z-10 h-4 w-4" />
@@ -295,22 +312,26 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                     onClick={switchToGrid}
                     disabled={viewMode === 'grid'}
                     aria-pressed={viewMode === 'grid'}
-                    className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default ${viewMode === 'grid'
-                        ? 'text-white/80'
-                        : 'text-white/25 hover:text-white/50 hover:bg-white/5'
-                        }`}
+                    className="relative flex h-7 w-7 items-center justify-center rounded-md transition-all disabled:cursor-default"
+                    style={{
+                        color: viewMode === 'grid' ? 'var(--ghost-accent)' : 'var(--ghost-text-dim)',
+                    }}
                     title="Vista de Cuadrícula"
                 >
                     {viewMode === 'grid' && (
                         <motion.span
                             layoutId="terminal-view-pill"
                             transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                            className="absolute inset-0 rounded-md bg-white/[0.08]"
+                            className="absolute inset-0 rounded-md"
+                            style={{ background: 'color-mix(in srgb, var(--ghost-accent) 18%, transparent)' }}
                         />
                     )}
                     <LayoutGrid className="relative z-10 h-4 w-4" />
                 </button>
-                <div className="mx-1 h-4 w-px bg-white/[0.06]" />
+                <div
+                    className="mx-1 h-4 w-px"
+                    style={{ background: 'color-mix(in srgb, var(--ghost-border) 60%, transparent)' }}
+                />
                 <button
                     onClick={collapseTabs}
                     className="flex h-7 w-7 items-center justify-center rounded-md text-white/20 transition-all hover:bg-white/5 hover:text-white/40"
@@ -327,7 +348,13 @@ export function TerminalTabs({ workspaces, activeWorkspaceId, onNewTab, onSelect
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: -4, scale: 0.96 }}
                             transition={{ duration: 0.14 }}
-                            className="pointer-events-none absolute -bottom-6 right-3 whitespace-nowrap rounded-md border border-white/[0.06] bg-[#050812]/95 px-1.5 py-0.5 text-[10px] text-white/40"
+                            className="pointer-events-none absolute -bottom-6 right-3 whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[10px]"
+                            style={{
+                                borderColor: 'color-mix(in srgb, var(--ghost-border) 80%, transparent)',
+                                background: 'color-mix(in srgb, var(--ghost-sidebar) 92%, transparent)',
+                                color: 'var(--ghost-text-dim)',
+                                backdropFilter: 'blur(8px)',
+                            }}
                         >
                             {actionHint}
                         </motion.span>

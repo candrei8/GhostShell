@@ -134,10 +134,14 @@ export class PtyManager {
     }
 
     if (platform() === 'win32') {
-      pushPlan(preferredShell, preferredCwd, { useConpty: false })
+      // Prefer ConPTY: it has a larger, better-buffered pipe than winpty, so
+      // large bracketed pastes arrive to agent CLIs (Claude/Codex/Gemini) as
+      // a single paste block instead of getting fragmented across pipe reads.
+      // Winpty stays as a fallback if ConPTY's AttachConsole fails.
       pushPlan(preferredShell, preferredCwd, { useConpty: true })
-      pushPlan(fallbackShell, fallbackCwd, { useConpty: false })
+      pushPlan(preferredShell, preferredCwd, { useConpty: false })
       pushPlan(fallbackShell, fallbackCwd, { useConpty: true })
+      pushPlan(fallbackShell, fallbackCwd, { useConpty: false })
       return plans
     }
 
@@ -214,7 +218,12 @@ export class PtyManager {
   }
 
   write(id: string, data: string): void {
-    this.processes.get(id)?.write(data)
+    const proc = this.processes.get(id)
+    if (!proc || !data) return
+    // Hand the full payload to node-pty in one call. node-pty queues to the
+    // PTY pipe with the OS's own backpressure — no setTimeout delays means
+    // bracketed-paste boundaries stay tight and Claude sees one paste block.
+    proc.write(data)
   }
 
   resize(id: string, cols: number, rows: number): void {

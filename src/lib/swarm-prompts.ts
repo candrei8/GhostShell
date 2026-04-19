@@ -116,9 +116,12 @@ function toolsSection(ctx: SwarmPromptContext): string {
 
 ## Swarm CLI Tools (use these — do NOT edit JSON files directly)
 
-MESSAGING:  node ${r}/bin/gs-mail.cjs <cmd>
-TASKS:      node ${r}/bin/gs-task.cjs <cmd>
-FILE LOCKS: node ${r}/bin/gs-lock.cjs <cmd>
+IMPORTANT: Always wrap the script path in DOUBLE QUOTES so paths with spaces
+or special characters survive shell parsing. Pattern: \`node "PATH/bin/SCRIPT" args...\`
+
+MESSAGING:  node "${r}/bin/gs-mail.cjs" <cmd>
+TASKS:      node "${r}/bin/gs-task.cjs" <cmd>
+FILE LOCKS: node "${r}/bin/gs-lock.cjs" <cmd>
 
 ### gs-mail (messaging)
   send --to "<Agent>" --body "msg" [--type message|status|escalation|worker_done|assignment|review_request|review_complete|review_feedback|interview_response] [--meta '{"key":"val"}']

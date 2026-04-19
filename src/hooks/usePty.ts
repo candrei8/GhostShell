@@ -950,29 +950,41 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
         let inputBuffer = ''
 
         // Clipboard: copy/paste support (Ctrl+C with selection, Ctrl+Shift+C/V, Ctrl+V, right-click paste)
+        const sendRawToPty = (data: string) => {
+          const { syncInputsMode, sessions } = useTerminalStore.getState()
+          if (syncInputsMode === 'all') {
+            sessions.forEach((s) => {
+              try { window.ghostshell.ptyWrite(s.id, data) } catch {}
+            })
+          } else {
+            window.ghostshell.ptyWrite(sessionId, data)
+          }
+        }
+
         const writeToPty = (text: string, mirrorToInputBuffer = false) => {
           if (mirrorToInputBuffer) {
             inputBuffer += text.replace(/\x1b\[200~|\x1b\[201~/g, '')
           }
-
-          const { syncInputsMode, sessions } = useTerminalStore.getState()
-          if (syncInputsMode === 'all') {
-            sessions.forEach((s) => {
-              try { window.ghostshell.ptyWrite(s.id, text) } catch {}
-            })
-          } else {
-            window.ghostshell.ptyWrite(sessionId, text)
-          }
+          sendRawToPty(text)
         }
 
+        // Send the entire bracketed-paste payload in a single IPC message.
+        // The main-process PTY manager owns pipe-overflow protection via a
+        // per-PTY sequential write queue. Double-chunking here used to cause
+        // chunk interleaving when writes raced, which Claude's CLI saw as
+        // dozens of separate paste blocks ("[Pasted text #N +K lines]").
         const writeInjectedText = (text: string) => {
           if (!text) return
           const normalized = normalizeTerminalPasteText(text)
           if (!normalized) return
-          if (terminal.modes.bracketedPasteMode) {
-            writeToPty(`\x1b[200~${normalized}\x1b[201~`, true)
+
+          const useBracket = terminal.modes.bracketedPasteMode
+          inputBuffer += normalized
+
+          if (useBracket) {
+            sendRawToPty(`\x1b[200~${normalized}\x1b[201~`)
           } else {
-            writeToPty(normalized, true)
+            sendRawToPty(normalized)
           }
         }
 
@@ -1026,6 +1038,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
               if (sel) {
                 navigator.clipboard.writeText(sel)
                 terminal.clearSelection()
+              } else {
+                // No selection in smart-input/readOnly: send SIGINT so users
+                // can still interrupt a running process (e.g. npm run dev).
+                try { window.ghostshell.ptyWrite(sessionId, '\x03') } catch {}
               }
               return false
             }
@@ -1134,21 +1150,45 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
           termEl.addEventListener('contextmenu', handleContextMenu)
           cleanups.push(() => termEl.removeEventListener('contextmenu', handleContextMenu))
 
-          // Paste event: images are handled by GhostShell, while text is still bridged
-          // through our PTY writer so bracketed paste stays consistent.
+          const routePasteToSmartInput = (text: string) => {
+            window.dispatchEvent(
+              new CustomEvent(SMART_INPUT_FOCUS_EVENT, {
+                detail: { sessionId, text },
+              }),
+            )
+          }
+
+          // Paste event — we take full control: wrap in bracketed paste and
+          // deliver as a single IPC write. We block xterm's native paste
+          // handler (via stopImmediatePropagation) so the PTY never receives
+          // the same payload twice (which made Claude register extra paste
+          // blocks). The beforeinput/input paths are already no-ops for
+          // insertFromPaste, so this is the single source of truth.
           const handlePaste = (e: ClipboardEvent) => {
-            if (readOnlyRef.current) {
+            if (!e.clipboardData) return
+
+            const text = e.clipboardData.getData('text/plain')
+            if (text) {
               e.preventDefault()
               e.stopPropagation()
+              e.stopImmediatePropagation()
+              clearHelperTextarea()
+              if (readOnlyRef.current) {
+                routePasteToSmartInput(text)
+              } else {
+                writeInjectedText(text)
+              }
               return
             }
-            if (!e.clipboardData) return
-            // Check for image data synchronously
+
+            // Image-only clipboard: save to temp and emit the path.
+            if (readOnlyRef.current) return
             const items = e.clipboardData.items
             for (let i = 0; i < items.length; i++) {
               if (items[i].type.startsWith('image/')) {
                 e.preventDefault()
                 e.stopPropagation()
+                e.stopImmediatePropagation()
                 const mimeType = items[i].type
                 const blob = items[i].getAsFile()
                 if (!blob) return
@@ -1167,25 +1207,37 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
                 return
               }
             }
-            const text = e.clipboardData.getData('text/plain')
-            if (text) {
-              e.preventDefault()
-              e.stopPropagation()
-              writeInjectedText(text)
-            }
           }
+          // Capture on both termEl and the helper textarea itself: xterm's
+          // own listener is on the textarea, and a termEl-only capture can
+          // still let the textarea's own listener run. Attaching the capture
+          // hook to the textarea too guarantees we preempt xterm.
           termEl.addEventListener('paste', handlePaste, true)
           cleanups.push(() => termEl.removeEventListener('paste', handlePaste, true))
 
           const helperTextarea = termEl.querySelector('textarea')
           let lastStructuredInsert = ''
           let lastStructuredInsertAt = 0
-          const STRUCTURED_INSERT_DEDUPE_MS = 100
+          // Widened from 100ms to 350ms: tools like Wispr Flow and the native
+          // paste pipeline can fire `paste` + `beforeinput` + `input` with
+          // noticeable gaps, and the tighter window let duplicates slip through.
+          const STRUCTURED_INSERT_DEDUPE_MS = 350
+
+          const isDuplicateInsert = (text: string) => {
+            if (!text) return false
+            const now = Date.now()
+            return text === lastStructuredInsert && now - lastStructuredInsertAt < STRUCTURED_INSERT_DEDUPE_MS
+          }
 
           const handleStructuredInsert = (text: string) => {
             if (!text) return
+            if (isDuplicateInsert(text)) return
             lastStructuredInsert = text
             lastStructuredInsertAt = Date.now()
+            if (readOnlyRef.current) {
+              routePasteToSmartInput(text)
+              return
+            }
             writeInjectedText(text)
           }
 
@@ -1197,55 +1249,58 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
 
           const handleBeforeInput = (e: Event) => {
             if (!(e instanceof InputEvent)) return
-            if (readOnlyRef.current) {
-              e.preventDefault()
-              e.stopPropagation()
-              e.stopImmediatePropagation()
+            const text = e.data || ''
+            if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) {
+              if (readOnlyRef.current) {
+                // Swallow stray single-char keys in readOnly so they don't echo.
+                e.preventDefault()
+                e.stopPropagation()
+                e.stopImmediatePropagation()
+              }
               return
             }
-            const text = e.data || ''
-            if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) return
 
             e.preventDefault()
             e.stopPropagation()
             e.stopImmediatePropagation()
             clearHelperTextarea()
+            if (isDuplicateInsert(text)) return
             handleStructuredInsert(text)
           }
 
           const handleInput = (e: Event) => {
             if (!(e instanceof InputEvent)) return
-            if (readOnlyRef.current) {
-              e.stopPropagation()
-              e.stopImmediatePropagation()
-              clearHelperTextarea()
-              return
-            }
             const fallbackText =
               helperTextarea instanceof HTMLTextAreaElement
                 ? helperTextarea.value
                 : ''
             const text = e.data || fallbackText
-            if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) return
-
-            const now = Date.now()
-            if (text === lastStructuredInsert && now - lastStructuredInsertAt < STRUCTURED_INSERT_DEDUPE_MS) {
-              e.stopPropagation()
-              e.stopImmediatePropagation()
-              clearHelperTextarea()
+            if (!shouldCaptureStructuredTextInsertion(e.inputType, text)) {
+              if (readOnlyRef.current) {
+                e.stopPropagation()
+                e.stopImmediatePropagation()
+                clearHelperTextarea()
+              }
               return
             }
 
             e.stopPropagation()
             e.stopImmediatePropagation()
             clearHelperTextarea()
+            if (isDuplicateInsert(text)) return
             handleStructuredInsert(text)
           }
 
           if (helperTextarea instanceof HTMLTextAreaElement) {
+            // Attach paste capture to the textarea too: xterm's own paste
+            // listener lives here, and a termEl-only capture isn't guaranteed
+            // to block same-element listeners. stopImmediatePropagation in our
+            // capture phase ensures xterm never sees the event.
+            helperTextarea.addEventListener('paste', handlePaste, true)
             helperTextarea.addEventListener('beforeinput', handleBeforeInput, true)
             helperTextarea.addEventListener('input', handleInput, true)
             cleanups.push(() => {
+              helperTextarea.removeEventListener('paste', handlePaste, true)
               helperTextarea.removeEventListener('beforeinput', handleBeforeInput, true)
               helperTextarea.removeEventListener('input', handleInput, true)
             })

@@ -2009,6 +2009,34 @@ describe('GhostShell Path Helpers', () => {
     expect(path).toBe('/project/.ghostswarm/swarms/pane-123')
   })
 
+  it('buildSwarmRoot normalizes Windows backslash paths to POSIX', async () => {
+    // Regression: a Windows directory like `C:\Users\zetar\Documents\proj`
+    // used to be concatenated raw, producing a mixed-slash Frankenstein path
+    // (`C:\Users\zetar\...\proj/.ghostswarm/...`) that bash on Windows ate
+    // the backslashes from when an LLM agent ran `node <path>/bin/gs-mail.cjs`.
+    // Forward-slash form survives unquoted bash parsing on Git Bash/MSYS.
+    const { buildSwarmRoot } = await import('../ghostshell')
+
+    expect(buildSwarmRoot('C:\\Users\\zetar\\proj', 'p1')).toBe(
+      'C:/Users/zetar/proj/.ghostswarm/swarms/p1',
+    )
+    expect(buildSwarmRoot('C:\\proj\\', 'p1')).toBe(
+      'C:/proj/.ghostswarm/swarms/p1',
+    )
+    expect(buildSwarmRoot('C:\\proj/sub', 'p1')).toBe(
+      'C:/proj/sub/.ghostswarm/swarms/p1',
+    )
+  })
+
+  it('normalizePosixPath converts backslashes and trims trailing slashes', async () => {
+    const { normalizePosixPath } = await import('../ghostshell')
+
+    expect(normalizePosixPath('C:\\Users\\zetar\\proj')).toBe('C:/Users/zetar/proj')
+    expect(normalizePosixPath('/posix/path/')).toBe('/posix/path')
+    expect(normalizePosixPath('C:\\proj\\\\')).toBe('C:/proj')
+    expect(normalizePosixPath('/already/posix')).toBe('/already/posix')
+  })
+
   it('swarmBinPath, swarmKnowledgePath, swarmReportsPath return correct subdirectories', async () => {
     const { swarmBinPath, swarmKnowledgePath, swarmReportsPath, swarmInboxPath, swarmPromptsPath } = await import('../ghostshell')
 

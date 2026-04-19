@@ -306,7 +306,7 @@ export function TerminalPane({
   )
 
   const paneStyle = useMemo(() => ({
-    background: '#0a0e18',
+    background: 'var(--ghost-bg)',
   }), [])
 
   const handleQuickLaunchComplete = () => {
@@ -361,7 +361,11 @@ export function TerminalPane({
       {/* Pane Header */}
       {showPaneLabel && (
         <div
-          className="pane-header shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06]"
+          className="pane-header shrink-0 flex items-center justify-between px-3 py-1.5 border-b"
+          style={{
+            borderColor: 'color-mix(in srgb, var(--ghost-border) 70%, transparent)',
+            background: 'color-mix(in srgb, var(--ghost-sidebar) 55%, transparent)',
+          }}
         >
 
           {/* Left: Identity */}
@@ -401,7 +405,14 @@ export function TerminalPane({
                       setIsEditingTitle(false)
                     }
                   }}
-                  className="max-w-[180px] rounded-md border border-white/[0.1] bg-black/30 px-1.5 py-0.5 text-[12px] font-medium text-white/85 outline-none focus:border-white/[0.2]"
+                  className="max-w-[180px] rounded-md border px-1.5 py-0.5 text-[12px] font-medium outline-none focus:shadow-none"
+                  style={{
+                    borderColor: 'var(--ghost-border)',
+                    background: 'color-mix(in srgb, var(--ghost-sidebar) 70%, transparent)',
+                    color: 'var(--ghost-text)',
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--ghost-accent)' }}
+                  onBlurCapture={(e) => { e.currentTarget.style.borderColor = 'var(--ghost-border)' }}
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
@@ -470,7 +481,14 @@ export function TerminalPane({
                       setIsEditingDesc(false)
                     }
                   }}
-                  className="max-w-[220px] rounded-md border border-white/[0.08] bg-black/30 px-1.5 py-0.5 text-[10px] text-white/60 outline-none focus:border-white/[0.15]"
+                  className="max-w-[220px] rounded-md border px-1.5 py-0.5 text-[10px] outline-none"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--ghost-border) 80%, transparent)',
+                    background: 'color-mix(in srgb, var(--ghost-sidebar) 70%, transparent)',
+                    color: 'color-mix(in srgb, var(--ghost-text) 70%, transparent)',
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--ghost-accent)' }}
+                  onBlurCapture={(e) => { e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--ghost-border) 80%, transparent)' }}
                   placeholder="Set task focus..."
                   onClick={(e) => e.stopPropagation()}
                 />
@@ -546,7 +564,10 @@ export function TerminalPane({
             )}
 
             {showSmartInput && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-14 bg-gradient-to-t from-[#0a0e18] to-transparent" />
+              <div
+                className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-px"
+                style={{ background: 'color-mix(in srgb, var(--ghost-border) 60%, transparent)' }}
+              />
             )}
           </div>
 

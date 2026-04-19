@@ -27,6 +27,7 @@ import { SwarmFileDiffViewer } from './SwarmFileDiffViewer'
 import { SwarmKnowledgeGraphView } from './SwarmKnowledgeGraphView'
 import { createSnapshot } from '../../lib/swarm-time-travel'
 import { loadGraph } from '../../lib/swarm-knowledge-graph'
+import { resumeSwarmRuntime } from '../../lib/swarm-orchestrator'
 
 // ─── Prediction Tracker ─────────────────────────────────────
 
@@ -91,6 +92,10 @@ export function SwarmDashboard() {
   const completeSwarm = useSwarmStore((s) => s.completeSwarm)
   const incrementTick = useSwarmStore((s) => s.incrementTick)
   const setSwarmViewMode = useSwarmStore((s) => s.setSwarmViewMode)
+  // Reactive selector — using `conflicts` inside the
+  // render reads the value once but never resubscribes, so the SwarmFileDiffViewer
+  // and SwarmExecutionTimeline silently never updated when new conflicts arrived.
+  const conflicts = useSwarmStore((s) => s.conflicts)
 
   // Local dashboard state
   const [viewMode, setViewMode] = useState<CommandCenterViewMode>('split')
@@ -131,7 +136,7 @@ export function SwarmDashboard() {
             activeSwarm.agents,
             activeSwarm.tasks,
             activeSwarm.messages,
-            useSwarmStore.getState().conflicts,
+            conflicts,
             activeSwarm.startedAt,
           )
         }
@@ -151,7 +156,7 @@ export function SwarmDashboard() {
           activeSwarm.agents,
           activeSwarm.tasks,
           activeSwarm.messages,
-          useSwarmStore.getState().conflicts,
+          conflicts,
           activeSwarm.startedAt,
         )
       }
@@ -220,7 +225,14 @@ export function SwarmDashboard() {
         onViewModeChange={setViewMode}
         onBack={handleBack}
         onPause={() => pauseSwarm(activeSwarm.id)}
-        onResume={() => resumeSwarm(activeSwarm.id)}
+        onResume={() => {
+          // Critical: resumeSwarm only flips status. resumeSwarmRuntime restarts
+          // the message injector, task sync, self-heal, and CI monitor — without
+          // it, the dashboard freezes (no new messages, no agent updates) after
+          // a pause/resume cycle even though the PTYs are still running.
+          resumeSwarm(activeSwarm.id)
+          resumeSwarmRuntime(activeSwarm.id)
+        }}
         onStop={() => completeSwarm(activeSwarm.id)}
       />
 
@@ -289,7 +301,7 @@ export function SwarmDashboard() {
                     agents={displayAgents}
                     messages={activeSwarm.messages}
                     tasks={activeSwarm.tasks}
-                    conflicts={useSwarmStore.getState().conflicts}
+                    conflicts={conflicts}
                     simulation={activeSwarm.simulation}
                     startedAt={activeSwarm.startedAt}
                     selectedAgentId={selectedAgentId}
@@ -313,7 +325,7 @@ export function SwarmDashboard() {
                     agents={displayAgents}
                     messages={activeSwarm.messages}
                     tasks={activeSwarm.tasks}
-                    conflicts={useSwarmStore.getState().conflicts}
+                    conflicts={conflicts}
                     simulation={activeSwarm.simulation}
                     startedAt={activeSwarm.startedAt}
                     selectedAgentId={selectedAgentId}
@@ -330,7 +342,7 @@ export function SwarmDashboard() {
 
             {viewMode === 'conflicts' && (
               <SwarmFileDiffViewer
-                conflicts={useSwarmStore.getState().conflicts}
+                conflicts={conflicts}
                 swarmId={activeSwarm.id}
               />
             )}

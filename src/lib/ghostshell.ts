@@ -26,12 +26,31 @@ export const GHOSTSWARM_DIR = '.ghostswarm'
 export const SWARMS_SUBDIR = 'swarms'
 
 /**
+ * Normalize a directory path to canonical POSIX form (forward slashes, no
+ * trailing slash). This is the single point that converts Windows-style
+ * paths (`C:\Users\foo`) into the form used by every swarm helper, prompt
+ * template, and metadata file (`C:/Users/foo`).
+ *
+ * Why: bash on Windows (Git Bash/MSYS) eats unquoted backslashes, turning
+ * `C:\Users\zetar\...` into `C:UserszetarDocumentsCEO...` when the LLM pastes
+ * the path into a `node ...` command. Forward slashes are understood by both
+ * bash and Node, so normalizing here kills the bug at the root and avoids
+ * having to quote 50+ template strings.
+ */
+export function normalizePosixPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+/**
  * Compute the canonical swarm root path for a given project directory and pane.
  *
- * Result: `{projectDir}/.ghostswarm/swarms/{paneId}`
+ * Result: `{projectDir}/.ghostswarm/swarms/{paneId}` with all backslashes
+ * converted to forward slashes (POSIX form). Safe to embed unquoted in bash
+ * commands as long as the directory contains no spaces.
  */
 export function buildSwarmRoot(projectDir: string, paneId: string): string {
-  return `${projectDir}/${GHOSTSWARM_DIR}/${SWARMS_SUBDIR}/${paneId}`
+  const normalized = normalizePosixPath(projectDir)
+  return `${normalized}/${GHOSTSWARM_DIR}/${SWARMS_SUBDIR}/${paneId}`
 }
 
 /** Canonical bin/ path inside a swarm root. */

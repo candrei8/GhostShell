@@ -33,6 +33,7 @@ import {
   swarmKnowledgePath,
   swarmReportsPath,
   swarmPromptsPath,
+  normalizePosixPath,
 } from './ghostshell'
 
 // ─── Constants ──────────────────────────────────────────────
@@ -238,12 +239,15 @@ async function writeSwarmMeta(
   meta: SwarmLayoutMeta,
   swarm: Swarm,
 ): Promise<void> {
+  // Normalize directory to POSIX form so the metadata file matches the
+  // canonical swarmRoot (which is also POSIX). Mixing slash styles in
+  // swarm-meta.json is the visible footprint of the legacy path bug.
   const payload = {
     ...meta,
     swarmId: swarm.id,
     swarmName: swarm.config.name,
     mission: swarm.config.mission,
-    directory: swarm.config.directory,
+    directory: normalizePosixPath(swarm.config.directory),
     swarmRoot,
     skills: swarm.config.skills,
   }
@@ -270,6 +274,17 @@ async function writeAgentsJson(
     `${swarmRoot}/agents.json`,
     JSON.stringify({ agents, layout: meta.layoutPreset, tier: meta.tierLabel }, null, 2) + '\n',
   )
+
+  // Pre-create per-agent inbox directories so a freshly spawned agent that
+  // calls `gs-mail check` before any sender writes to it sees "No messages"
+  // instead of "No inbox found for X" — the latter looks like a fatal error
+  // and confuses the LLM into thinking the messaging layer is broken.
+  // Also pre-create the @operator inbox used by escalation channels.
+  const inboxRoot = `${swarmRoot}/inbox`
+  for (const a of agents) {
+    await window.ghostshell.fsCreateDir(`${inboxRoot}/${a.label}`)
+  }
+  await window.ghostshell.fsCreateDir(`${inboxRoot}/@operator`)
 }
 
 // ─── SWARM_BOARD.md ──────────────────────────────────────────

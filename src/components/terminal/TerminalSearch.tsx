@@ -47,8 +47,14 @@ export function TerminalSearch({ isOpen, onClose, onSearchNext, onSearchPrev, on
   if (!isOpen) return null
 
   return (
-    <div className="absolute top-1 right-2 z-30 flex items-center gap-0.5 rounded-lg border border-white/[0.08] bg-[#0a0f1a]/95 px-2 py-1 backdrop-blur-sm shadow-[0_4px_16px_rgba(0,0,0,0.3)]">
-      <Search className="w-3 h-3 text-white/25 shrink-0 mr-1" />
+    <div
+      className="absolute top-1 right-2 z-30 flex items-center gap-0.5 rounded-lg border px-2 py-1 backdrop-blur-md shadow-[0_4px_16px_rgba(0,0,0,0.3)]"
+      style={{
+        borderColor: 'color-mix(in srgb, var(--ghost-border) 85%, transparent)',
+        background: 'color-mix(in srgb, var(--ghost-sidebar) 92%, transparent)',
+      }}
+    >
+      <Search className="w-3 h-3 shrink-0 mr-1" style={{ color: 'var(--ghost-text-dim)' }} />
       <input
         ref={inputRef}
         type="text"
@@ -56,7 +62,8 @@ export function TerminalSearch({ isOpen, onClose, onSearchNext, onSearchPrev, on
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Search..."
-        className="w-44 bg-transparent text-[12px] text-white/80 outline-none placeholder:text-white/25"
+        className="w-44 bg-transparent text-[12px] outline-none placeholder:text-white/25"
+        style={{ color: 'var(--ghost-text)' }}
       />
       <button
         onClick={() => handleSearch('prev')}

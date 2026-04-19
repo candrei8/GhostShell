@@ -9,9 +9,12 @@ module.exports = {
           surface: 'var(--ghost-surface)',
           sidebar: 'var(--ghost-sidebar)',
           border: 'var(--ghost-border)',
-          text: 'var(--ghost-text)',
+          // `text` + `accent` use rgb(<triplet> / <alpha-value>) so opacity
+          // modifiers (text-ghost-text/60, bg-ghost-accent/10) work correctly.
+          // Triplets are kept in sync with the hex tokens by applyTheme().
+          text: 'rgb(var(--ghost-text-rgb) / <alpha-value>)',
           'text-dim': 'var(--ghost-text-dim)',
-          accent: 'var(--ghost-accent)',
+          accent: 'rgb(var(--ghost-accent-rgb) / <alpha-value>)',
           'accent-2': 'var(--ghost-accent-2)',
           'accent-3': 'var(--ghost-accent-3)',
           success: 'var(--ghost-success)',

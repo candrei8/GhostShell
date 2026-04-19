@@ -35,11 +35,15 @@ export function AppLayout() {
   const closeWizard = useSwarmStore((s) => s.closeWizard)
   const setActiveSwarm = useSwarmStore((s) => s.setActiveSwarm)
 
-  // Determine if the swarm dashboard should be shown as the main view
+  // Determine if the swarm dashboard should be shown as the main view.
+  // Permissive: any non-completed status counts as "active" so the toggle and
+  // dashboard remain accessible even in transitional states (idle, error, etc.)
+  // — being too strict here used to leave the user trapped in terminals mode
+  // with no way back when the status briefly fell outside the allowed set.
   const swarms = useSwarmStore((s) => s.swarms)
   const activeSwarm = activeSwarmId ? swarms.find((s) => s.id === activeSwarmId) : undefined
-  const isSwarmRunning = activeSwarm && (activeSwarm.status === 'running' || activeSwarm.status === 'launching' || activeSwarm.status === 'paused')
-  const showDashboardMode = isSwarmRunning && swarmViewMode === 'dashboard'
+  const isSwarmActive = !!activeSwarm && activeSwarm.status !== 'completed'
+  const showDashboardMode = isSwarmActive && swarmViewMode === 'dashboard'
 
   const setSidebarView = useCallback((view: SidebarView | null) => {
     setSettingsOpen(false)
@@ -295,8 +299,10 @@ export function AppLayout() {
         {!showDashboardMode && <VibeSidebar activeView={activeView} />}
       </div>
 
-      {/* Floating view mode toggle when swarm is active */}
-      {isSwarmRunning && <SwarmViewToggle />}
+      {/* Floating view mode toggle — visible whenever a swarm exists, regardless
+          of status. Without this guarantee the user can get stranded in
+          terminals mode with no way to reach the dashboard. */}
+      {isSwarmActive && <SwarmViewToggle />}
 
       {monitorOpen && (
         <div className="shrink-0 px-3 pb-3">

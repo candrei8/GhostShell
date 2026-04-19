@@ -35,8 +35,6 @@ import { useWorkspaceStore } from '../../stores/workspaceStore'
 
 // ─── Constants ───────────────────────────────────────────────
 
-const ACCENT = '#38bdf8' // sky-400
-
 interface QuickLaunchProps {
   onLaunched: () => void
   sessionId?: string // If provided, update this session instead of creating new ones
@@ -187,11 +185,11 @@ function StepBar({ step }: { step: 1 | 2 }) {
   return (
     <div className="flex items-center justify-center absolute left-1/2 -translate-x-1/2 top-[60px]">
       <div className="flex items-center">
-        <div className={`flex h-8 items-center justify-center rounded-full px-5 text-[11px] font-bold tracking-[0.15em] uppercase transition-all ${step >= 1 ? 'border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8]' : 'text-white/40 border border-white/10 bg-white/[0.02]'}`}>
+        <div className={`flex h-8 items-center justify-center rounded-full px-5 text-[11px] font-bold tracking-[0.15em] uppercase transition-all ${step >= 1 ? 'border border-ghost-accent/40 bg-ghost-accent/10 text-ghost-accent' : 'text-white/40 border border-white/10 bg-white/[0.02]'}`}>
           <span className="mr-2 opacity-50 font-normal">1</span> LAYOUT
         </div>
-        <div className={`h-px w-8 transition-all duration-500 mx-2 ${step >= 2 ? 'bg-[#38bdf8]/40' : 'bg-white/10'}`} />
-        <div className={`flex h-8 items-center justify-center rounded-full px-5 text-[11px] font-bold tracking-[0.15em] uppercase transition-all ${step >= 2 ? 'border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8]' : 'text-white/40 border border-white/10 bg-white/[0.02]'}`}>
+        <div className={`h-px w-8 transition-all duration-500 mx-2 ${step >= 2 ? 'bg-ghost-accent/40' : 'bg-white/10'}`} />
+        <div className={`flex h-8 items-center justify-center rounded-full px-5 text-[11px] font-bold tracking-[0.15em] uppercase transition-all ${step >= 2 ? 'border border-ghost-accent/40 bg-ghost-accent/10 text-ghost-accent' : 'text-white/40 border border-white/10 bg-white/[0.02]'}`}>
           <span className="mr-2 opacity-50 font-normal">2</span> AGENTS
         </div>
       </div>
@@ -689,10 +687,10 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                 </div>
 
                 {/* Terminal command input */}
-                <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden transition-all focus-within:border-[#38bdf8]/30">
+                <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden transition-all focus-within:border-ghost-accent/30">
                   <div className="flex items-center px-4 py-3 gap-3">
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[15px] font-bold text-[#38bdf8] leading-none select-none">{'>_'}</span>
+                      <span className="text-[15px] font-bold text-ghost-accent leading-none select-none">{'>_'}</span>
                       <span className="text-white/25 text-sm font-mono select-none">$</span>
                     </div>
                     <input
@@ -717,7 +715,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                         }
                       }}
                       placeholder="cd ~/projects/my-app or ../repo"
-                      className="flex-1 bg-transparent text-[14px] text-white font-mono placeholder:text-white/20 focus:outline-none caret-[#38bdf8]"
+                      className="flex-1 bg-transparent text-[14px] text-white font-mono placeholder:text-white/20 focus:outline-none caret-ghost-accent"
                     />
                     <button
                       onClick={handleTerminalCommand}
@@ -749,7 +747,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                               onMouseEnter={() => setSuggestIdx(i)}
                               className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px] font-mono transition-colors ${
                                 i === suggestIdx
-                                  ? 'bg-[#38bdf8]/10 text-[#38bdf8]'
+                                  ? 'bg-ghost-accent/10 text-ghost-accent'
                                   : 'text-white/50 hover:text-white/70'
                               }`}
                             >
@@ -802,7 +800,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                           animate={{ opacity: 1, scale: 1 }}
                           transition={{ duration: 0.2, delay: idx * 0.04 }}
                           whileTap={{ scale: 0.97 }}
-                          className="group relative flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] pl-4 pr-9 py-3 text-left transition-all hover:border-[#38bdf8]/30 hover:bg-[#38bdf8]/5"
+                          className="group relative flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] pl-4 pr-9 py-3 text-left transition-all hover:border-ghost-accent/30 hover:bg-ghost-accent/5"
                         >
                           <div className="flex flex-col min-w-0">
                             <span className="text-[13px] font-bold text-white truncate">{preset.name}</span>
@@ -837,7 +835,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                         onClick={() => setGridLayout(opt.layout)}
                         className={`group flex flex-col items-center justify-center gap-4 rounded-2xl border p-5 transition-all ${
                           active
-                            ? 'border-[#38bdf8]/50 bg-[#38bdf8]/10 text-[#38bdf8] scale-[1.02]'
+                            ? 'border-ghost-accent/50 bg-ghost-accent/10 text-ghost-accent scale-[1.02]'
                             : 'border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20 hover:bg-white/[0.04] hover:text-white/80'
                         }`}
                       >
@@ -904,7 +902,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                 </button>
                 <button
                   onClick={() => setStep(2)}
-                  className="group flex h-[52px] items-center gap-2.5 rounded-xl bg-[#38bdf8] px-8 text-[15px] font-bold text-[#050812] transition-all hover:bg-[#38bdf8]/90 active:scale-[0.98]"
+                  className="group flex h-[52px] items-center gap-2.5 rounded-xl bg-ghost-accent px-8 text-[15px] font-bold text-ghost-sidebar transition-all hover:bg-ghost-accent/90 active:scale-[0.98]"
                 >
                   Configure Agents
                   <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
@@ -959,8 +957,8 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                         animate={{ opacity: 1, scale: 1 }}
                         className={`flex h-[42px] w-[42px] items-center justify-center rounded-[16px] border transition-all duration-300 ${
                           isAssigned 
-                            ? 'border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8]' 
-                            : 'border-[#38bdf8]/20 bg-transparent text-[#38bdf8]/50 border-solid'
+                            ? 'border-ghost-accent/40 bg-ghost-accent/10 text-ghost-accent' 
+                            : 'border-ghost-accent/20 bg-transparent text-ghost-accent/50 border-solid'
                         }`}
                       >
                         <Icon className="h-5 w-5" />
@@ -974,7 +972,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                      <motion.p 
                        key="unassigned"
                        initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
-                       className="text-[13px] font-bold uppercase tracking-widest text-[#38bdf8]/50"
+                       className="text-[13px] font-bold uppercase tracking-widest text-ghost-accent/50"
                      >
                        {slotCount - totalAssigned} slot{slotCount - totalAssigned > 1 ? 's' : ''} left
                      </motion.p>
@@ -982,7 +980,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                      <motion.p 
                        key="ready"
                        initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
-                       className="text-[13px] font-bold uppercase tracking-widest text-[#38bdf8]"
+                       className="text-[13px] font-bold uppercase tracking-widest text-ghost-accent"
                      >
                        ALL SLOTS FILLED
                      </motion.p>
@@ -1002,12 +1000,12 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                       key={p.id}
                       className={`group flex flex-col items-center gap-6 rounded-[24px] border p-6 transition-all duration-300 relative overflow-hidden ${
                         hasCount
-                          ? 'border-[#38bdf8]/40 bg-white/[0.02]'
+                          ? 'border-ghost-accent/40 bg-white/[0.02]'
                           : 'border-white/10 bg-white/[0.01] hover:bg-white/[0.03] hover:border-white/20'
                       }`}
                     >
                       <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-[20px] transition-all duration-300 z-10 ${
-                        hasCount ? 'bg-[#38bdf8]/20 text-[#38bdf8]' : 'bg-white/[0.03] text-white/30 group-hover:text-white/50'
+                        hasCount ? 'bg-ghost-accent/20 text-ghost-accent' : 'bg-white/[0.03] text-white/30 group-hover:text-white/50'
                       }`}>
                         <Icon className="h-8 w-8" />
                       </div>
@@ -1024,15 +1022,15 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                         disabled={count === slotCount}
                         className={`z-10 w-full rounded-xl py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition-all mt-1 ${
                           count === slotCount
-                            ? 'border border-[#38bdf8]/30 bg-[#38bdf8]/10 text-[#38bdf8]/50 cursor-default'
-                            : 'border border-white/10 bg-white/[0.03] text-white/40 hover:border-[#38bdf8]/30 hover:bg-[#38bdf8]/10 hover:text-[#38bdf8]'
+                            ? 'border border-ghost-accent/30 bg-ghost-accent/10 text-ghost-accent/50 cursor-default'
+                            : 'border border-white/10 bg-white/[0.03] text-white/40 hover:border-ghost-accent/30 hover:bg-ghost-accent/10 hover:text-ghost-accent'
                         }`}
                       >
                         All {slotCount}
                       </button>
 
                       <div className={`flex items-center justify-between w-full rounded-[16px] p-1 border transition-colors mt-2 z-10 ${
-                        hasCount ? 'bg-[#050812]/80 border-[#38bdf8]/20' : 'bg-white/[0.02] border-transparent'
+                        hasCount ? 'bg-[#050812]/80 border-ghost-accent/20' : 'bg-white/[0.02] border-transparent'
                       }`}>
                         <button
                           onClick={() => decrement(p.id)}
@@ -1041,7 +1039,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                         >
                           <Minus className="h-5 w-5" />
                         </button>
-                        <span className={`w-6 text-center text-[19px] font-extrabold tabular-nums transition-colors ${hasCount ? 'text-[#38bdf8]' : 'text-white/20'}`}>
+                        <span className={`w-6 text-center text-[19px] font-extrabold tabular-nums transition-colors ${hasCount ? 'text-ghost-accent' : 'text-white/20'}`}>
                           {count}
                         </span>
                         <button
@@ -1067,8 +1065,8 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                     transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                     className="overflow-hidden"
                   >
-                    <div className="flex items-center gap-2 rounded-2xl border border-[#38bdf8]/20 bg-[#38bdf8]/5 p-3">
-                      <Save className="h-4 w-4 text-[#38bdf8]/50 shrink-0 ml-1" />
+                    <div className="flex items-center gap-2 rounded-2xl border border-ghost-accent/20 bg-ghost-accent/5 p-3">
+                      <Save className="h-4 w-4 text-ghost-accent/50 shrink-0 ml-1" />
                       <input
                         autoFocus
                         value={presetName}
@@ -1083,7 +1081,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                       <button
                         onClick={handleSavePreset}
                         disabled={!presetName.trim()}
-                        className="shrink-0 px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-[0.12em] text-[#050812] bg-[#38bdf8] transition-all hover:bg-[#38bdf8]/90 disabled:opacity-40 active:scale-[0.97]"
+                        className="shrink-0 px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-[0.12em] text-ghost-sidebar bg-ghost-accent transition-all hover:bg-ghost-accent/90 disabled:opacity-40 active:scale-[0.97]"
                       >
                         Save
                       </button>
@@ -1112,7 +1110,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                     onClick={() => setShowSavePreset(!showSavePreset)}
                     className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold uppercase tracking-[0.1em] transition-all ${
                       showSavePreset
-                        ? 'text-[#38bdf8] bg-[#38bdf8]/10'
+                        ? 'text-ghost-accent bg-ghost-accent/10'
                         : 'text-white/40 hover:bg-white/[0.06] hover:text-white'
                     }`}
                   >
@@ -1123,7 +1121,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
                 <button
                   onClick={handleLaunch}
                   disabled={launching || totalAssigned !== slotCount}
-                  className="group flex h-[52px] items-center gap-2.5 rounded-xl bg-[#38bdf8] px-10 text-[15px] font-bold text-[#050812] transition-all hover:bg-[#38bdf8]/90 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed active:scale-[0.98]"
+                  className="group flex h-[52px] items-center gap-2.5 rounded-xl bg-ghost-accent px-10 text-[15px] font-bold text-ghost-sidebar transition-all hover:bg-ghost-accent/90 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed active:scale-[0.98]"
                 >
                   {launching ? (
                      <div className="h-5 w-5 rounded-full border-2 border-[#050812]/30 border-t-[#050812] animate-spin" />
