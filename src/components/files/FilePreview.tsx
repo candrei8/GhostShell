@@ -427,7 +427,7 @@ export function FilePreview({
         )}
 
         {previewKind === 'image' && !error && fileUrl && (
-          <div className="flex min-h-[240px] items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.06),_transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))] p-4">
+          <div className="flex min-h-[240px] items-center justify-center bg-white/[0.03] p-4">
             <img
               src={fileUrl}
               alt={file.name}

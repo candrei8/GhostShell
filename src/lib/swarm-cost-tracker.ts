@@ -13,9 +13,11 @@ interface ModelPricing {
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
   // Claude models
-  'claude-opus-4-6':          { input: 15, output: 75, label: 'Opus 4.6' },
+  'claude-fable-5':           { input: 10, output: 50, label: 'Fable 5' },
+  'claude-opus-4-8':          { input: 5, output: 25, label: 'Opus 4.8' },
+  'claude-opus-4-6':          { input: 5, output: 25, label: 'Opus 4.6' },
   'claude-sonnet-4-6':        { input: 3, output: 15, label: 'Sonnet 4.6' },
-  'claude-haiku-4-5-20251001': { input: 0.25, output: 1.25, label: 'Haiku 4.5' },
+  'claude-haiku-4-5-20251001': { input: 1, output: 5, label: 'Haiku 4.5' },
   // Gemini models
   'gemini-3.1-pro-preview':   { input: 1.25, output: 5, label: 'Gemini 3.1 Pro' },
   'pro':                      { input: 1.25, output: 5, label: 'Gemini Pro' },

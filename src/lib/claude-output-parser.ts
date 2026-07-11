@@ -1,8 +1,22 @@
 import { ClaudeActivity, Provider, SubAgentType } from './types'
 import { getKnownContextWindow } from './providers'
 
-// Strip ANSI escape sequences
-const ANSI_STRIP = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\(B/g
+// Strip ANSI/VT escape sequences. Covers CSI with private-parameter bytes
+// (\x1b[?25l, \x1b[?2026h, \x1b[?1049h — emitted constantly by Claude Code),
+// OSC terminated by BEL *or* ST (\x1b\\, which ConPTY/Windows emits), DCS/APC/PM
+// strings, charset designations, and stray 2-byte escapes. The old pattern's
+// [0-9;]* could not consume '?' so it leaked those control bytes into the
+// parsed text and the Companion chat.
+const ANSI_STRIP = new RegExp(
+  [
+    '\\x1b\\][^\\x1b\\x07]*(?:\\x07|\\x1b\\\\)?', // OSC (BEL/ST terminated or partial)
+    '\\x1b[P_^][^\\x1b]*(?:\\x1b\\\\)?',          // DCS/APC/PM (ST terminated or partial)
+    '\\x1b\\[[0-9;?!>=]*[ -/]*[@-~]',             // CSI incl. private markers/intermediates
+    '\\x1b[()#][0-9A-Za-z]',                      // charset / line-size designations
+    '\\x1b[@-Z\\\\-_=><]',                        // other 2-byte escapes
+  ].join('|'),
+  'g',
+)
 
 // Tool call patterns from Claude Code CLI output
 const TOOL_READ = /\bRead\s*\(\s*file_path:\s*"([^"]+)"/

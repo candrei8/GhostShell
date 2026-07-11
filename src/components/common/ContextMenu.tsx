@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 interface MenuItem {
   label: string
@@ -16,22 +17,48 @@ interface ContextMenuProps {
 
 export function ContextMenu({ items, onClose, position }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
+  // Portalled to <body> with position:fixed so it is never clipped by an
+  // ancestor's overflow:hidden (e.g. the titlebar). Coords are clamped to the
+  // viewport, flipping up/left when near an edge.
+  const [coords, setCoords] = useState<{ left: number; top: number }>(() => ({
+    left: position?.x ?? 0,
+    top: position?.y ?? 0,
+  }))
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const margin = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    let left = position?.x ?? 0
+    let top = position?.y ?? 0
+    if (left + rect.width + margin > vw) left = Math.max(margin, vw - rect.width - margin)
+    if (top + rect.height + margin > vh) top = Math.max(margin, vh - rect.height - margin)
+    setCoords({ left, top })
+  }, [position?.x, position?.y, items.length])
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose()
-      }
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [onClose])
 
-  return (
+  return createPortal(
     <div
       ref={ref}
-      className="absolute bg-ghost-surface border border-ghost-border rounded-md shadow-minimal-lg z-50 py-1 min-w-[160px]"
-      style={position ? { left: position.x, top: position.y } : undefined}
+      className="fixed bg-ghost-surface border border-ghost-border rounded-md shadow-minimal-lg z-[999] py-1 min-w-[160px]"
+      style={{ left: coords.left, top: coords.top }}
     >
       {items.map((item, i) => (
         item.divider ? (
@@ -46,7 +73,7 @@ export function ContextMenu({ items, onClose, position }: ContextMenuProps) {
             className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
               item.danger
                 ? 'text-red-400 hover:bg-red-500/10'
-                : 'text-ghost-text hover:bg-slate-800/50'
+                : 'text-ghost-text hover:bg-white/[0.06]'
             }`}
           >
             {item.icon}
@@ -54,6 +81,7 @@ export function ContextMenu({ items, onClose, position }: ContextMenuProps) {
           </button>
         )
       ))}
-    </div>
+    </div>,
+    document.body,
   )
 }

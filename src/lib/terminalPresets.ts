@@ -309,13 +309,17 @@ export function getCliAppearancePreset(
     ? fallbackCursorStyle
     : tuning.fallbackCursorStyle
 
+  // letterSpacing is hard-zeroed for every profile: fractional letter spacing
+  // desyncs the WebGL renderer's glyph-atlas cell math and paints ghost
+  // (duplicated) glyphs at row starts during TUI repaints. The per-profile
+  // values kept in the data above are legacy and intentionally ignored.
   if (!safeProvider) {
     return {
       theme: baseTheme,
       cursorStyle: safeCursorStyle,
       cursorBlink: fallbackCursorBlink ?? tuning.fallbackCursorBlink,
       lineHeight: tuning.fallbackLineHeight,
-      letterSpacing: tuning.fallbackLetterSpacing,
+      letterSpacing: 0,
       searchDecorations: tuning.fallbackSearch || DEFAULT_SEARCH_DECORATIONS,
     }
   }
@@ -345,7 +349,7 @@ export function getCliAppearancePreset(
     cursorStyle: profile.cursorStyle,
     cursorBlink: profile.cursorBlink,
     lineHeight: profile.lineHeight,
-    letterSpacing: profile.letterSpacing,
+    letterSpacing: 0,
     searchDecorations: profile.search,
   }
 }

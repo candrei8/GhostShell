@@ -20,8 +20,17 @@ function getPromptProvider(sessionId: string): Provider {
   return session?.detectedProvider || 'claude'
 }
 
+// True only for a real interactive AI CLI session (agent-backed or a detected
+// provider). A plain PowerShell/bash tab is NOT interactive here.
+function isInteractiveProviderSession(sessionId: string): boolean {
+  const session = useTerminalStore.getState().getSession(sessionId)
+  return !!session?.agentId || !!session?.detectedProvider
+}
+
 function getNativeMultilineSequence(provider: Provider): string {
+  // Claude Code: ESC+CR (Alt/Option+Enter) inserts a newline without submitting.
   if (provider === 'claude') return '\x1b\r'
+  // Codex / Gemini: raw LF inserts a newline without submitting.
   return '\n'
 }
 
@@ -47,7 +56,12 @@ function detectProviderFromCommand(command: string): Provider | null {
   return null
 }
 
-function writePrompt(sessionId: string, command: string, provider: Provider): void {
+function writePrompt(
+  sessionId: string,
+  command: string,
+  provider: Provider,
+  isInteractive: boolean,
+): void {
   const lines = command.split('\n')
 
   if (lines.length <= 1) {
@@ -55,8 +69,11 @@ function writePrompt(sessionId: string, command: string, provider: Provider): vo
     return
   }
 
-  // Batch all lines into a single ptyWrite to guarantee ordering
-  const multilineSequence = getNativeMultilineSequence(provider)
+  // For a plain shell (not an interactive AI CLI) never use ESC+CR — a bare ESC
+  // clears the current PSReadLine input line, wiping the command. Submit each
+  // line with CR so the shell runs them in order. Interactive providers use
+  // their native soft-newline sequence so the whole prompt stays on one turn.
+  const multilineSequence = isInteractive ? getNativeMultilineSequence(provider) : '\r'
   const payload = lines.join(multilineSequence) + '\r'
   window.ghostshell.ptyWrite(sessionId, payload)
 }
@@ -93,6 +110,11 @@ export function submitPromptToSession(
   if (!normalizedCommand) return false
 
   registerPromptSubmission(sessionId, normalizedCommand, fallbackCwd)
-  writePrompt(sessionId, normalizedCommand, getPromptProvider(sessionId))
+  writePrompt(
+    sessionId,
+    normalizedCommand,
+    getPromptProvider(sessionId),
+    isInteractiveProviderSession(sessionId),
+  )
   return true
 }

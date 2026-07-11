@@ -299,6 +299,7 @@ declare global {
       windowIsMaximized: () => Promise<boolean>
       ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number; provider?: Provider; env?: Record<string, string> }) => Promise<{ success: boolean; error?: string }>
       ptyWrite: (id: string, data: string) => void
+      ptyAck: (id: string, charCount: number) => void
       ptyResize: (id: string, cols: number, rows: number) => void
       ptyKill: (id: string) => void
       ptyIsAlive: (id: string) => Promise<boolean>

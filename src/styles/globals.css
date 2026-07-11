@@ -26,10 +26,22 @@
   --ghost-warning: #fbbf24;
   --ghost-error: #fb7185;
 
-  /* RGB triplets — lets Tailwind apply opacity modifiers (ghost-accent/10).
-     applyTheme() in themes.ts keeps these in sync with the hex tokens above. */
-  --ghost-accent-rgb: 56 189 248;
+  /* RGB triplets — let Tailwind apply opacity modifiers on EVERY token
+     (bg-ghost-surface/60, text-ghost-text-dim/40, border-ghost-border/70).
+     applyTheme() in themes.ts overwrites these with the active theme; these are
+     the defaults for the pre-hydration paint (dark sky-accent theme). */
+  --ghost-bg-rgb: 5 9 18;
+  --ghost-surface-rgb: 15 20 32;
+  --ghost-sidebar-rgb: 5 8 18;
+  --ghost-border-rgb: 51 65 85;
   --ghost-text-rgb: 255 255 255;
+  --ghost-text-dim-rgb: 148 163 184;
+  --ghost-accent-rgb: 56 189 248;
+  --ghost-accent-2-rgb: 2 132 199;
+  --ghost-accent-3-rgb: 14 165 233;
+  --ghost-success-rgb: 52 211 153;
+  --ghost-warning-rgb: 251 191 36;
+  --ghost-error-rgb: 251 113 133;
 }
 
 * {
@@ -38,13 +50,24 @@
   box-sizing: border-box;
 }
 
+/* Safety net: Tailwind's preflight sets border-color:#e5e7eb (light gray) on
+   every element. In a dark UI, any element with a border utility but a dropped
+   color class rendered a light gray hairline. Default the border color to the
+   theme border so a missed class fails dark, not light. */
+*, ::before, ::after {
+  border-color: var(--ghost-border);
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
   background: var(--ghost-bg);
   color: var(--ghost-text);
-  font-family: 'Manrope', 'Segoe UI Variable Text', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  /* Inter is the font actually loaded in index.html. The old stack led with
+     'Manrope', which was never loaded, so the entire UI silently fell back to
+     Segoe UI. */
+  font-family: 'Inter', 'Segoe UI Variable Text', 'SF Pro Display', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

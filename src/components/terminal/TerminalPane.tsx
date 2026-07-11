@@ -9,14 +9,10 @@ import { QuickLaunch } from './QuickLaunch'
 import { TerminalCommandBar } from './TerminalCommandBar'
 import { useAgentStore } from '../../stores/agentStore'
 import { useActivityStore } from '../../stores/activityStore'
-import { useCompanionStore } from '../../stores/companionStore'
-import { useCommandBlockStore } from '../../stores/commandBlockStore'
-import { ActivityIcon } from '../agents/ActivityIcon'
+import { getActivityConfig } from '../agents/ActivityIcon'
 import { TerminalSession } from '../../lib/types'
 import { resolveProvider, getProviderColor } from '../../lib/providers'
-import { ContextGauge } from '../agents/ContextGauge'
-import { TerminalContextPanel } from './TerminalContextPanel'
-import { hasContextMetrics } from '../../lib/contextMetrics'
+import { submitPromptToSession } from '../../lib/terminalPromptSubmission'
 import { SHORTCUT_EVENTS } from '../../lib/shortcutEvents'
 
 const SMART_INPUT_FOCUS_EVENT = 'ghostshell:focus-command-bar'
@@ -29,7 +25,42 @@ interface TerminalPaneProps {
   showPaneLabel?: boolean
   searchOpen?: boolean
   onSearchClose?: () => void
-  outputViewMode?: 'terminal' | 'companion'
+}
+
+// If no fresh activity event arrives within this window, the regex-based
+// activity detector is treated as stale and the header shows idle. This makes a
+// stuck "Thinking…" impossible: the indicator self-clears when output stops.
+const ACTIVITY_STALE_MS = 8000
+
+/** Compact elapsed like "12s" / "2m 05s". */
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${(s % 60).toString().padStart(2, '0')}s`
+  return `${Math.floor(m / 60)}h ${(m % 60).toString().padStart(2, '0')}m`
+}
+
+/**
+ * Live status derived from the activity store, guarded against a stuck detector:
+ * returns `{ busy, elapsed }` where `busy` flips false once activity goes stale.
+ */
+function useLiveActivity(activityName: string | null, startedAt: number | null) {
+  const rawBusy = !!activityName && activityName !== 'idle'
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!rawBusy) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [rawBusy, startedAt])
+
+  const fresh = rawBusy && !!startedAt && now - startedAt < ACTIVITY_STALE_MS
+  return {
+    busy: fresh,
+    elapsed: fresh && startedAt ? formatElapsed(now - startedAt) : null,
+  }
 }
 
 export function TerminalPane({
@@ -40,7 +71,6 @@ export function TerminalPane({
   showPaneLabel = true,
   searchOpen: externalSearchOpen,
   onSearchClose,
-  outputViewMode,
 }: TerminalPaneProps) {
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
 
@@ -48,16 +78,10 @@ export function TerminalPane({
     session.agentId ? s.agents.find((a) => a.id === session.agentId) : undefined,
   )
   const activityId = session.agentId || session.id
-  // Select only the fields TerminalPane actually renders to avoid re-renders
-  // from high-frequency activityLog/subAgents changes (e.g. spinner frames).
+  // Select only the fields the header renders to avoid re-renders from
+  // high-frequency activityLog/subAgents changes (e.g. spinner frames).
   const activityName = useActivityStore((s) => s.activities[activityId]?.currentActivity || null)
-  const activityDetail = useActivityStore((s) => s.activities[activityId]?.currentDetail || null)
   const activityStartedAt = useActivityStore((s) => s.activities[activityId]?.lastActivityTime || null)
-  const activityContextMetrics = useActivityStore((s) => s.activities[activityId]?.contextMetrics)
-  const companionSession = useCompanionStore((s) => s.sessions[session.id])
-  const blocksForSession = useCommandBlockStore((s) => s.blocksBySession[session.id])
-  const companionEntries = companionSession?.entries ?? []
-  const commandBlocks = blocksForSession ?? []
 
   const sessionProvider = session.detectedProvider
   const provider = agent ? resolveProvider(agent) : sessionProvider
@@ -76,31 +100,21 @@ export function TerminalPane({
     showSmartInput,
   )
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
-  const [labelHovered, setLabelHovered] = useState(false)
-  const [contextOpen, setContextOpen] = useState(outputViewMode === 'companion')
   const [multiLineOpen, setMultiLineOpen] = useState(false)
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
   const providerColor = provider ? getProviderColor(provider) : '#e4e4e7'
-  const hasContextData = useMemo(
-    () =>
-      !!provider ||
-      hasContextMetrics(activityContextMetrics) ||
-      companionEntries.length > 0 ||
-      commandBlocks.length > 0,
-    [provider, activityContextMetrics, companionEntries.length, commandBlocks.length],
-  )
 
-  // Title and Description editing state
+  // ── Minimal status line: "Thinking · 12s" as plain typography ────────
+  // busy self-clears when the detector goes stale, so it can never get stuck.
+  const { busy: isBusy, elapsed: elapsedLabel } = useLiveActivity(activityName, activityStartedAt)
+  const statusLabel = isBusy && activityName ? getActivityConfig(activityName).label : null
+
+  // Title editing state
   const updateSession = useTerminalStore((s) => s.updateSession)
-
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleInput, setTitleInput] = useState(session.title)
   const titleInputRef = useRef<HTMLInputElement>(null)
-
-  const [isEditingDesc, setIsEditingDesc] = useState(false)
-  const [descInput, setDescInput] = useState(session.description || '')
-  const descInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!isEditingTitle) {
@@ -109,24 +123,11 @@ export function TerminalPane({
   }, [session.title, isEditingTitle])
 
   useEffect(() => {
-    if (!isEditingDesc) {
-      setDescInput(session.description || '')
-    }
-  }, [session.description, isEditingDesc])
-
-  useEffect(() => {
     if (isEditingTitle && titleInputRef.current) {
       titleInputRef.current.focus()
       titleInputRef.current.select()
     }
   }, [isEditingTitle])
-
-  useEffect(() => {
-    if (isEditingDesc && descInputRef.current) {
-      descInputRef.current.focus()
-      descInputRef.current.select()
-    }
-  }, [isEditingDesc])
 
   const handleTitleSubmit = () => {
     if (titleInput.trim() && titleInput !== session.title) {
@@ -135,13 +136,6 @@ export function TerminalPane({
       setTitleInput(session.title)
     }
     setIsEditingTitle(false)
-  }
-
-  const handleDescSubmit = () => {
-    if (descInput !== session.description) {
-      updateSession(session.id, { description: descInput.trim() || undefined })
-    }
-    setIsEditingDesc(false)
   }
 
   usePty({
@@ -270,30 +264,10 @@ export function TerminalPane({
   const handleMultiLineSubmit = useCallback(
     (text: string) => {
       if (!session.id) return
-      // Detect provider to use the correct multiline sequence
-      const provider = agent
-        ? resolveProvider(agent)
-        : session.detectedProvider || 'claude'
-      const isClaudeProvider = provider === 'claude'
-
-      const lines = text.split('\n')
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i]) {
-          window.ghostshell.ptyWrite(session.id, lines[i])
-        }
-        if (i < lines.length - 1) {
-          // For Claude: "\" + Enter triggers multiline continuation
-          // For Codex/Gemini: raw LF works as newline
-          if (isClaudeProvider) {
-            window.ghostshell.ptyWrite(session.id, '\\')
-            window.ghostshell.ptyWrite(session.id, '\r')
-          } else {
-            window.ghostshell.ptyWrite(session.id, '\n')
-          }
-        }
-      }
-      // Final Enter to submit
-      window.ghostshell.ptyWrite(session.id, '\r')
+      // Single source of truth: registers the prompt in history/blocks/companion
+      // and uses the correct per-provider soft-newline sequence (ESC+CR for
+      // Claude, LF for Codex/Gemini, plain CR for shells).
+      submitPromptToSession(session.id, text, session.cwd)
       setTimeout(() => {
         if (showSmartInput) {
           focusSmartInput()
@@ -302,12 +276,14 @@ export function TerminalPane({
         }
       }, 50)
     },
-    [session.id, terminal, agent, session.detectedProvider, showSmartInput, focusSmartInput],
+    [session.id, session.cwd, terminal, showSmartInput, focusSmartInput],
   )
 
   const paneStyle = useMemo(() => ({
     background: 'var(--ghost-bg)',
   }), [])
+
+  const cwdLeaf = session.cwd ? session.cwd.split(/[/\\]/).filter(Boolean).pop() : null
 
   const handleQuickLaunchComplete = () => {
     updateSession(session.id, { showQuickLaunch: false })
@@ -345,7 +321,7 @@ export function TerminalPane({
     <div
       data-terminal-pane
       data-smart-input-active={showSmartInput ? 'true' : undefined}
-      className="terminal-pane relative flex h-full flex-col overflow-hidden"
+      className="terminal-pane group relative flex h-full flex-col overflow-hidden"
       style={paneStyle}
       onClick={(event) => {
         onClick?.()
@@ -354,174 +330,98 @@ export function TerminalPane({
           focusSmartInput()
         }
       }}
-      onMouseEnter={() => setLabelHovered(true)}
-      onMouseLeave={() => setLabelHovered(false)}
     >
 
-      {/* Pane Header */}
+      {/* Pane header — minimal: dot · title · status · (spacer) · cwd · close */}
       {showPaneLabel && (
         <div
-          className="pane-header shrink-0 flex items-center justify-between px-3 py-1.5 border-b"
+          className="pane-header flex h-8 shrink-0 items-center gap-2.5 border-b px-3"
           style={{
-            borderColor: 'color-mix(in srgb, var(--ghost-border) 70%, transparent)',
-            background: 'color-mix(in srgb, var(--ghost-sidebar) 55%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--ghost-border) 55%, transparent)',
+            background: 'color-mix(in srgb, var(--ghost-sidebar) 45%, transparent)',
           }}
         >
+          {/* Status dot: provider color while busy, dim while idle */}
+          {agent || provider ? (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full transition-opacity duration-300"
+              style={{ backgroundColor: providerColor, opacity: isBusy ? 1 : 0.45 }}
+            />
+          ) : (
+            <TerminalIcon className="h-3 w-3 shrink-0 text-white/25" />
+          )}
 
-          {/* Left: Identity */}
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            {/* Agent dot or terminal icon */}
-            <div className="shrink-0">
-              {agent ? (
-                <div className="relative">
-                  <div
-                    className="h-3 w-3 rounded-full"
-                    style={{ backgroundColor: providerColor }}
-                  />
-                  {agent.status === 'working' && (
-                    <div
-                      className="absolute inset-0 animate-ping rounded-full opacity-40"
-                      style={{ backgroundColor: providerColor }}
-                    />
-                  )}
-                </div>
-              ) : (
-                <TerminalIcon className="h-3 w-3 text-white/25" />
+          {/* Title */}
+          {isEditingTitle ? (
+            <input
+              ref={titleInputRef}
+              value={titleInput}
+              onChange={(e) => setTitleInput(e.target.value)}
+              onBlur={handleTitleSubmit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleTitleSubmit()
+                if (e.key === 'Escape') {
+                  setTitleInput(session.title)
+                  setIsEditingTitle(false)
+                }
+              }}
+              className="max-w-[200px] rounded border bg-transparent px-1.5 py-0.5 text-[12px] font-medium outline-none"
+              style={{
+                borderColor: 'var(--ghost-accent)',
+                color: 'var(--ghost-text)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                setIsEditingTitle(true)
+              }}
+              className={`shrink-0 cursor-default truncate text-[12px] font-medium transition-colors ${
+                isActive ? 'text-white/75' : 'text-white/40'
+              }`}
+              title="Double-click to rename"
+            >
+              {session.title}
+            </span>
+          )}
+
+          {/* Activity status: plain quiet typography, no chip */}
+          {!isEditingTitle && statusLabel && (
+            <span className="min-w-0 truncate text-[11px] text-white/30">
+              {statusLabel}
+              {elapsedLabel && (
+                <span className="tabular-nums text-white/20">{` · ${elapsedLabel}`}</span>
               )}
-            </div>
+            </span>
+          )}
 
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              {/* Title */}
-              {isEditingTitle ? (
-                <input
-                  ref={titleInputRef}
-                  value={titleInput}
-                  onChange={(e) => setTitleInput(e.target.value)}
-                  onBlur={handleTitleSubmit}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleTitleSubmit()
-                    if (e.key === 'Escape') {
-                      setTitleInput(session.title)
-                      setIsEditingTitle(false)
-                    }
-                  }}
-                  className="max-w-[180px] rounded-md border px-1.5 py-0.5 text-[12px] font-medium outline-none focus:shadow-none"
-                  style={{
-                    borderColor: 'var(--ghost-border)',
-                    background: 'color-mix(in srgb, var(--ghost-sidebar) 70%, transparent)',
-                    color: 'var(--ghost-text)',
-                  }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--ghost-accent)' }}
-                  onBlurCapture={(e) => { e.currentTarget.style.borderColor = 'var(--ghost-border)' }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    setIsEditingTitle(true)
-                  }}
-                  className={`cursor-text truncate text-[12px] font-medium transition-colors ${isActive ? 'text-white/80' : 'text-white/45'}`}
-                  title="Double-click to rename"
-                >
-                  {session.title}
-                </span>
-              )}
+          <span className="min-w-0 flex-1" />
 
-              {/* Activity indicator */}
-              {!isEditingTitle && agent && activityName && activityName !== 'idle' && (
-                <div className="shrink-0 scale-85 origin-left">
-                  <ActivityIcon
-                    activity={activityName}
-                    detail={activityDetail || undefined}
-                    size="xs"
-                    startedAt={activityStartedAt || undefined}
-                    showElapsed={activityName === 'thinking'}
-                    showLabel={false}
-                  />
-                </div>
-              )}
+          {/* Working directory leaf */}
+          {cwdLeaf && (
+            <span
+              className="hidden shrink-0 font-mono text-[10px] text-white/20 md:block"
+              title={session.cwd}
+            >
+              {cwdLeaf}
+            </span>
+          )}
 
-              {/* Inline description */}
-              {!isEditingTitle && !isEditingDesc && (
-                <span className="hidden lg:inline truncate text-[10px] text-white/20">
-                  {session.description && (
-                    <>
-                      <span className="mx-1">&bull;</span>
-                      <span
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setIsEditingDesc(true)
-                        }}
-                        className="cursor-text hover:text-white/40 transition-colors"
-                      >
-                        {session.description}
-                      </span>
-                    </>
-                  )}
-                  {session.cwd && (
-                    <>
-                      <span className="mx-1">&bull;</span>
-                      {session.cwd.split(/[/\\]/).pop()}
-                    </>
-                  )}
-                </span>
-              )}
-
-              {isEditingDesc && (
-                <input
-                  ref={descInputRef}
-                  value={descInput}
-                  onChange={(e) => setDescInput(e.target.value)}
-                  onBlur={handleDescSubmit}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleDescSubmit()
-                    if (e.key === 'Escape') {
-                      setDescInput(session.description || '')
-                      setIsEditingDesc(false)
-                    }
-                  }}
-                  className="max-w-[220px] rounded-md border px-1.5 py-0.5 text-[10px] outline-none"
-                  style={{
-                    borderColor: 'color-mix(in srgb, var(--ghost-border) 80%, transparent)',
-                    background: 'color-mix(in srgb, var(--ghost-sidebar) 70%, transparent)',
-                    color: 'color-mix(in srgb, var(--ghost-text) 70%, transparent)',
-                  }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--ghost-accent)' }}
-                  onBlurCapture={(e) => { e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--ghost-border) 80%, transparent)' }}
-                  placeholder="Set task focus..."
-                  onClick={(e) => e.stopPropagation()}
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Right: Context gauge + close */}
-          <div className="flex items-center gap-2 shrink-0 pl-2">
-            {provider && hasContextData && (
-              <ContextGauge
-                provider={provider}
-                metrics={activityContextMetrics}
-                active={contextOpen}
-                onClick={() => setContextOpen((prev) => !prev)}
-              />
-            )}
-
-            {onClose && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onClose()
-                }}
-                className={`flex h-5 w-5 items-center justify-center rounded-md text-white/20 transition-all hover:bg-rose-500/15 hover:text-rose-300 ${labelHovered ? 'opacity-100' : 'opacity-0'
-                  }`}
-                title="Close"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
+          {/* Close — appears on pane hover */}
+          {onClose && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose()
+              }}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/25 opacity-0 transition-all hover:bg-white/[0.06] hover:text-white/70 group-hover:opacity-100"
+              title="Close"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
       )}
 
@@ -580,19 +480,6 @@ export function TerminalPane({
             />
           )}
         </div>
-
-        {contextOpen && (
-          <div className="min-h-0">
-            <TerminalContextPanel
-              session={session}
-              provider={provider}
-              activityId={activityId}
-              entries={companionEntries}
-              blocks={commandBlocks}
-              onClose={() => setContextOpen(false)}
-            />
-          </div>
-        )}
       </div>
 
     </div>

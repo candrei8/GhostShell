@@ -141,13 +141,11 @@ export async function createCheckpoint(
 /**
  * Rollback to a specific checkpoint.
  *
- * Strategy:
- * - If checkpoint captured dirty state (isClean=false): `git stash apply <hash>`
- *   restores the exact working tree state at that point.
- * - If checkpoint captured clean state (isClean=true): `git checkout <hash> -- .`
- *   restores all tracked files to that commit's state.
- *
- * WARNING: This is destructive to current uncommitted changes.
+ * The checkpoint is a real commit object (created via a throwaway index that
+ * snapshots tracked + untracked files) anchored under refs/ghostshell/checkpoints.
+ * Rollback runs `git checkout <hash> -- .`, restoring every captured file to its
+ * snapshot content. It never runs `git clean -fd`, so files created after the
+ * checkpoint are left in place rather than deleted (non-destructive to new work).
  */
 export async function rollbackToCheckpoint(
   directory: string,

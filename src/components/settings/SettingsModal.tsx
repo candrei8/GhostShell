@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, RefreshCw, Volume2, Settings, Palette, Terminal, Cpu, Keyboard } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useSettingsStore, type NotificationTimingMode, type TerminalOutputEmphasis } from '../../stores/settingsStore'
+import { useSettingsStore, type NotificationTimingMode } from '../../stores/settingsStore'
 import { useNotificationStore } from '../../stores/notificationStore'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -40,12 +40,6 @@ const notificationTimingModes: { id: NotificationTimingMode; label: string; hint
   { id: 'aggressive', label: 'Aggressive', hint: 'Notifies quickly after prompt return.' },
   { id: 'balanced', label: 'Balanced', hint: 'Good default for most workflows.' },
   { id: 'silent', label: 'Silent', hint: 'Only longer command runs trigger success toasts.' },
-]
-
-const terminalOutputEmphasisOptions: { id: TerminalOutputEmphasis; label: string; hint: string }[] = [
-  { id: 'off', label: 'Off', hint: 'Show raw terminal output with no extra highlight layer.' },
-  { id: 'balanced', label: 'Balanced', hint: 'Highlight actions, errors, prompts, and context without overwhelming the log.' },
-  { id: 'vivid', label: 'Vivid', hint: 'Use stronger line-level emphasis so important agent output stands out immediately.' },
 ]
 
 function sanitizeSettingsTab(tab: SettingsTab | undefined): SettingsTab {
@@ -93,7 +87,6 @@ function SettingsModalContent({ initialTab, onClose }: { initialTab: SettingsTab
     cursorBlink,
     cursorStyle,
     cliVisualProfile,
-    terminalOutputEmphasis,
     restoreTabs,
     muteNotifications,
     notificationVolume,
@@ -111,7 +104,6 @@ function SettingsModalContent({ initialTab, onClose }: { initialTab: SettingsTab
     setCursorBlink,
     setCursorStyle,
     setCliVisualProfile,
-    setTerminalOutputEmphasis,
     setRestoreTabs,
     setMuteNotifications,
     setNotificationVolume,
@@ -562,26 +554,6 @@ function SettingsModalContent({ initialTab, onClose }: { initialTab: SettingsTab
                     ))}
                   </div>
 
-                  <label className="text-xs text-white/40 uppercase tracking-[0.15em] mt-5 mb-3 block">Agent Output Emphasis</label>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {terminalOutputEmphasisOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        onClick={() => setTerminalOutputEmphasis(option.id)}
-                        className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                          terminalOutputEmphasis === option.id
-                            ? 'border-[#38bdf8]/30 bg-[#38bdf8]/[0.08] text-[#38bdf8]'
-                            : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:border-white/[0.12] hover:text-white/60'
-                        }`}
-                      >
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em]">{option.label}</p>
-                        <p className="text-[11px] mt-0.5 opacity-70 normal-case">{option.hint}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-xs text-white/20">
-                    Applies only to AI and agent terminal rendering. Raw PTY output, parsing, and exports stay unchanged.
-                  </p>
                 </div>
 
                 <div className={sectionClass}>

@@ -986,7 +986,7 @@ export function TerminalCommandBar({
       className="shrink-0 border-t backdrop-blur-xl"
       style={{
         borderColor: 'color-mix(in srgb, var(--ghost-border) 72%, rgba(255,255,255,0.04))',
-        background: 'linear-gradient(180deg, color-mix(in srgb, var(--ghost-bg) 88%, rgba(255,255,255,0.02)) 0%, color-mix(in srgb, var(--ghost-sidebar) 94%, rgba(255,255,255,0.015)) 100%)',
+        background: 'color-mix(in srgb, var(--ghost-sidebar) 92%, rgba(255,255,255,0.02))',
       }}
     >
       <div className="px-3 pb-2 pt-2">

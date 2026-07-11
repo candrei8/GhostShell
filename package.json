@@ -1,6 +1,6 @@
 {
   "name": "ghostshell",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "GhostShell Team",
   "description": "GhostShell - Terminal for VibeCoders",
   "main": "./out/main/index.js",
@@ -21,6 +21,8 @@
     "package:dir": "electron-vite build --config electron.vite.config.mjs && electron-builder --win --dir",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "verify": "npm run typecheck && npm run test",
     "generate-icon": "node scripts/generate-icon.js",
     "postinstall": "node scripts/ensure-electron-install.js"
   },

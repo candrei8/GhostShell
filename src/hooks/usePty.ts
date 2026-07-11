@@ -9,10 +9,8 @@ import { useCommandBlockStore, type CommandBlock, type CommandBlockStatus } from
 import { useSettingsStore, type NotificationTimingMode } from '../stores/settingsStore'
 import { buildLaunchCommand, resolveProvider, getInstallCommand, getProviderLabel, getKnownContextWindow } from '../lib/providers'
 import { createBatchParser, stripAnsi } from '../lib/claude-output-parser'
-import { enhanceTerminalOutput } from '../lib/terminalOutputEnhancer'
 import { createTerminalImageLabelRegistry } from '../lib/terminalImageLabels'
 import { normalizeTerminalPasteText, shouldCaptureStructuredTextInsertion } from '../lib/terminalTextInput'
-import { SHORTCUT_EVENTS } from '../lib/shortcutEvents'
 import { Provider, SubAgentOutputLine } from '../lib/types'
 import { detectDomain } from '../lib/domain-detector'
 import { reportAgentOutput } from '../lib/swarm-message-injector'
@@ -418,6 +416,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
     let lastSubAgentStartedAt = 0
     const SUBAGENT_SPAWN_DEDUPE_MS = 1200
     let promptTail = ''
+    // Declared at the effect scope (not inside init) so trackCommandSubmission —
+    // which also lives here — can reset it. Previously it was declared inside the
+    // nested init() and the outer assignment threw a ReferenceError at runtime,
+    // swallowing Enter in plain-shell sessions.
+    let inputBuffer = ''
     let completionCheckTimer: ReturnType<typeof setTimeout> | null = null
     let completionCandidateTail = ''
     let autoConfirmPendingUntil = 0
@@ -743,6 +746,15 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
         const OUTPUT_BUFFER_MAX = 50000
         const bufferKey = `__ghostshell_output_${sessionId}`
 
+        // Ack rendered chars back to main so it can release PTY backpressure.
+        const ackToMain = (charCount: number) => {
+          try {
+            window.ghostshell.ptyAck(sessionId, charCount)
+          } catch {
+            // PTY/main may be gone during teardown.
+          }
+        }
+
         const createResult = await window.ghostshell.ptyCreate({
           id: sessionId,
           shell,
@@ -757,25 +769,42 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
 
         // PTY -> Terminal
         const removeDataListener = window.ghostshell.ptyOnData(sessionId, (data) => {
-          if (cancelled || !hasLiveSession()) return
+          // Ack accounting must be airtight: main counts data.length as unacked
+          // and pauses the PTY past the high-water mark, so EVERY delivered chunk
+          // must be acked exactly once via any code path (early return, write
+          // callback, or the empty-display branch). ptyAck is a no-op once the
+          // flow is disposed, so acking on the guard path is harmless.
+          const ackLen = data.length
+          let acked = false
+          const ackOnce = () => {
+            if (acked) return
+            acked = true
+            ackToMain(ackLen)
+          }
+
+          if (cancelled || !hasLiveSession()) {
+            ackOnce()
+            return
+          }
 
           clearCompletionCheck()
           // Report output for swarm heartbeat tracking + self-heal analysis
           reportAgentOutput(sessionId)
           feedAgentOutput(sessionId, data)
+
+          // DISPLAY PATH: write RAW pty bytes to xterm. We never rewrite the byte
+          // stream on its way to the terminal — injecting SGR/masking into escape
+          // sequences (which ConPTY routinely splits across chunks) corrupts a
+          // TUI's cursor/column math and produces the garbled, mispositioned text
+          // seen when running Claude Code. Cosmetic image-path masking is applied
+          // only to GhostShell-owned surfaces (command blocks, companion) below.
+          const displayData = sanitizeReadOnlyDisplay(data)
           const maskedData = imageLabels.maskText(data)
-          const sanitizedDisplayData = sanitizeReadOnlyDisplay(maskedData)
-          const outputEmphasis = useSettingsStore.getState().terminalOutputEmphasis
-          const hasResolvedProvider = !!agentId || !!useTerminalStore.getState().getSession(sessionId)?.detectedProvider
-          const bypassOutputEnhancer = currentProvider === 'gemini' || currentProvider === 'codex'
-          const displayData =
-            outputEmphasis === 'off' || !hasResolvedProvider || bypassOutputEnhancer
-              ? sanitizedDisplayData
-              : enhanceTerminalOutput(sanitizedDisplayData, currentProvider, outputEmphasis)
           let bufferBeforeWrite: Terminal['buffer']['active']
           try {
             bufferBeforeWrite = terminal.buffer.active
           } catch {
+            ackOnce()
             return
           }
           const savedViewportY = bufferBeforeWrite.viewportY
@@ -784,9 +813,16 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
             !data.includes('\x1b') &&
             bufferBeforeWrite.baseY - bufferBeforeWrite.viewportY > 1
 
+          // `issued` guards the case where withTerminal bails (cancelled) or
+          // term.write throws synchronously (disposed terminal): the async write
+          // callback would never fire, so we ack here instead. On the normal path
+          // issued=true and ackOnce fires later via the write callback (the acked
+          // guard makes the fallback a no-op) — so backpressure is preserved.
           if (displayData && preserveViewport) {
+            let issued = false
             withTerminal((term) => {
               term.write(displayData, () => {
+                ackOnce()
                 if (cancelled || !hasLiveSession()) return
                 try {
                   const bufferAfterWrite = term.buffer.active
@@ -798,11 +834,19 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
                   // Ignore writes landing after tab teardown.
                 }
               })
+              issued = true
             })
+            if (!issued) ackOnce()
           } else if (displayData) {
+            let issued = false
             withTerminal((term) => {
-              term.write(displayData)
+              term.write(displayData, ackOnce)
+              issued = true
             })
+            if (!issued) ackOnce()
+          } else {
+            // Nothing written (fully sanitized) — release backpressure anyway.
+            ackOnce()
           }
 
           // Buffer output for export
@@ -864,22 +908,18 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
             }
           }
 
-          // Auto-confirm CLI prompts (provider-aware)
-          if (agentId) {
-            const needsAutoConfirm = getAutoConfirmPatterns(currentProvider).some((p) => p.test(data))
-            if (needsAutoConfirm) {
-              autoConfirmPendingUntil = Math.max(
-                autoConfirmPendingUntil,
-                Date.now() + getCompletionTimingProfile().completionGraceMs + 1200,
-              )
-              setTimeout(() => {
-                try {
-                  window.ghostshell.ptyWrite(sessionId, 'y\r')
-                } catch {
-                  // PTY may have closed
-                }
-              }, 150)
-            }
+          // NOTE: GhostShell used to auto-type 'y\r' whenever a (y/n) pattern
+          // appeared in the OUTPUT stream. That silently answered prompts on the
+          // agent's behalf — including permission prompts whose safe default is
+          // NO — from regex false positives on printed text. Removed. Auto-approval
+          // must go through the CLI's own sanctioned flag (see providers.ts), never
+          // synthesized keystrokes. `autoConfirmPendingUntil` is still honored by
+          // the completion-check debounce below when a real confirm pattern shows.
+          if (agentId && getAutoConfirmPatterns(currentProvider).some((p) => p.test(data))) {
+            autoConfirmPendingUntil = Math.max(
+              autoConfirmPendingUntil,
+              Date.now() + getCompletionTimingProfile().completionGraceMs + 1200,
+            )
           }
 
           // Detect CLI not found and show a helpful notification once.
@@ -947,7 +987,8 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
         })
         cleanups.push(removeDataListener)
 
-        let inputBuffer = ''
+        // inputBuffer is declared at the effect scope (see above) so both
+        // trackCommandSubmission and this closure share the same reference.
 
         // Clipboard: copy/paste support (Ctrl+C with selection, Ctrl+Shift+C/V, Ctrl+V, right-click paste)
         const sendRawToPty = (data: string) => {
@@ -1108,11 +1149,11 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
             return false
           }
 
-          // Ctrl+T: New terminal tab (intercept so xterm doesn't send \x14 to PTY)
+          // Ctrl+T: only swallow the key so xterm doesn't send \x14 to the PTY.
+          // Do NOT dispatch the new-terminal event here — the global shortcut
+          // handler (useKeyboardShortcuts) already fires for Ctrl+T even when a
+          // terminal is focused, and dispatching from both opened TWO terminals.
           if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyT') {
-            if (e.type === 'keydown') {
-              window.dispatchEvent(new CustomEvent(SHORTCUT_EVENTS.newTerminal))
-            }
             return false
           }
 
@@ -1566,6 +1607,9 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
       cleanups.forEach((fn) => fn())
       delete (window as unknown as Record<string, unknown>)[`__ghostshell_output_${sessionId}`]
       useCompanionStore.getState().removeSession(sessionId)
+      // Release the session's command-block history (up to ~18 MB of strings)
+      // — nothing else freed it, so it accumulated for the app's lifetime.
+      useCommandBlockStore.getState().clearSession(sessionId)
       try {
         window.ghostshell.ptyKill(sessionId)
       } catch {

@@ -156,9 +156,16 @@ export function useTerminal(
       cursorBlink: appearance.cursorBlink,
       cursorStyle: appearance.cursorStyle,
       theme: appearance.theme,
-      allowTransparency: true,
+      // Opaque canvas: with transparency the WebGL renderer blends instead of
+      // overwriting on repaints, which can smear stale glyphs. The pane behind
+      // the terminal is the same solid theme background anyway.
+      allowTransparency: false,
       scrollback: 10000,
-      convertEol: provider !== 'gemini',
+      // NEVER convert EOL for a PTY-backed terminal. ConPTY already emits
+      // proper \r\n; forcing bare \n (index-down, keep column) to \r\n yanks
+      // the cursor to column 0 mid-repaint, which is exactly how TUI apps like
+      // Claude Code end up with duplicated fragments at line starts.
+      convertEol: false,
       fontWeight: '400',
       fontWeightBold: '700',
       letterSpacing: appearance.letterSpacing,
@@ -317,7 +324,6 @@ export function useTerminal(
         term.options.theme = appearance.theme
         term.options.cursorBlink = appearance.cursorBlink
         term.options.cursorStyle = appearance.cursorStyle
-        term.options.convertEol = provider !== 'gemini'
         term.options.letterSpacing = appearance.letterSpacing
         term.options.lineHeight = appearance.lineHeight
         debouncedFit()
@@ -359,7 +365,6 @@ export function useTerminal(
     terminal.options.theme = initialAppearance.theme
     terminal.options.cursorBlink = initialAppearance.cursorBlink
     terminal.options.cursorStyle = initialAppearance.cursorStyle
-    terminal.options.convertEol = provider !== 'gemini'
     terminal.options.letterSpacing = initialAppearance.letterSpacing
     terminal.options.lineHeight = initialAppearance.lineHeight
     debouncedFit()

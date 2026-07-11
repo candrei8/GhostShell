@@ -13,7 +13,10 @@ export function SwarmViewToggle() {
 
   return (
     <div
-      className="fixed right-3 z-[60] flex items-center gap-0.5 bg-black/85 backdrop-blur-md border border-sky-400/20 rounded-lg p-0.5 shadow-lg"
+      // Centered in the titlebar. Was `right-3`, which sat on top of the
+      // frameless window's minimize/maximize/close controls — the only way to
+      // close the app — and could fully cover them while a swarm was active.
+      className="fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5 bg-black/85 backdrop-blur-md border border-sky-400/20 rounded-lg p-0.5 shadow-lg"
       style={{ top: 6 }}
     >
       <button

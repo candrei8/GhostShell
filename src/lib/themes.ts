@@ -645,9 +645,26 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty('--ghost-warning', c.warning)
   root.style.setProperty('--ghost-error', c.error)
 
-  // RGB triplets used by Tailwind for opacity modifiers (ghost-accent/10).
-  const accentRgb = hexToRgbTriplet(c.accent)
-  if (accentRgb) root.style.setProperty('--ghost-accent-rgb', accentRgb)
-  const textRgb = hexToRgbTriplet(c.text)
-  if (textRgb) root.style.setProperty('--ghost-text-rgb', textRgb)
+  // RGB triplets used by Tailwind so opacity modifiers work on EVERY ghost
+  // token (bg-ghost-surface/60, text-ghost-text-dim/40, border-ghost-border/70).
+  // Without these, Tailwind silently drops the opacity modifier and the class
+  // compiles to no CSS at all.
+  const rgbTokens: Array<[string, string]> = [
+    ['bg', c.bg],
+    ['surface', c.surface],
+    ['sidebar', c.sidebar],
+    ['border', c.border],
+    ['text', c.text],
+    ['text-dim', c.textDim],
+    ['accent', c.accent],
+    ['accent-2', c.accent2],
+    ['accent-3', c.accent3],
+    ['success', c.success],
+    ['warning', c.warning],
+    ['error', c.error],
+  ]
+  for (const [name, value] of rgbTokens) {
+    const triplet = hexToRgbTriplet(value)
+    if (triplet) root.style.setProperty(`--ghost-${name}-rgb`, triplet)
+  }
 }

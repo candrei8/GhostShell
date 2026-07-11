@@ -34,14 +34,56 @@ let closeForceTimer: ReturnType<typeof setTimeout> | null = null
 const ptyManager = new PtyManager()
 const workspaceManager = new WorkspaceManager()
 
+// ── PTY output flow control + coalescing ──────────────────────────────────
+// Agent CLIs cat huge files and run verbose builds; forwarding one
+// webContents.send per node-pty chunk floods the renderer event loop. We
+// coalesce chunks on a short timer and apply ack-based backpressure with the
+// same watermarks VS Code uses (FlowControlConstants).
+const FLOW_HIGH_WATERMARK = 100_000 // unacked chars before pausing the pty
+const FLOW_LOW_WATERMARK = 5_000 // resume threshold
+const FLOW_FLUSH_MS = 8
+
+interface PtyFlowState {
+  buffer: string
+  unacked: number
+  paused: boolean
+  flushTimer: ReturnType<typeof setTimeout> | null
+}
+
+const ptyFlow = new Map<string, PtyFlowState>()
+
+function disposePtyFlow(id: string): void {
+  const state = ptyFlow.get(id)
+  if (state?.flushTimer) clearTimeout(state.flushTimer)
+  ptyFlow.delete(id)
+}
+
+function flushPtyBuffer(id: string): void {
+  const state = ptyFlow.get(id)
+  if (!state) return
+  state.flushTimer = null
+  if (!state.buffer) return
+  // If the window is gone the renderer can never ack — dispose the flow rather
+  // than clearing the buffer into the void and leaving the PTY paused-and-alive.
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    disposePtyFlow(id)
+    return
+  }
+  const payload = state.buffer
+  state.buffer = ''
+  mainWindow.webContents.send(`pty:data:${id}`, payload)
+}
+
 // Set app name early to ensure consistent userData path for cache dirs below
 app.setName('GhostShell')
 
-// Enable hardware acceleration for crisp WebGL terminal rendering
+// Enable hardware acceleration for crisp WebGL terminal rendering.
+// NOTE: do NOT force-device-scale-factor here — it makes the whole app render
+// tiny on the typical 125-150% scaled Windows display and disables per-monitor
+// DPI. The WebGL renderer already sizes its canvas by devicePixelRatio, so
+// glyphs stay crisp at fractional scales without lying to the compositor.
 app.commandLine.appendSwitch('enable-gpu-rasterization')
 app.commandLine.appendSwitch('enable-zero-copy')
-app.commandLine.appendSwitch('high-dpi-support', '1')
-app.commandLine.appendSwitch('force-device-scale-factor', '1')
 
 // Keep Chromium cache/session data in a dedicated location.
 // In dev on Windows, Chromium can fail to move the default cache when a prior
@@ -268,25 +310,45 @@ function setupIPC(): void {
       },
     ) => {
       try {
-        const pty = ptyManager.create(options.id, {
-          shell: options.shell,
-          cwd: options.cwd,
-          cols: options.cols || 80,
-          rows: options.rows || 24,
-          provider: options.provider,
-          env: options.env,
-        })
+        const id = options.id
+        // Reset any flow state from a previous process under this id.
+        disposePtyFlow(id)
+        const flow: PtyFlowState = { buffer: '', unacked: 0, paused: false, flushTimer: null }
+        ptyFlow.set(id, flow)
 
-        pty.onData((data: string) => {
-          mainWindow?.webContents.send(`pty:data:${options.id}`, data)
-        })
-
-        pty.onExit(({ exitCode }: { exitCode: number }) => {
-          mainWindow?.webContents.send(`pty:exit:${options.id}`, exitCode)
-        })
+        ptyManager.create(
+          id,
+          {
+            shell: options.shell,
+            cwd: options.cwd,
+            cols: options.cols || 80,
+            rows: options.rows || 24,
+            provider: options.provider,
+            env: options.env,
+          },
+          {
+            onData: (data: string) => {
+              flow.buffer += data
+              flow.unacked += data.length
+              if (!flow.paused && flow.unacked >= FLOW_HIGH_WATERMARK) {
+                flow.paused = true
+                ptyManager.pause(id)
+              }
+              if (!flow.flushTimer) {
+                flow.flushTimer = setTimeout(() => flushPtyBuffer(id), FLOW_FLUSH_MS)
+              }
+            },
+            onExit: (exitCode: number) => {
+              flushPtyBuffer(id)
+              disposePtyFlow(id)
+              mainWindow?.webContents.send(`pty:exit:${id}`, exitCode)
+            },
+          },
+        )
 
         return { success: true }
       } catch (error) {
+        disposePtyFlow(options.id)
         return { success: false, error: String(error) }
       }
     },
@@ -301,7 +363,19 @@ function setupIPC(): void {
   })
 
   ipcMain.on('pty:kill', (_event, id: string) => {
+    disposePtyFlow(id)
     ptyManager.kill(id)
+  })
+
+  // Ack-based flow control: renderer reports how many chars it has rendered.
+  ipcMain.on('pty:ack', (_event, id: string, charCount: number) => {
+    const flow = ptyFlow.get(id)
+    if (!flow) return
+    flow.unacked = Math.max(0, flow.unacked - (charCount || 0))
+    if (flow.paused && flow.unacked < FLOW_LOW_WATERMARK) {
+      flow.paused = false
+      ptyManager.resume(id)
+    }
   })
 
   ipcMain.handle('pty:isAlive', (_event, id: string) => {
@@ -428,38 +502,67 @@ function setupIPC(): void {
     }
   })
 
-  // Git checkpoint: create a stash-like commit object WITHOUT modifying working tree
+  // Git checkpoint: snapshot the FULL working tree (tracked + untracked, honoring
+  // .gitignore) into a commit object on no branch, WITHOUT touching the user's
+  // index or working tree. Uses a throwaway index via GIT_INDEX_FILE so
+  // `git add -A` doesn't stage anything in the real index. This is the piece the
+  // old `git stash create` missed — stash never captured untracked files, so
+  // rollback's `git clean -fd` used to permanently delete agent-written files.
   ipcMain.handle('git:createCheckpoint', async (_event, cwd: string) => {
+    const tmpIndex = join(app.getPath('temp'), `ghostshell-idx-${randomUUID()}`)
     try {
-      // git stash create: returns hash if there are changes, empty string if clean
-      const hash = await runCommand('git', ['stash', 'create'], { cwd, timeoutMs: 10000 })
-      const trimmedHash = hash.trim()
-
-      if (trimmedHash) {
-        // There were uncommitted changes — hash captures them
-        return { hash: trimmedHash, clean: false }
+      // Provide a git identity via env so commit-tree never fails on a repo with
+      // no configured user.name/user.email (it silently fell back to HEAD-only
+      // before, losing all uncommitted + untracked changes while reporting clean).
+      const env = {
+        GIT_INDEX_FILE: tmpIndex,
+        GIT_AUTHOR_NAME: 'GhostShell',
+        GIT_AUTHOR_EMAIL: 'checkpoint@ghostshell.local',
+        GIT_COMMITTER_NAME: 'GhostShell',
+        GIT_COMMITTER_EMAIL: 'checkpoint@ghostshell.local',
       }
-
-      // Working tree is clean — use HEAD as the reference point
-      const headHash = await runCommand('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5000 })
-      return { hash: headHash.trim(), clean: true }
-    } catch (error) {
-      return { hash: '', clean: true, error: String(error) }
+      await runCommand('git', ['read-tree', 'HEAD'], { cwd, env, timeoutMs: 10000 })
+      await runCommand('git', ['add', '-A'], { cwd, env, timeoutMs: 20000 })
+      const tree = (await runCommand('git', ['write-tree'], { cwd, env, timeoutMs: 10000 })).trim()
+      const commit = (
+        await runCommand('git', ['commit-tree', tree, '-p', 'HEAD', '-m', 'ghostshell-checkpoint'], {
+          cwd,
+          env,
+          timeoutMs: 10000,
+        })
+      ).trim()
+      // Anchor the commit under a ref so `git gc` / `git prune` can't collect
+      // this otherwise-dangling object before the user rolls back to it.
+      await runCommand('git', ['update-ref', `refs/ghostshell/checkpoints/${commit}`, commit], {
+        cwd,
+        timeoutMs: 10000,
+      })
+      return { hash: commit, clean: false }
+    } catch {
+      // Snapshot path failed (e.g. no commits yet). Fall back to HEAD as a
+      // reference point — still non-destructive on rollback.
+      try {
+        const headHash = await runCommand('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5000 })
+        return { hash: headHash.trim(), clean: true }
+      } catch (error) {
+        return { hash: '', clean: true, error: String(error) }
+      }
+    } finally {
+      try { rmSync(tmpIndex, { force: true }) } catch { /* best effort */ }
     }
   })
 
-  // Git rollback: restore working tree to a checkpoint state
-  ipcMain.handle('git:rollback', async (_event, cwd: string, hash: string, isClean: boolean) => {
+  // Git rollback: restore every file captured in the checkpoint to its snapshot
+  // content. We NEVER run `git clean -fd` — deleting files the checkpoint didn't
+  // capture is data loss. `git checkout <snapshot> -- .` is non-destructive to
+  // files created after the checkpoint (they are simply left in place).
+  ipcMain.handle('git:rollback', async (_event, cwd: string, hash: string, _isClean: boolean) => {
+    const trimmed = (hash || '').trim()
+    if (!trimmed) {
+      return { success: false, error: 'No checkpoint hash to roll back to' }
+    }
     try {
-      if (isClean) {
-        // Checkpoint was from a clean state — just checkout that commit's files
-        await runCommand('git', ['checkout', hash, '--', '.'], { cwd, timeoutMs: 15000 })
-      } else {
-        // Checkpoint captured dirty state — first clean, then apply stash object
-        await runCommand('git', ['checkout', '.'], { cwd, timeoutMs: 10000 })
-        await runCommand('git', ['clean', '-fd'], { cwd, timeoutMs: 10000 })
-        await runCommand('git', ['stash', 'apply', hash], { cwd, timeoutMs: 15000 })
-      }
+      await runCommand('git', ['checkout', trimmed, '--', '.'], { cwd, timeoutMs: 15000 })
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }

@@ -16,8 +16,23 @@ interface SpawnRuntimeOptions {
   useConpty?: boolean
 }
 
+interface PtyHandlers {
+  onData?: (data: string) => void
+  onExit?: (exitCode: number) => void
+}
+
+interface PtyEntry {
+  proc: pty.IPty
+  disposables: pty.IDisposable[]
+}
+
 export class PtyManager {
-  private processes: Map<string, pty.IPty> = new Map()
+  private entries: Map<string, PtyEntry> = new Map()
+
+  /** Back-compat accessor: the live process for an id, if any. */
+  private getProc(id: string): pty.IPty | undefined {
+    return this.entries.get(id)?.proc
+  }
 
   private getDefaultShell(): string {
     if (platform() === 'win32') {
@@ -150,8 +165,8 @@ export class PtyManager {
     return plans
   }
 
-  create(id: string, options: PtyOptions = {}): pty.IPty {
-    if (this.processes.has(id)) {
+  create(id: string, options: PtyOptions = {}, handlers: PtyHandlers = {}): pty.IPty {
+    if (this.entries.has(id)) {
       this.kill(id)
     }
 
@@ -208,17 +223,31 @@ export class PtyManager {
       throw lastError instanceof Error ? lastError : new Error('Failed to spawn PTY process')
     }
 
-    this.processes.set(id, proc)
-    proc.onExit(() => {
-      if (this.processes.get(id) === proc) {
-        this.processes.delete(id)
-      }
-    })
+    const disposables: pty.IDisposable[] = []
+
+    if (handlers.onData) {
+      const cb = handlers.onData
+      disposables.push(proc.onData((data: string) => cb(data)))
+    }
+
+    // The exit disposable is stored so kill()/recreate can tear the listener
+    // down — otherwise a dying old process (ConPTY flushes exit async on
+    // Windows) delivers its exit event to the NEW session sharing this id.
+    disposables.push(
+      proc.onExit(({ exitCode }: { exitCode: number }) => {
+        // Only act if this entry is still the current one for this id.
+        if (this.entries.get(id)?.proc !== proc) return
+        handlers.onExit?.(exitCode)
+        this.entries.delete(id)
+      }),
+    )
+
+    this.entries.set(id, { proc, disposables })
     return proc
   }
 
   write(id: string, data: string): void {
-    const proc = this.processes.get(id)
+    const proc = this.getProc(id)
     if (!proc || !data) return
     // Hand the full payload to node-pty in one call. node-pty queues to the
     // PTY pipe with the OS's own backpressure — no setTimeout delays means
@@ -226,9 +255,18 @@ export class PtyManager {
     proc.write(data)
   }
 
+  /** Flow control: pause/resume the underlying pipe (ack-based backpressure). */
+  pause(id: string): void {
+    try { this.getProc(id)?.pause() } catch { /* dead process */ }
+  }
+
+  resume(id: string): void {
+    try { this.getProc(id)?.resume() } catch { /* dead process */ }
+  }
+
   resize(id: string, cols: number, rows: number): void {
     try {
-      this.processes.get(id)?.resize(cols, rows)
+      this.getProc(id)?.resize(cols, rows)
     } catch {
       // Ignore resize errors for dead processes
     }
@@ -236,7 +274,7 @@ export class PtyManager {
 
   /** Get the current working directory of a PTY process */
   getCwd(id: string): string | null {
-    const proc = this.processes.get(id)
+    const proc = this.getProc(id)
     if (!proc) return null
 
     try {
@@ -264,7 +302,7 @@ export class PtyManager {
 
   /** Check if a PTY process is still alive */
   isAlive(id: string): boolean {
-    const proc = this.processes.get(id)
+    const proc = this.getProc(id)
     if (!proc) return false
     try {
       // node-pty process — check if pid is still valid
@@ -279,19 +317,23 @@ export class PtyManager {
   }
 
   kill(id: string): void {
-    const proc = this.processes.get(id)
-    if (proc) {
-      try {
-        proc.kill()
-      } catch {
-        // Already dead
-      }
-      this.processes.delete(id)
+    const entry = this.entries.get(id)
+    if (!entry) return
+    // Dispose data/exit listeners BEFORE killing so a late flush from the dying
+    // process can't reach a renderer that has since re-subscribed under this id.
+    for (const d of entry.disposables) {
+      try { d.dispose() } catch { /* noop */ }
     }
+    try {
+      entry.proc.kill()
+    } catch {
+      // Already dead
+    }
+    this.entries.delete(id)
   }
 
   killAll(): void {
-    for (const id of this.processes.keys()) {
+    for (const id of [...this.entries.keys()]) {
       this.kill(id)
     }
   }

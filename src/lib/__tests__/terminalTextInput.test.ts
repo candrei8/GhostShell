@@ -6,10 +6,12 @@ describe('terminalTextInput', () => {
     expect(normalizeTerminalPasteText('one\r\ntwo\nthree')).toBe('one\rtwo\rthree')
   })
 
-  it('captures structured paste and replacement input types', () => {
-    expect(shouldCaptureStructuredTextInsertion('insertFromPaste', 'hello')).toBe(true)
-    expect(shouldCaptureStructuredTextInsertion('insertReplacementText', 'hello')).toBe(true)
-    expect(shouldCaptureStructuredTextInsertion('insertFromDrop', 'hello')).toBe(true)
+  it('does NOT capture paste/drop input types (xterm handles those natively)', () => {
+    // Intercepting these caused double writes that agent CLIs registered as
+    // multiple paste blocks. The paste pipeline owns them via the paste event.
+    expect(shouldCaptureStructuredTextInsertion('insertFromPaste', 'hello')).toBe(false)
+    expect(shouldCaptureStructuredTextInsertion('insertReplacementText', 'hello')).toBe(false)
+    expect(shouldCaptureStructuredTextInsertion('insertFromDrop', 'hello')).toBe(false)
   })
 
   it('captures multi-character insertText but ignores regular typing', () => {

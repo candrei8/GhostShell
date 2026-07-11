@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { electronStorage } from '../lib/electronStorage'
 import {
   type KeyCombo,
@@ -336,7 +336,11 @@ export const useShortcutStore = create<ShortcutState>()(
     }),
     {
       name: 'ghostshell-shortcuts',
-      storage: electronStorage as any,
+      // createJSONStorage wraps the string-based StateStorage into the
+      // object-based PersistStorage zustand v5 requires. The old `as any` cast
+      // passed the wrong shape, so setItem received an object, JSON.parse threw,
+      // and every custom keybinding was silently lost on restart.
+      storage: createJSONStorage(() => electronStorage),
       partialize: (state) => ({ overrides: state.overrides }),
       version: 2,
       migrate: (persistedState) => {

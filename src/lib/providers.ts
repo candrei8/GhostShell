@@ -11,24 +11,27 @@ export interface ModelDef {
 export const CODEX_CLI_DEFAULT_MODEL_ID = 'codex-cli-default'
 
 export const CLAUDE_MODELS: ModelDef[] = [
-  { id: 'claude-opus-4-6', name: 'Opus 4.6', badge: 'Latest Known', color: '#f59e0b' },
+  { id: 'claude-opus-4-8', name: 'Opus 4.8', badge: 'Latest Known', color: '#f59e0b' },
+  { id: 'claude-fable-5', name: 'Fable 5', badge: 'Most Capable', color: '#38bdf8' },
   { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', badge: 'Stable', color: '#a855f7' },
   { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', badge: 'Fastest', color: '#22d3ee' },
 ]
 
 export const GEMINI_MODELS: ModelDef[] = [
-  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', badge: 'Latest Known', color: '#1a73e8' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', badge: 'Most Capable', color: '#4285f4' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', badge: 'Recommended', color: '#34a853' },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', badge: 'Recommended', color: '#34a853' },
+  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', badge: 'Preview', color: '#1a73e8' },
+  { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', badge: 'Most Capable', color: '#4285f4' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', badge: 'Stable', color: '#4285f4' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', badge: 'Stable', color: '#34a853' },
   { id: 'gemini-2.5-flash-lite', name: 'Flash Lite', badge: 'Fastest', color: '#fbbc04' },
 ]
 
 export const CODEX_MODELS: ModelDef[] = [
   { id: CODEX_CLI_DEFAULT_MODEL_ID, name: 'Latest (CLI Default)', badge: 'Recommended', color: '#10a37f' },
+  { id: 'gpt-5.5', name: 'GPT-5.5', badge: 'Most Capable', color: '#10a37f' },
+  { id: 'gpt-5.4', name: 'GPT-5.4', badge: 'Stable', color: '#0d8c6d' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', badge: 'Fastest', color: '#19c37d' },
   { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', badge: 'Legacy', color: '#0d8c6d' },
-  { id: 'gpt-5.3-codex-spark', name: 'Codex Spark', badge: 'Fastest', color: '#19c37d' },
-  { id: 'codex-mini-latest', name: 'Codex Mini', badge: 'Mini', color: '#0d8c6d' },
-  { id: 'o3', name: 'o3', badge: 'Reasoning', color: '#6e44ff' },
 ]
 
 export function isCodexCliDefaultModel(modelId?: string): boolean {
@@ -87,7 +90,7 @@ export function resolveModelsForProvider(
 export function getDefaultModel(provider: Provider): string {
   if (provider === 'gemini') return 'gemini-3-flash-preview'
   if (provider === 'codex') return CODEX_CLI_DEFAULT_MODEL_ID
-  return 'claude-opus-4-6'
+  return 'claude-opus-4-8'
 }
 
 /**
@@ -323,8 +326,8 @@ export function parseDiscoveredModels(provider: Provider, raw: string): ModelDef
 /** Format a raw model ID into a readable name */
 function formatModelName(id: string, provider: Provider): string {
   if (provider === 'claude') {
-    // "claude-opus-4-6" → "Opus 4.6"
-    const m = id.match(/claude-(opus|sonnet|haiku)-([\d]+)(?:-([\d]+))?/i)
+    // "claude-opus-4-8" → "Opus 4.8", "claude-fable-5" → "Fable 5"
+    const m = id.match(/claude-(opus|sonnet|haiku|fable|mythos)-([\d]+)(?:-([\d]+))?/i)
     if (m) {
       const family = m[1].charAt(0).toUpperCase() + m[1].slice(1)
       const ver = m[3] ? `${m[2]}.${m[3]}` : m[2]
@@ -368,6 +371,7 @@ function detectBadge(line: string): string {
 function guessModelColor(id: string, provider: Provider): string {
   const lower = id.toLowerCase()
   if (provider === 'claude') {
+    if (lower.includes('fable') || lower.includes('mythos')) return '#38bdf8'
     if (lower.includes('opus')) return '#f59e0b'
     if (lower.includes('sonnet')) return '#a855f7'
     if (lower.includes('haiku')) return '#22d3ee'

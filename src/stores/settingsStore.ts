@@ -158,7 +158,7 @@ function getFallbackAvatar(provider: Provider): AgentAvatarConfig {
 function getDefaultModelForProvider(provider: Provider): string {
   if (provider === 'gemini') return 'gemini-3-flash-preview'
   if (provider === 'codex') return CODEX_CLI_DEFAULT_MODEL_ID
-  return 'claude-opus-4-6'
+  return 'claude-opus-4-8'
 }
 
 function sanitizeSavedAgent(value: unknown): SavedAgentConfig | null {
@@ -273,7 +273,7 @@ function normalizePersistedSettings(persistedState: unknown) {
       ? raw.terminalOutputEmphasis
       : 'balanced',
     claudeCliPath: pickTrimmedString(raw.claudeCliPath, 'claude'),
-    defaultModel: pickTrimmedString(raw.defaultModel, 'claude-opus-4-6'),
+    defaultModel: pickTrimmedString(raw.defaultModel, 'claude-opus-4-8'),
     defaultSkipPermissions:
       typeof raw.defaultSkipPermissions === 'boolean' ? raw.defaultSkipPermissions : false,
     defaultProvider: isProvider(raw.defaultProvider) ? raw.defaultProvider : 'claude',
@@ -305,7 +305,7 @@ export const useSettingsStore = create<SettingsState>()(
       cliVisualProfile: 'executive',
       terminalOutputEmphasis: 'balanced',
       claudeCliPath: 'claude',
-      defaultModel: 'claude-opus-4-6',
+      defaultModel: 'claude-opus-4-8',
       defaultSkipPermissions: false,
       defaultProvider: 'claude',
       geminiCliPath: 'gemini',

@@ -6,6 +6,7 @@ import * as readline from 'readline'
 interface RunCommandOptions {
   cwd?: string
   timeoutMs?: number
+  env?: Record<string, string>
 }
 
 interface SpawnSpec {
@@ -62,6 +63,7 @@ export async function runCommand(
       cwd: options.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
     })
 
     let stdout = ''

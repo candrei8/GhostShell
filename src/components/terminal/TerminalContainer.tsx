@@ -37,16 +37,27 @@ export function TerminalContainer() {
   }, [])
 
   useEffect(() => {
+    // Coalesce duplicate new-terminal events fired within one keypress (e.g. an
+    // xterm intercept + the global shortcut handler both firing) so Ctrl+T
+    // always opens exactly one terminal.
+    let lastNewTerminalAt = 0
     const handleNewTerminalRequest = () => {
+      const now = Date.now()
+      if (now - lastNewTerminalAt < 250) return
+      lastNewTerminalAt = now
       const cwd = useWorkspaceStore.getState().currentPath
       useTerminalStore.getState().addSession({
-        id: `term-standalone-${Date.now()}`,
+        id: `term-standalone-${now}`,
         title: 'Terminal',
         cwd,
       })
     }
 
+    let lastSplitAt = 0
     const handleSplitRequest = () => {
+      const now = Date.now()
+      if (now - lastSplitAt < 250) return
+      lastSplitAt = now
       const currentSessionId = useTerminalStore.getState().activeSessionId
       if (!currentSessionId) return
       useTerminalStore.getState().duplicateSession(currentSessionId)
@@ -88,6 +99,28 @@ export function TerminalContainer() {
     }
   }, [resolvedActiveWorkspaceId, activeWorkspaceId, setActiveWorkspace])
 
+  // Which sessions are visible right now. Every session stays mounted; this
+  // only drives CSS visibility so layout changes never unmount a pane (and
+  // therefore never kill a live PTY).
+  const visibleSessionIds = useMemo(() => {
+    if (maximizedSessionId && sessions.some((s) => s.id === maximizedSessionId)) {
+      return [maximizedSessionId]
+    }
+    if (viewMode === 'grid') {
+      return sessions.map((s) => s.id)
+    }
+    const ws = workspaces.find((w) => w.id === resolvedActiveWorkspaceId)
+    if (ws) return ws.sessionIds
+    return sessions[0] ? [sessions[0].id] : []
+  }, [maximizedSessionId, viewMode, sessions, workspaces, resolvedActiveWorkspaceId])
+
+  // A visibility/layout change (maximize toggle, tabs↔grid) doesn't resize the
+  // DOM node, so nudge all terminals to refit after the CSS settles.
+  useEffect(() => {
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent('ghostshell:refit')), 60)
+    return () => clearTimeout(t)
+  }, [viewMode, maximizedSessionId, visibleSessionIds])
+
   const handleTypeSelected = useCallback((type: SessionType) => {
     setShowTypeSelector(false)
 
@@ -105,66 +138,44 @@ export function TerminalContainer() {
     }
   }, [])
 
-  const renderWorkspace = useCallback((workspaceSessions: typeof sessions, workspaceId: string, isVisible: boolean) => {
-    if (workspaceSessions.length === 0) return null
+  const isSingleVisible = visibleSessionIds.length === 1
+  const visibleSet = useMemo(() => new Set(visibleSessionIds), [visibleSessionIds])
 
-    const wrapperClassName = viewMode === 'tabs'
-      ? (isVisible ? 'absolute inset-0' : 'absolute inset-0 hidden')
-      : 'absolute inset-0'
-
-    // In tabs mode, use the first session id as the wrapper key so that the
-    // React subtree stays mounted when a singleton workspace is promoted to
-    // a group after a split (workspace id changes from session.id to
-    // group.id, but the first session id stays the same). This prevents
-    // TerminalPane from remounting — which would dispose xterm and kill the
-    // PTY, losing all context.
-    const stableKey =
-      viewMode === 'tabs' ? (workspaceSessions[0]?.id ?? workspaceId) : workspaceId
-    const isSingle = workspaceSessions.length === 1 && viewMode === 'tabs'
-
-    return (
-      <div key={stableKey} className={wrapperClassName} aria-hidden={!isVisible}>
-        <BentoLayout
-          sessions={workspaceSessions}
-          maximizedSessionId={maximizedSessionId}
-          renderPane={(session) => (
-            <div
-              key={session.id}
-              className="w-full h-full relative"
-              onMouseDownCapture={() => {
-                if (session.id !== activeSessionId) {
-                  setActiveSession(session.id)
-                }
-              }}
-            >
-              <TerminalPane
-                session={session}
-                isActive={isVisible && (isSingle || session.id === activeSessionId)}
-                onClose={() => removeSession(session.id)}
-                onClick={() => setActiveSession(session.id)}
-                showPaneLabel={true}
-              />
-            </div>
-          )}
+  const renderPane = useCallback(
+    (session: (typeof sessions)[number]) => (
+      // No key here — BentoLayout keys the wrapping cell by session.id.
+      <div
+        className="w-full h-full relative"
+        onMouseDownCapture={() => {
+          if (session.id !== activeSessionId) {
+            setActiveSession(session.id)
+          }
+        }}
+      >
+        <TerminalPane
+          session={session}
+          isActive={visibleSet.has(session.id) && (isSingleVisible || session.id === activeSessionId)}
+          onClose={() => removeSession(session.id)}
+          onClick={() => setActiveSession(session.id)}
+          showPaneLabel={true}
         />
       </div>
-    )
-  }, [activeSessionId, maximizedSessionId, removeSession, setActiveSession, viewMode])
+    ),
+    [activeSessionId, isSingleVisible, removeSession, setActiveSession, visibleSet],
+  )
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-ghost-bg h-full w-full relative">
 
-      {/* Workspace Area */}
+      {/* Workspace Area — a single mounted set of panes; tabs/grid/maximize
+          only toggle CSS visibility so no layout change ever kills a PTY. */}
       <div className="flex-1 min-h-0 relative">
-        {viewMode === 'tabs'
-          ? workspaces.map((workspace) =>
-            renderWorkspace(
-              sessions.filter((session) => workspace.sessionIds.includes(session.id)),
-              workspace.id,
-              workspace.id === resolvedActiveWorkspaceId,
-            ),
-          )
-          : renderWorkspace(sessions, 'grid-view', true)}
+        <BentoLayout
+          sessions={sessions}
+          visibleSessionIds={visibleSessionIds}
+          maximizedSessionId={maximizedSessionId}
+          renderPane={renderPane}
+        />
       </div>
 
       {hasNoSessions && !showTypeSelector && (

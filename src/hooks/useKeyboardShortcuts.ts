@@ -434,37 +434,18 @@ export function useKeyboardShortcuts({
 
       // ── Settings shortcuts ────────────────────────────────────────────
 
-      if (
-        run('nav.settings', () => {
-          onOpenSettingsTab?.('appearance') ?? onNavigate?.('settings')
-        })
-      ) {
-        return
+      // Each opens a specific settings tab. onOpenSettingsTab returns void, so
+      // the old `?? onNavigate('settings')` ALWAYS also ran and reset the tab to
+      // the default (appearance). Use explicit if/else so the requested tab wins.
+      const openSettingsTab = (tab: 'appearance' | 'terminal' | 'providers' | 'shortcuts') => {
+        if (onOpenSettingsTab) onOpenSettingsTab(tab)
+        else onNavigate?.('settings')
       }
 
-      if (
-        run('nav.settingsTerminal', () => {
-          onOpenSettingsTab?.('terminal') ?? onNavigate?.('settings')
-        })
-      ) {
-        return
-      }
-
-      if (
-        run('nav.settingsProviders', () => {
-          onOpenSettingsTab?.('providers') ?? onNavigate?.('settings')
-        })
-      ) {
-        return
-      }
-
-      if (
-        run('nav.settingsShortcuts', () => {
-          onOpenSettingsTab?.('shortcuts') ?? onNavigate?.('settings')
-        })
-      ) {
-        return
-      }
+      if (run('nav.settings', () => openSettingsTab('appearance'))) return
+      if (run('nav.settingsTerminal', () => openSettingsTab('terminal'))) return
+      if (run('nav.settingsProviders', () => openSettingsTab('providers'))) return
+      if (run('nav.settingsShortcuts', () => openSettingsTab('shortcuts'))) return
 
       if (run('nav.history', () => onNavigate?.('history'))) return
       if (run('nav.blocks', () => onNavigate?.('blocks'))) return

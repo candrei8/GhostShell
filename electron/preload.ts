@@ -12,6 +12,8 @@ const api = {
   ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number; provider?: 'claude' | 'gemini' | 'codex'; env?: Record<string, string> }) =>
     ipcRenderer.invoke('pty:create', options) as Promise<{ success: boolean; error?: string }>,
   ptyWrite: (id: string, data: string) => ipcRenderer.send('pty:write', id, data),
+  // Flow control: renderer acks rendered chars so main can pause/resume the pty.
+  ptyAck: (id: string, charCount: number) => ipcRenderer.send('pty:ack', id, charCount),
   ptyResize: (id: string, cols: number, rows: number) => ipcRenderer.send('pty:resize', id, cols, rows),
   ptyKill: (id: string) => ipcRenderer.send('pty:kill', id),
   ptyIsAlive: (id: string) => ipcRenderer.invoke('pty:isAlive', id) as Promise<boolean>,
