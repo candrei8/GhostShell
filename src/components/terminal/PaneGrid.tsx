@@ -53,6 +53,8 @@ const PaneCell = memo(function PaneCell({
       data-hidden={visible ? undefined : 'true'}
       data-maximized={maximized ? 'true' : undefined}
       data-focused={focused && visible ? 'true' : undefined}
+      // The agent setup screen is not a terminal yet: no card, no focus ring.
+      data-chromeless={session.showQuickLaunch ? 'true' : undefined}
       aria-hidden={!visible}
       style={{ left: x, top: y, width, height }}
     >

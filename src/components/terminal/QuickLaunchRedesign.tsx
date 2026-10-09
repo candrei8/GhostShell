@@ -615,16 +615,19 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
     >
       <StepBar step={step} />
 
-      {/* Inside a pane the header's × already closes it. */}
-      {!sessionId && (
-        <button
-          onClick={onLaunched}
-          className="absolute top-10 right-10 flex h-9 w-9 items-center justify-center rounded-xl text-white/40 transition-all hover:bg-white/[0.06] hover:text-white"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" />
-        </button>
-      )}
+      <button
+        onClick={() => {
+          if (sessionId) {
+            // Inside a tab: remove the empty session
+            useTerminalStore.getState().removeSession(sessionId)
+          }
+          onLaunched()
+        }}
+        className="absolute top-10 right-10 flex h-9 w-9 items-center justify-center rounded-xl text-white/40 transition-all hover:bg-white/[0.06] hover:text-white"
+        aria-label="Close"
+      >
+        <X className="h-5 w-5" />
+      </button>
 
       <motion.div
         initial={{ opacity: 0, y: 12, scale: 0.98 }}

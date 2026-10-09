@@ -342,7 +342,6 @@ export function TerminalPane({
         data-terminal-pane
         data-smart-input-active={showSmartInput ? 'true' : undefined}
         className="terminal-pane relative flex h-full flex-col overflow-hidden"
-        style={paneStyle}
         onClick={(event) => {
           onClick?.()
           const target = event.target as HTMLElement | null
@@ -351,10 +350,8 @@ export function TerminalPane({
           }
         }}
       >
-        {header}
-        <div className="relative min-h-0 flex-1">
-          <QuickLaunch sessionId={session.id} onLaunched={handleQuickLaunchComplete} />
-        </div>
+        {/* No pane header: there is no terminal yet, only the setup screen. */}
+        <QuickLaunch sessionId={session.id} onLaunched={handleQuickLaunchComplete} />
       </div>
     )
   }

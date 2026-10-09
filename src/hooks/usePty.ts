@@ -16,6 +16,7 @@ import { detectDomain } from '../lib/domain-detector'
 import { reportAgentOutput } from '../lib/swarm-message-injector'
 import { feedAgentOutput } from '../lib/swarm-self-heal'
 import { registerPromptSubmission } from '../lib/terminalPromptSubmission'
+import { getNativeMultilineSequence } from '../lib/multilineInput'
 import { emitSwarmActivity } from '../lib/swarm-activity-emitter'
 import { resolveDroppedFilePathFromBridge } from '../lib/fileDrop'
 
@@ -189,16 +190,6 @@ function getAutoConfirmPatterns(provider: Provider): RegExp[] {
   if (provider === 'gemini') return GEMINI_AUTO_CONFIRM_PATTERNS
   if (provider === 'codex') return CODEX_AUTO_CONFIRM_PATTERNS
   return CLAUDE_AUTO_CONFIRM_PATTERNS
-}
-
-function getNativeMultilineSequence(provider: Provider): string {
-  // Claude Code: ESC + CR (Alt/Option+Enter) inserts a newline without submit.
-  // The old approach (\\ + CR) showed a visible backslash and caused double
-  // newlines on Windows because the PTY CR echo stacked with the CLI's own
-  // continuation newline.
-  // Codex / Gemini: raw LF (Ctrl+J) inserts a newline without submit.
-  if (provider === 'claude') return '\x1b\r'
-  return '\n'
 }
 
 function getCommandCompletionPromptPatterns(provider: Provider): RegExp[] {
@@ -416,6 +407,10 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
     let lastSubAgentStartedAt = 0
     const SUBAGENT_SPAWN_DEDUPE_MS = 1200
     let promptTail = ''
+    // Provider the current promptTail was accumulated under (see onData).
+    let providerOfPromptTail: Provider | undefined = agentId
+      ? undefined
+      : useTerminalStore.getState().getSession(sessionId)?.detectedProvider
     // Declared at the effect scope (not inside init) so trackCommandSubmission —
     // which also lives here — can reset it. Previously it was declared inside the
     // nested init() and the outer assignment threw a ReferenceError at runtime,
@@ -864,11 +859,22 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
           if (detectedOutputProvider) {
             setStandaloneProvider(detectedOutputProvider)
           }
-          promptTail = (promptTail + normalizedForPrompt).slice(-320)
 
           const standaloneProvider = !agentId
             ? useTerminalStore.getState().getSession(sessionId)?.detectedProvider
             : undefined
+          // A CLI was just launched (e.g. `codex` sent from the command bar,
+          // which sets the provider outside this hook). The shell prompt still
+          // at the end of promptTail is the one it was launched FROM; if the
+          // next chunk adds no visible text (a title change, cursor moves) it
+          // would read as "the CLI exited" and drop the provider at once,
+          // leaving the pane in command-bar mode with keys never reaching it.
+          if (standaloneProvider !== providerOfPromptTail) {
+            providerOfPromptTail = standaloneProvider
+            if (standaloneProvider) promptTail = ''
+          }
+          promptTail = (promptTail + normalizedForPrompt).slice(-320)
+
           if (standaloneProvider && isNativeShellPrompt(promptTail)) {
             setStandaloneProvider(undefined)
           }

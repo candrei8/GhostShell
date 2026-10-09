@@ -5,6 +5,7 @@ import { useHistoryStore } from '../stores/historyStore'
 import { useTerminalStore } from '../stores/terminalStore'
 import { resolveProvider } from './providers'
 import { Provider } from './types'
+import { getNativeMultilineSequence } from './multilineInput'
 
 function normalizePrompt(command: string): string | null {
   const normalized = command.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
@@ -25,13 +26,6 @@ function getPromptProvider(sessionId: string): Provider {
 function isInteractiveProviderSession(sessionId: string): boolean {
   const session = useTerminalStore.getState().getSession(sessionId)
   return !!session?.agentId || !!session?.detectedProvider
-}
-
-function getNativeMultilineSequence(provider: Provider): string {
-  // Claude Code: ESC+CR (Alt/Option+Enter) inserts a newline without submitting.
-  if (provider === 'claude') return '\x1b\r'
-  // Codex / Gemini: raw LF inserts a newline without submitting.
-  return '\n'
 }
 
 function detectProviderFromCommand(command: string): Provider | null {

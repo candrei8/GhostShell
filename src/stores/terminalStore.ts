@@ -149,7 +149,9 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
 
   addSession: (session) => {
     set((state) => {
-      const title = isGenericTitle(session.title)
+      // The agent setup screen keeps its placeholder ("New Session") until it
+      // launches: the name goes to the terminal or agent that replaces it.
+      const title = isGenericTitle(session.title) && !session.showQuickLaunch
         ? nextPaneName(state.sessions.map((s) => s.title))
         : session.title
       const newSession: TerminalSession = { ...session, title, isActive: true }

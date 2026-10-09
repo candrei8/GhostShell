@@ -148,3 +148,26 @@ describe('terminalStore pane names', () => {
     expect(useTerminalStore.getState().sessions[0].title).toBe('Terminal')
   })
 })
+
+describe('terminalStore agent setup screen', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+
+  it('keeps the placeholder title until the setup screen launches something', () => {
+    const { addSession, updateSession } = useTerminalStore.getState()
+    addSession({ id: 'ql', title: 'New Session', cwd: '.', showQuickLaunch: true })
+    expect(useTerminalStore.getState().sessions[0].title).toBe('New Session')
+
+    // Launching a plain terminal from it: placeholder in, real name out.
+    updateSession('ql', { title: 'Terminal', showQuickLaunch: false })
+    expect(useTerminalStore.getState().sessions[0].title).toBe('Emma')
+  })
+
+  it('takes the launched agent name when the setup screen launches an agent', () => {
+    const { addSession, updateSession } = useTerminalStore.getState()
+    addSession({ id: 'ql', title: 'New Session', cwd: '.', showQuickLaunch: true })
+    updateSession('ql', { title: 'James', showQuickLaunch: false })
+    expect(useTerminalStore.getState().sessions[0].title).toBe('James')
+  })
+})

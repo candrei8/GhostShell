@@ -170,6 +170,21 @@
   z-index: 2;
 }
 
+/* Agent setup screen (QuickLaunch): sits on the canvas itself. It is not a
+   terminal yet, so it gets no card, border, radius or selection ring. */
+.pane-card[data-chromeless='true'],
+.pane-card[data-chromeless='true'][data-focused='true'],
+.pane-card[data-chromeless='true']:hover {
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pane-card[data-chromeless='true']::after {
+  content: none;
+}
+
 /* Pane header — dot · provider glyph · name · status · actions */
 .pane-header {
   height: var(--pane-header-h);
