@@ -1,21 +1,19 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import {
+  LayoutGrid,
   Minus,
   Network,
   Plus,
   Settings as SettingsIcon,
   Square,
-  Terminal as TerminalIcon,
   X,
-  type LucideIcon,
 } from 'lucide-react'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { useAgentStore } from '../../stores/agentStore'
-import { useWorkspaceStore } from '../../stores/workspaceStore'
-import { useSwarmStore } from '../../stores/swarmStore'
 import { ContextMenu } from '../common/ContextMenu'
-import { SessionTypeSelector } from '../terminal/SessionTypeSelector'
-import { type SessionType } from '../../lib/types'
+import { openQuickLaunchSession } from '../../lib/sessionLaunch'
+import { resolveProvider } from '../../lib/providers'
+import { ProviderGlyph } from '../terminal/ProviderGlyph'
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -36,25 +34,9 @@ const TAB_COLORS = [
   { label: 'Pink', value: '#d94fa8' },
 ]
 
-const AUTO_COLORS = TAB_COLORS.map((c) => c.value)
-
-function getAutoColor(id: string) {
-  let hash = 0
-  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash)
-  return AUTO_COLORS[Math.abs(hash) % AUTO_COLORS.length]
-}
-
-function getTabBg(color: string | undefined, active: boolean) {
-  if (active) {
-    if (!color || !color.startsWith('#')) return '#4094e0'
-    return color
-  }
-  return 'transparent'
-}
-
-function getTabBorder(color: string | undefined): string {
-  if (!color || !color.startsWith('#')) return '#4094e0'
-  return color
+/** "Agents (4)" → "Agents": the tab shows the pane count as its own badge. */
+function getTabLabel(title: string, isGroup: boolean): string {
+  return isGroup ? title.replace(/\s*\(\d+\)$/, '') || title : title
 }
 
 const Logo = () => (
@@ -87,7 +69,6 @@ export function GlobalDock({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null)
-  const [showTypeSelector, setShowTypeSelector] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const workspaces = useMemo(() => getWorkspaces(), [getWorkspaces, sessions, groups])
@@ -146,30 +127,15 @@ export function GlobalDock({
     void handleMaximize()
   }, [handleMaximize])
 
+  // + opens the agent setup screen directly; Shift+click (or right-click)
+  // opens a plain terminal.
   const handleNewTab = useCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
     if (e.shiftKey) {
       onSpawnTerminal()
       return
     }
-    setShowTypeSelector(true)
+    openQuickLaunchSession()
   }, [onSpawnTerminal])
-
-  const handleTypeSelected = useCallback((type: SessionType) => {
-    setShowTypeSelector(false)
-
-    if (type === 'ghostswarm') {
-      useSwarmStore.getState().openWizard()
-    } else {
-      const cwd = useWorkspaceStore.getState().currentPath
-      useTerminalStore.getState().addSession({
-        id: `term-quicklaunch-${Date.now()}`,
-        title: 'New Session',
-        cwd,
-        showQuickLaunch: true,
-        sessionType: 'ghostcode',
-      })
-    }
-  }, [])
 
   const handleNewTabContext = useCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -215,7 +181,8 @@ export function GlobalDock({
   return (
     <div
       onDoubleClick={handleDoubleClick}
-      className="titlebar-drag relative z-20 flex h-11 w-full shrink-0 items-center bg-[#080c14] border-b border-white/[0.04] overflow-hidden"
+      className="titlebar-drag relative z-20 flex h-[44px] w-full shrink-0 items-center overflow-hidden"
+      style={{ background: 'var(--shell-bg)' }}
     >
       {contextMenu && (
         <ContextMenu
@@ -232,64 +199,71 @@ export function GlobalDock({
         </div>
       </div>
 
-      {/* ── Center: Tabs + New ─────────────────────── */}
-      <div className="flex h-full flex-1 items-center overflow-x-auto no-scrollbar">
+      {/* ── Center: Workspace tabs + New ─────────────── */}
+      <div role="tablist" aria-label="Workspaces" className="flex h-full flex-1 items-center gap-1 overflow-x-auto no-scrollbar pl-1 pr-2">
         {showTabs && workspaces.map((ws) => {
           const isActive = ws.id === resolvedActiveWorkspaceId
-          const agent = ws.agentId ? agents.find((a) => a.id === ws.agentId) : null
-          let tabColor = ws.color
-          if (!tabColor) tabColor = agent?.color || getAutoColor(ws.id)
-          else if (tabColor === 'default') tabColor = undefined
-          const wsSession = sessions.find((s) => ws.sessionIds.includes(s.id))
-          const isSwarm = wsSession?.sessionType === 'ghostswarm' || ws.title.toLowerCase().includes('swarm')
-          const TabIcon = isSwarm ? Network : TerminalIcon
+          const firstSession = sessions.find((s) => s.id === ws.sessionIds[0])
+          const agent = firstSession?.agentId ? agents.find((a) => a.id === firstSession.agentId) : undefined
+          const provider = agent ? resolveProvider(agent) : firstSession?.detectedProvider
+          const isSwarm = firstSession?.sessionType === 'ghostswarm' || ws.title.toLowerCase().includes('swarm')
+          // Only a colour the user picked is shown, as a quiet label dot.
+          const labelColor = ws.color && ws.color !== 'default' ? ws.color : undefined
           const isEditing = editingId === ws.id
+          const count = ws.sessionIds.length
 
           return (
             <div
               key={ws.id}
+              role="tab"
+              aria-selected={isActive}
+              data-active={isActive ? 'true' : undefined}
+              title={ws.title}
               onClick={() => { if (!isEditing) setActiveWorkspace(ws.id) }}
               onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(ws.title); setEditingId(ws.id) }}
               onContextMenu={(e) => { e.preventDefault(); setContextMenu({ id: ws.id, x: e.clientX, y: e.clientY }) }}
-              className={`titlebar-no-drag group relative flex h-full min-w-[120px] max-w-[200px] shrink-0 cursor-pointer items-center justify-between px-3 transition-all duration-150 border-r border-white/5 ${
-                isActive ? 'text-white' : 'text-white/70 hover:text-white/90 hover:bg-white/[0.04]'
-              }`}
-              style={{
-                backgroundColor: getTabBg(tabColor, isActive),
-                borderLeft: !isActive ? `2px solid ${getTabBorder(tabColor)}` : undefined,
-              }}
+              className="workspace-tab titlebar-no-drag group"
             >
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <TabIcon className="h-3.5 w-3.5 shrink-0" style={{ color: isActive ? 'white' : getTabBorder(tabColor) }} />
-                {isEditing ? (
-                  <input
-                    ref={inputRef}
-                    value={editingTitle}
-                    onChange={(e) => setEditingTitle(e.target.value)}
-                    onBlur={() => handleSaveTitle(ws.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveTitle(ws.id)
-                      if (e.key === 'Escape') setEditingId(null)
-                    }}
-                    className="w-full bg-black/40 px-1 py-0.5 rounded text-[12px] font-medium leading-none outline-none text-white selection:bg-white/30"
-                    onClick={(e) => e.stopPropagation()}
-                  />
+              {labelColor && (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: labelColor }} />
+              )}
+              <span className="workspace-tab-icon flex shrink-0 items-center justify-center">
+                {isSwarm ? (
+                  <Network className="h-3.5 w-3.5" />
+                ) : count > 1 ? (
+                  <LayoutGrid className="h-3.5 w-3.5" />
                 ) : (
-                  <span className="truncate text-[12px] font-medium leading-none">{ws.title}</span>
+                  <ProviderGlyph provider={provider} size={14} />
                 )}
-                {!isEditing && ws.sessionIds.length > 1 && (
-                  <span className={`flex items-center justify-center rounded-full px-1.5 h-4 text-[9px] font-bold ${
-                    isActive ? 'bg-black/20 text-white' : 'bg-black/30 text-white/90'
-                  }`}>
-                    {ws.sessionIds.length}
-                  </span>
-                )}
-              </div>
+              </span>
+              {isEditing ? (
+                <input
+                  ref={inputRef}
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={() => handleSaveTitle(ws.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle(ws.id)
+                    if (e.key === 'Escape') setEditingId(null)
+                  }}
+                  className="h-6 min-w-0 flex-1 rounded-md border bg-transparent px-1.5 text-[12.5px] font-medium outline-none"
+                  style={{ borderColor: 'var(--pane-focus)', color: 'var(--ghost-text)' }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium tracking-[-0.005em]">
+                  {getTabLabel(ws.title, ws.isGroup)}
+                </span>
+              )}
+              {!isEditing && count > 1 && (
+                <span className="workspace-tab-count">{count}</span>
+              )}
               <button
+                type="button"
+                aria-label={`Close ${ws.title}`}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={(e) => { e.stopPropagation(); closeWorkspace(ws.id) }}
-                className={`ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-all hover:bg-black/40 ${
-                  isActive ? 'text-white/80 hover:text-white' : 'opacity-0 group-hover:opacity-100 text-white/70 hover:text-white'
-                }`}
+                className="workspace-tab-close"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -300,9 +274,10 @@ export function GlobalDock({
           onClick={handleNewTab}
           onContextMenu={handleNewTabContext}
           title="New session (Shift+click for plain terminal)"
-          className="titlebar-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded-md ml-1 transition-all text-white/30 hover:bg-white/[0.06] hover:text-white/60 active:scale-[0.95]"
+          aria-label="New session"
+          className="workspace-tab-new titlebar-no-drag"
         >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+          <Plus className="h-4 w-4" strokeWidth={2} />
         </button>
       </div>
 
@@ -349,13 +324,6 @@ export function GlobalDock({
           <X className="h-[18px] w-[18px]" />
         </button>
       </div>
-
-      {showTypeSelector && (
-        <SessionTypeSelector
-          onSelect={handleTypeSelected}
-          onClose={() => setShowTypeSelector(false)}
-        />
-      )}
     </div>
   )
 }

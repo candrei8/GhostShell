@@ -76,6 +76,11 @@ function flushPtyBuffer(id: string): void {
 
 // Set app name early to ensure consistent userData path for cache dirs below
 app.setName('GhostShell')
+// QA/dev isolation: a dev run otherwise shares userData with the installed app
+// and would restore — then clear — its saved tabs and overwrite its settings.
+if (process.env.GHOSTSHELL_USER_DATA_DIR) {
+  app.setPath('userData', process.env.GHOSTSHELL_USER_DATA_DIR)
+}
 
 // Enable hardware acceleration for crisp WebGL terminal rendering.
 // NOTE: do NOT force-device-scale-factor here — it makes the whole app render
@@ -220,7 +225,10 @@ function createWindow(): void {
     minHeight: 768,
     frame: false,
     titleBarStyle: 'hidden',
-    backgroundColor: '#1a1025',
+    // Windows paints this colour into not-yet-repainted regions while the
+    // window is being resized. Default theme's (Zero Lux) --shell-bg; the
+    // renderer replaces it with the active theme's via window:setBackgroundColor.
+    backgroundColor: '#080808',
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -228,10 +236,25 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       zoomFactor: 1.0,
+      // A minimized window would otherwise have its timers clamped to ~1/s.
+      // xterm parses PTY output on timers and acks it back for flow control;
+      // throttled, the acks stall, the PTY hits the high watermark and pauses,
+      // and the agent CLI blocks until the window is restored.
+      backgroundThrottling: false,
     },
   })
 
   mainWindow = window
+
+  // Tell the renderer when the window stops/starts being on screen so it can
+  // freeze PTY resizes while minimized and repaint/re-attach WebGL on return.
+  const sendWindowState = (state: 'minimized' | 'restored') => {
+    if (!window.isDestroyed()) window.webContents.send('window:state', state)
+  }
+  window.on('minimize', () => sendWindowState('minimized'))
+  window.on('hide', () => sendWindowState('minimized'))
+  window.on('restore', () => sendWindowState('restored'))
+  window.on('show', () => sendWindowState('restored'))
 
   window.on('ready-to-show', () => {
     window.show()
@@ -288,6 +311,12 @@ function setupIPC(): void {
   })
   ipcMain.on('window:close', () => mainWindow?.close())
   ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized())
+  // Keep the native window colour equal to the themed canvas so a resize never
+  // flashes a different colour in not-yet-repainted regions.
+  ipcMain.on('window:setBackgroundColor', (_event, color: unknown) => {
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) return
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(color)
+  })
   ipcMain.on('window:toggleFullscreen', () => {
     if (mainWindow) {
       mainWindow.setFullScreen(!mainWindow.isFullScreen())

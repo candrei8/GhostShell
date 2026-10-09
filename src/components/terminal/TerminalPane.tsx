@@ -1,5 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
-import { X, Terminal as TerminalIcon } from 'lucide-react'
+import { useState, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTerminal } from '../../hooks/useTerminal'
 import { usePty } from '../../hooks/usePty'
 import { useTerminalStore } from '../../stores/terminalStore'
@@ -7,11 +6,12 @@ import { TerminalSearch } from './TerminalSearch'
 import { MultiLineInput } from './MultiLineInput'
 import { QuickLaunch } from './QuickLaunch'
 import { TerminalCommandBar } from './TerminalCommandBar'
+import { PaneHeader, type PaneStatus } from './PaneHeader'
 import { useAgentStore } from '../../stores/agentStore'
 import { useActivityStore } from '../../stores/activityStore'
 import { getActivityConfig } from '../agents/ActivityIcon'
 import { TerminalSession } from '../../lib/types'
-import { resolveProvider, getProviderColor } from '../../lib/providers'
+import { resolveProvider } from '../../lib/providers'
 import { submitPromptToSession } from '../../lib/terminalPromptSubmission'
 import { SHORTCUT_EVENTS } from '../../lib/shortcutEvents'
 
@@ -20,8 +20,11 @@ const SMART_INPUT_FOCUS_EVENT = 'ghostshell:focus-command-bar'
 interface TerminalPaneProps {
   session: TerminalSession
   isActive?: boolean
+  isMaximized?: boolean
   onClose?: () => void
   onClick?: () => void
+  onToggleMaximize?: () => void
+  onSplit?: () => void
   showPaneLabel?: boolean
   searchOpen?: boolean
   onSearchClose?: () => void
@@ -66,8 +69,11 @@ function useLiveActivity(activityName: string | null, startedAt: number | null) 
 export function TerminalPane({
   session,
   isActive,
+  isMaximized = false,
   onClose,
   onClick,
+  onToggleMaximize,
+  onSplit,
   showPaneLabel = true,
   searchOpen: externalSearchOpen,
   onSearchClose,
@@ -103,40 +109,27 @@ export function TerminalPane({
   const [multiLineOpen, setMultiLineOpen] = useState(false)
 
   const searchOpen = externalSearchOpen !== undefined ? externalSearchOpen : localSearchOpen
-  const providerColor = provider ? getProviderColor(provider) : '#e4e4e7'
 
   // ── Minimal status line: "Thinking · 12s" as plain typography ────────
   // busy self-clears when the detector goes stale, so it can never get stuck.
   const { busy: isBusy, elapsed: elapsedLabel } = useLiveActivity(activityName, activityStartedAt)
   const statusLabel = isBusy && activityName ? getActivityConfig(activityName).label : null
 
-  // Title editing state
+  const paneStatus: PaneStatus =
+    agent?.status === 'error'
+      ? 'error'
+      : agent?.status === 'offline'
+        ? 'offline'
+        : isBusy
+          ? 'busy'
+          : 'alive'
+
   const updateSession = useTerminalStore((s) => s.updateSession)
-  const [isEditingTitle, setIsEditingTitle] = useState(false)
-  const [titleInput, setTitleInput] = useState(session.title)
-  const titleInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!isEditingTitle) {
-      setTitleInput(session.title)
-    }
-  }, [session.title, isEditingTitle])
-
-  useEffect(() => {
-    if (isEditingTitle && titleInputRef.current) {
-      titleInputRef.current.focus()
-      titleInputRef.current.select()
-    }
-  }, [isEditingTitle])
-
-  const handleTitleSubmit = () => {
-    if (titleInput.trim() && titleInput !== session.title) {
-      updateSession(session.id, { title: titleInput.trim() })
-    } else {
-      setTitleInput(session.title)
-    }
-    setIsEditingTitle(false)
-  }
+  const renameSession = useTerminalStore((s) => s.renameSession)
+  const handleRename = useCallback(
+    (title: string) => renameSession(session.id, title),
+    [session.id, renameSession],
+  )
 
   usePty({
     sessionId: session.id,
@@ -160,19 +153,6 @@ export function TerminalPane({
       setLocalSearchOpen(false)
     }
   }, [onSearchClose])
-
-  useEffect(() => {
-    if (!isActive) return
-
-    const handleRenameRequest = () => {
-      setTitleInput(session.title)
-      setIsEditingTitle(true)
-    }
-
-    window.addEventListener(SHORTCUT_EVENTS.renameTab, handleRenameRequest as EventListener)
-    return () =>
-      window.removeEventListener(SHORTCUT_EVENTS.renameTab, handleRenameRequest as EventListener)
-  }, [isActive, session.title])
 
   useEffect(() => {
     if (!isActive) return
@@ -280,10 +260,68 @@ export function TerminalPane({
   )
 
   const paneStyle = useMemo(() => ({
-    background: 'var(--ghost-bg)',
+    background: 'var(--pane-bg)',
   }), [])
 
-  const cwdLeaf = session.cwd ? session.cwd.split(/[/\\]/).filter(Boolean).pop() : null
+  const handleClear = useCallback(() => {
+    terminal?.clear()
+  }, [terminal])
+
+  // Put keyboard focus back into this pane's input once layout has settled
+  // (two frames: the visibility flip of a maximize lands on the first).
+  const focusPane = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (showSmartInput) {
+          focusSmartInput()
+          return
+        }
+        try { terminal?.focus() } catch { /* disposed */ }
+      })
+    })
+  }, [focusSmartInput, showSmartInput, terminal])
+
+  const handleMaximizeToggle = useCallback(() => {
+    onToggleMaximize?.()
+    focusPane()
+  }, [focusPane, onToggleMaximize])
+
+  // In smart-input panes the xterm textarea is a dead end for keystrokes (the
+  // terminal is read-only); if anything focuses it — xterm's own mousedown,
+  // a programmatic focus — hand focus to the command bar instead.
+  useEffect(() => {
+    if (!showSmartInput || !containerEl) return
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.classList.contains('xterm-helper-textarea')) focusSmartInput()
+    }
+    containerEl.addEventListener('focusin', handleFocusIn)
+    return () => containerEl.removeEventListener('focusin', handleFocusIn)
+  }, [containerEl, focusSmartInput, showSmartInput])
+
+  const handleSplit = useCallback(() => {
+    onSplit?.()
+  }, [onSplit])
+
+  const header = showPaneLabel ? (
+    <PaneHeader
+      title={session.title}
+      cwd={session.cwd}
+      provider={provider}
+      status={paneStatus}
+      statusLabel={statusLabel}
+      elapsedLabel={elapsedLabel}
+      isActive={!!isActive}
+      isMaximized={isMaximized}
+      onRename={handleRename}
+      onToggleMaximize={handleMaximizeToggle}
+      onSplit={handleSplit}
+      onClose={onClose}
+      onSearch={handleToggleSearch}
+      onClear={handleClear}
+      onFocusPane={focusPane}
+    />
+  ) : null
 
   const handleQuickLaunchComplete = () => {
     updateSession(session.id, { showQuickLaunch: false })
@@ -303,7 +341,8 @@ export function TerminalPane({
       <div
         data-terminal-pane
         data-smart-input-active={showSmartInput ? 'true' : undefined}
-        className="terminal-pane relative flex h-full flex-col overflow-hidden bg-ghost-bg"
+        className="terminal-pane relative flex h-full flex-col overflow-hidden"
+        style={paneStyle}
         onClick={(event) => {
           onClick?.()
           const target = event.target as HTMLElement | null
@@ -312,7 +351,10 @@ export function TerminalPane({
           }
         }}
       >
-        <QuickLaunch sessionId={session.id} onLaunched={handleQuickLaunchComplete} />
+        {header}
+        <div className="relative min-h-0 flex-1">
+          <QuickLaunch sessionId={session.id} onLaunched={handleQuickLaunchComplete} />
+        </div>
       </div>
     )
   }
@@ -332,98 +374,7 @@ export function TerminalPane({
       }}
     >
 
-      {/* Pane header — minimal: dot · title · status · (spacer) · cwd · close */}
-      {showPaneLabel && (
-        <div
-          className="pane-header flex h-8 shrink-0 items-center gap-2.5 border-b px-3"
-          style={{
-            borderColor: 'color-mix(in srgb, var(--ghost-border) 55%, transparent)',
-            background: 'color-mix(in srgb, var(--ghost-sidebar) 45%, transparent)',
-          }}
-        >
-          {/* Status dot: provider color while busy, dim while idle */}
-          {agent || provider ? (
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full transition-opacity duration-300"
-              style={{ backgroundColor: providerColor, opacity: isBusy ? 1 : 0.45 }}
-            />
-          ) : (
-            <TerminalIcon className="h-3 w-3 shrink-0 text-white/25" />
-          )}
-
-          {/* Title */}
-          {isEditingTitle ? (
-            <input
-              ref={titleInputRef}
-              value={titleInput}
-              onChange={(e) => setTitleInput(e.target.value)}
-              onBlur={handleTitleSubmit}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleTitleSubmit()
-                if (e.key === 'Escape') {
-                  setTitleInput(session.title)
-                  setIsEditingTitle(false)
-                }
-              }}
-              className="max-w-[200px] rounded border bg-transparent px-1.5 py-0.5 text-[12px] font-medium outline-none"
-              style={{
-                borderColor: 'var(--ghost-accent)',
-                color: 'var(--ghost-text)',
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span
-              onDoubleClick={(e) => {
-                e.stopPropagation()
-                setIsEditingTitle(true)
-              }}
-              className={`shrink-0 cursor-default truncate text-[12px] font-medium transition-colors ${
-                isActive ? 'text-white/75' : 'text-white/40'
-              }`}
-              title="Double-click to rename"
-            >
-              {session.title}
-            </span>
-          )}
-
-          {/* Activity status: plain quiet typography, no chip */}
-          {!isEditingTitle && statusLabel && (
-            <span className="min-w-0 truncate text-[11px] text-white/30">
-              {statusLabel}
-              {elapsedLabel && (
-                <span className="tabular-nums text-white/20">{` · ${elapsedLabel}`}</span>
-              )}
-            </span>
-          )}
-
-          <span className="min-w-0 flex-1" />
-
-          {/* Working directory leaf */}
-          {cwdLeaf && (
-            <span
-              className="hidden shrink-0 font-mono text-[10px] text-white/20 md:block"
-              title={session.cwd}
-            >
-              {cwdLeaf}
-            </span>
-          )}
-
-          {/* Close — appears on pane hover */}
-          {onClose && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose()
-              }}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/25 opacity-0 transition-all hover:bg-white/[0.06] hover:text-white/70 group-hover:opacity-100"
-              title="Close"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          )}
-        </div>
-      )}
+      {header}
 
       {/* Terminal Canvas */}
       <div className="flex min-h-0 flex-1 bg-transparent">

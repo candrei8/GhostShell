@@ -958,56 +958,25 @@ export function TerminalCommandBar({
     submitTypedCommand(nextCommand)
   }
 
-  const footerLabel = isSearchMode
-    ? isHistoryMode
-      ? 'History mode: Enter loads, arrows move, Esc closes.'
-      : 'Palette mode: search repo actions, blocks, and command history.'
-    : activeInlineSuggestion
-      ? activeInlineSuggestion.insertValue
-      : 'Tab autocomplete · Ctrl+R history · Ctrl+K palette'
-
-  const footerStatus = isSearchMode
+  // Search modes show a result count; otherwise only a pending inline
+  // suggestion earns a label. Everything lives in ONE row of fixed height: if
+  // the bar grew on focus or mode change, the terminal above it would resize
+  // and make ConPTY reflow the whole screen.
+  const statusLabel = isSearchMode
     ? `${searchSuggestions.length} results`
     : activeInlineSuggestion
       ? getSuggestionBadgeLabel(activeInlineSuggestion)
-      : input.trim()
-        ? 'ready'
-        : hasPathCommand
-          ? 'paths'
-          : 'idle'
-  const footerText = footerLabel.replaceAll('Ã‚Â·', '·')
-
-  const displayFooterText = isSearchMode || activeInlineSuggestion
-    ? footerLabel
-    : 'Tab or -> autocomplete | Ctrl+R history | Ctrl+K palette'
+      : null
 
   return (
     <div
-      className="shrink-0 border-t backdrop-blur-xl"
+      className="shrink-0 border-t"
       style={{
-        borderColor: 'color-mix(in srgb, var(--ghost-border) 72%, rgba(255,255,255,0.04))',
-        background: 'color-mix(in srgb, var(--ghost-sidebar) 92%, rgba(255,255,255,0.02))',
+        borderColor: 'var(--pane-border)',
+        background: 'var(--pane-bg)',
       }}
     >
-      <div className="px-3 pb-2 pt-2">
-        <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-white/24">
-          <span>
-            {isHistoryMode
-              ? 'History Search'
-              : isPaletteMode
-                ? 'Command Palette'
-                : provider
-                  ? `${provider} command line`
-                  : 'Command line'}
-          </span>
-          <span className="truncate text-white/18">{smartTruncatePath(cwd || '.', 38)}</span>
-          <span className="ml-auto shrink-0 text-white/16">
-            {isHistoryMode ? 'Ctrl+R' : isPaletteMode ? 'Ctrl+K' : 'Tab'}
-          </span>
-        </div>
-      </div>
-
-      <div className="px-3 pb-3">
+      <div className="px-2.5 py-2">
         <div className="relative">
           {isSearchMode && searchSuggestions.length > 0 && (
             <div
@@ -1087,37 +1056,36 @@ export function TerminalCommandBar({
           )}
 
           <div
-            className="overflow-hidden rounded-[20px] border transition-colors"
+            className="overflow-hidden rounded-lg border transition-colors"
             style={{
               borderColor: isFocused
-                ? 'color-mix(in srgb, var(--ghost-accent) 28%, rgba(255,255,255,0.08))'
-                : 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
+                ? 'color-mix(in srgb, var(--ghost-accent) 38%, transparent)'
+                : 'var(--pane-border)',
               background: isFocused
-                ? 'color-mix(in srgb, var(--ghost-sidebar) 90%, rgba(255,255,255,0.018))'
-                : 'color-mix(in srgb, var(--ghost-bg) 90%, rgba(255,255,255,0.014))',
-              boxShadow: isFocused
-                ? '0 14px 30px rgba(0, 0, 0, 0.28)'
-                : '0 10px 24px rgba(0, 0, 0, 0.22)',
+                ? 'color-mix(in srgb, var(--ghost-text) 3%, transparent)'
+                : 'color-mix(in srgb, var(--ghost-text) 1.5%, transparent)',
             }}
           >
-            <div className="flex h-14 items-center gap-3 px-3">
-              <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+            <div className="flex h-9 items-center gap-2 pl-2.5 pr-1">
+              <span
+                aria-hidden="true"
+                className="flex w-3.5 shrink-0 items-center justify-center font-mono text-[13px] leading-none"
                 style={{
-                  background: 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
                   color: isSearchMode
                     ? 'var(--ghost-accent-2)'
-                    : 'color-mix(in srgb, var(--ghost-accent) 78%, white)',
+                    : isFocused
+                      ? 'var(--ghost-accent)'
+                      : 'color-mix(in srgb, var(--ghost-text) 40%, transparent)',
                 }}
               >
-                {isSearchMode ? <Search className="h-3.5 w-3.5" /> : <TerminalSquare className="h-3.5 w-3.5" />}
-              </div>
+                {isSearchMode ? <Search className="h-3.5 w-3.5" /> : '\u276F'}
+              </span>
 
               <div className="relative flex h-full flex-1 items-center">
                 {activeInlineSuffix && !isSearchMode && (
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 flex items-center overflow-hidden font-mono text-[13px]"
+                    className="pointer-events-none absolute inset-0 flex items-center overflow-hidden font-mono text-[12.5px]"
                   >
                     <span className="whitespace-pre text-transparent">{input}</span>
                     <span className="whitespace-pre text-white/24">{activeInlineSuffix}</span>
@@ -1221,20 +1189,26 @@ export function TerminalCommandBar({
                     }
                   }}
                   placeholder={isHistoryMode
-                    ? 'Search command history and press Enter to load the result...'
+                    ? 'History: type to search, Enter loads, Esc closes'
                     : isPaletteMode
-                      ? 'Search commands, blocks, repo actions, and recent paths...'
-                      : 'Type a command or path. Press Tab to complete.'}
-                  className="relative z-10 h-full flex-1 bg-transparent font-mono text-[13px] text-white/92 outline-none placeholder:text-white/22"
+                      ? 'Palette: commands, blocks, repo actions, paths'
+                      : 'Type a command · Tab completes · Ctrl+R history · Ctrl+K palette'}
+                  className="relative z-10 h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] text-white/92 outline-none placeholder:text-white/25"
                 />
               </div>
+
+              {statusLabel && (
+                <span className="hidden shrink-0 text-[10px] uppercase tracking-[0.14em] text-white/25 lg:inline">
+                  {statusLabel}
+                </span>
+              )}
 
               {activeInlineSuggestion && !isSearchMode && (
                 <button
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => insertSuggestion(activeInlineSuggestion.insertValue)}
-                  className="hidden h-8 items-center rounded-lg border px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/42 md:inline-flex"
+                  className="hidden h-6 items-center rounded-md border px-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/42 md:inline-flex"
                   style={{
                     borderColor: 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
                     background: 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
@@ -1250,7 +1224,7 @@ export function TerminalCommandBar({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={sendInterrupt}
                   title="Send Ctrl+C to running process"
-                  className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-all"
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold uppercase tracking-[0.14em] transition-all"
                   style={{
                     borderColor: 'color-mix(in srgb, rgb(244, 63, 94) 48%, rgba(255,255,255,0.08))',
                     background: 'color-mix(in srgb, rgb(244, 63, 94) 16%, rgba(255,255,255,0.02))',
@@ -1267,7 +1241,7 @@ export function TerminalCommandBar({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={handleSubmit}
                 disabled={!input.trim() && !activeInlineSuggestion}
-                className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-all disabled:cursor-not-allowed disabled:opacity-35"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold uppercase tracking-[0.14em] transition-all disabled:cursor-not-allowed disabled:opacity-35"
                 style={{
                   borderColor: 'color-mix(in srgb, var(--ghost-border) 82%, rgba(255,255,255,0.08))',
                   background: isFocused
@@ -1278,41 +1252,11 @@ export function TerminalCommandBar({
                     : 'color-mix(in srgb, var(--ghost-text-dim) 80%, white)',
                 }}
               >
-                <CornerDownLeft className="h-3.5 w-3.5" />
+                <CornerDownLeft className="h-3 w-3" />
                 {isSearchMode ? 'Load' : 'Run'}
               </button>
             </div>
 
-            <div
-              className="flex h-8 items-center justify-between border-t px-3 text-[10px]"
-              style={{
-                borderColor: 'color-mix(in srgb, var(--ghost-border) 74%, rgba(255,255,255,0.04))',
-                color: 'color-mix(in srgb, var(--ghost-text-dim) 70%, white)',
-              }}
-            >
-              <div className="min-w-0 flex items-center gap-2 overflow-hidden">
-                {activeInlineSuggestion && !isSearchMode ? (
-                  <>
-                    <span
-                      className="inline-flex h-5 items-center rounded-md border px-1.5 font-semibold uppercase tracking-[0.16em]"
-                      style={{
-                        borderColor: 'color-mix(in srgb, var(--ghost-border) 84%, rgba(255,255,255,0.1))',
-                        background: 'color-mix(in srgb, var(--ghost-surface) 88%, rgba(255,255,255,0.02))',
-                      }}
-                    >
-                      Tab
-                    </span>
-                    <span className="truncate font-mono text-white/58">{displayFooterText}</span>
-                  </>
-                ) : (
-                  <span className="truncate">{displayFooterText}</span>
-                )}
-              </div>
-
-              <span className="ml-3 shrink-0 uppercase tracking-[0.16em] text-white/20">
-                {footerStatus}
-              </span>
-            </div>
           </div>
         </div>
       </div>

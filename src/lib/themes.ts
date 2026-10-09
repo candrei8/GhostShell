@@ -618,8 +618,15 @@ export const themes: Theme[] = [
   },
 ]
 
+/** House theme: new installs start on it and v6 moved existing installs onto it once. */
+export const DEFAULT_THEME_ID = 'zero-lux'
+
 export function getTheme(id: string): Theme {
-  return themes.find(t => t.id === id) || themes[0]
+  return (
+    themes.find(t => t.id === id) ||
+    themes.find(t => t.id === DEFAULT_THEME_ID) ||
+    themes[0]
+  )
 }
 
 function hexToRgbTriplet(hex: string): string | null {
@@ -627,6 +634,15 @@ function hexToRgbTriplet(hex: string): string | null {
   if (!m) return null
   const n = parseInt(m[1], 16)
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`
+}
+
+/** Mix a #rrggbb colour with black; mirrors --shell-bg in globals.css. */
+export function shadeHex(hex: string, keep: number): string | null {
+  const m = /^#?([a-f\d]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  const channel = (shift: number) => Math.round(((n >> shift) & 255) * keep).toString(16).padStart(2, '0')
+  return `#${channel(16)}${channel(8)}${channel(0)}`
 }
 
 export function applyTheme(theme: Theme): void {
@@ -666,5 +682,14 @@ export function applyTheme(theme: Theme): void {
   for (const [name, value] of rgbTokens) {
     const triplet = hexToRgbTriplet(value)
     if (triplet) root.style.setProperty(`--ghost-${name}-rgb`, triplet)
+  }
+
+  const shellBg = shadeHex(c.bg, 0.55)
+  if (shellBg) {
+    try {
+      window.ghostshell?.setWindowBackgroundColor?.(shellBg)
+    } catch {
+      // Not running inside Electron (tests / browser preview).
+    }
   }
 }

@@ -6,6 +6,7 @@ const api = {
   windowMaximize: () => ipcRenderer.send('window:maximize'),
   windowClose: () => ipcRenderer.send('window:close'),
   windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  setWindowBackgroundColor: (color: string) => ipcRenderer.send('window:setBackgroundColor', color),
   toggleFullscreen: () => ipcRenderer.send('window:toggleFullscreen'),
 
   // PTY
@@ -117,6 +118,13 @@ const api = {
     return () => { ipcRenderer.removeListener('app:before-close', handler) }
   },
   closeReady: () => ipcRenderer.send('app:close-ready'),
+
+  // Window lifecycle (minimize/restore) for terminal resize + WebGL handling
+  onWindowState: (callback: (state: 'minimized' | 'restored') => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: 'minimized' | 'restored') => callback(state)
+    ipcRenderer.on('window:state', handler)
+    return () => { ipcRenderer.removeListener('window:state', handler) }
+  },
 }
 
 contextBridge.exposeInMainWorld('ghostshell', api)

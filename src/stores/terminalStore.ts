@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { TerminalSession, SessionGroup } from '../lib/types'
+import { isGenericTitle, nextPaneName } from '../lib/paneNames'
 
 export interface TerminalWorkspace {
   id: string
@@ -27,7 +28,13 @@ interface TerminalState {
   removeSession: (id: string) => void
   setActiveSession: (id: string | null) => void
   setActiveWorkspace: (id: string | null) => void
+  /**
+   * Programmatic update. A placeholder title ("Terminal", "Claude 2"…) never
+   * overwrites a pane's name; use renameSession for user-chosen titles.
+   */
   updateSession: (id: string, updates: Partial<TerminalSession>) => void
+  /** User rename: sets the title verbatim. */
+  renameSession: (id: string, title: string) => void
   updateWorkspace: (id: string, updates: Partial<{ title: string; color: string }>) => void
   getSession: (id: string) => TerminalSession | undefined
   getWorkspaces: () => TerminalWorkspace[]
@@ -141,8 +148,11 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
   tabsCollapsed: false,
 
   addSession: (session) => {
-    const newSession: TerminalSession = { ...session, isActive: true }
     set((state) => {
+      const title = isGenericTitle(session.title)
+        ? nextPaneName(state.sessions.map((s) => s.title))
+        : session.title
+      const newSession: TerminalSession = { ...session, title, isActive: true }
       const sessions = [...state.sessions, newSession]
       const groups = normalizeGroups(sessions, state.groups)
       return {
@@ -257,7 +267,26 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
 
   updateSession: (id, updates) => {
     set((state) => ({
-      sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+      sessions: state.sessions.map((s) => {
+        if (s.id !== id) return s
+        if (updates.title !== undefined && isGenericTitle(updates.title)) {
+          // Keep the pane's name; only fill it in if it somehow has none.
+          const { title: _ignored, ...rest } = updates
+          const title = isGenericTitle(s.title)
+            ? nextPaneName(state.sessions.filter((other) => other.id !== id).map((other) => other.title))
+            : s.title
+          return { ...s, ...rest, title }
+        }
+        return { ...s, ...updates }
+      }),
+    }))
+  },
+
+  renameSession: (id, title) => {
+    const next = title.trim()
+    if (!next) return
+    set((state) => ({
+      sessions: state.sessions.map((s) => (s.id === id ? { ...s, title: next } : s)),
     }))
   },
 
@@ -453,7 +482,7 @@ export const useTerminalStore = create<TerminalState>()((set, get) => ({
     const newSession: TerminalSession = {
       ...session,
       id: newId,
-      title: session.title,
+      title: nextPaneName(get().sessions.map((s) => s.title)),
       agentId: undefined,
       isActive: true,
     }

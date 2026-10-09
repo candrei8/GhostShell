@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { Theme, Provider, SavedAgentConfig, AgentAvatarConfig, LaunchPreset, GridLayout } from '../lib/types'
-import { themes, getTheme, applyTheme } from '../lib/themes'
+import { themes, getTheme, applyTheme, DEFAULT_THEME_ID } from '../lib/themes'
 import { electronStorage } from '../lib/electronStorage'
 import { CliVisualProfile } from '../lib/terminalPresets'
 
@@ -259,7 +259,7 @@ function normalizePersistedSettings(persistedState: unknown) {
     : {}) as Record<string, unknown>
 
   return {
-    themeId: pickString(raw.themeId, 'qubria-dark'),
+    themeId: pickString(raw.themeId, DEFAULT_THEME_ID),
     fontSize: pickNumber(raw.fontSize, 13, 10, 18),
     fontFamily: pickString(
       raw.fontFamily,
@@ -293,10 +293,26 @@ function normalizePersistedSettings(persistedState: unknown) {
   }
 }
 
+/** Persisted-settings schema version. v6 switched the house theme to Zero Lux. */
+export const SETTINGS_VERSION = 6
+
+/**
+ * Upgrade settings stored by an older build. Runs once per upgrade: zustand
+ * writes the result back with SETTINGS_VERSION, so a theme the user picks
+ * afterwards is never overridden again.
+ */
+export function migrateSettings(persistedState: unknown, fromVersion: number) {
+  const settings = normalizePersistedSettings(persistedState)
+  if (fromVersion < 6) {
+    settings.themeId = DEFAULT_THEME_ID
+  }
+  return settings
+}
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
-      themeId: 'qubria-dark',
+      themeId: DEFAULT_THEME_ID,
       fontSize: 13,
       fontFamily: 'JetBrains Mono, Fira Code, Cascadia Code, Consolas, monospace',
       terminalFontSize: 14,
@@ -364,7 +380,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'ghostshell-settings',
-      version: 5,
+      version: SETTINGS_VERSION,
       storage: createJSONStorage(() => electronStorage),
       partialize: (state) => ({
         themeId: state.themeId,
@@ -391,7 +407,7 @@ export const useSettingsStore = create<SettingsState>()(
         savedAgents: state.savedAgents,
         launchPresets: state.launchPresets,
       }),
-      migrate: (persistedState) => normalizePersistedSettings(persistedState),
+      migrate: (persistedState, version) => migrateSettings(persistedState, version),
       merge: (persistedState, currentState) => ({
         ...currentState,
         ...normalizePersistedSettings(persistedState),

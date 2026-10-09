@@ -99,3 +99,52 @@ describe('terminalStore.closeWorkspace', () => {
     expect(state.activeGroupId).toBeNull()
   })
 })
+
+describe('terminalStore pane names', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+
+  it('names placeholder-titled sessions with unique human names', () => {
+    const { addSession } = useTerminalStore.getState()
+    addSession({ id: 'a', title: 'Terminal', cwd: '.' })
+    addSession({ id: 'b', title: 'New Session', cwd: '.' })
+    addSession({ id: 'c', title: 'Claude 2', cwd: '.' })
+
+    const titles = useTerminalStore.getState().sessions.map((s) => s.title)
+    expect(titles).toEqual(['Emma', 'James', 'Olivia'])
+  })
+
+  it('keeps meaningful titles as given', () => {
+    useTerminalStore.getState().addSession({ id: 'a', title: 'Backend API', cwd: '.' })
+    expect(useTerminalStore.getState().sessions[0].title).toBe('Backend API')
+  })
+
+  it('gives a duplicated pane its own name instead of copying the original', () => {
+    const { addSession, duplicateSession } = useTerminalStore.getState()
+    addSession({ id: 'a', title: 'Terminal', cwd: '.' })
+    const newId = duplicateSession('a')!
+
+    const state = useTerminalStore.getState()
+    const titles = state.sessions.map((s) => s.title)
+    expect(new Set(titles).size).toBe(titles.length)
+    expect(state.sessions.find((s) => s.id === newId)?.title).toBe('James')
+  })
+
+  it('never lets a programmatic placeholder title overwrite a name', () => {
+    const { addSession, updateSession } = useTerminalStore.getState()
+    addSession({ id: 'a', title: 'New Session', cwd: '.' })
+    updateSession('a', { title: 'Terminal', showQuickLaunch: false })
+
+    const session = useTerminalStore.getState().sessions[0]
+    expect(session.title).toBe('Emma')
+    expect(session.showQuickLaunch).toBe(false)
+  })
+
+  it('lets the user rename a pane to anything', () => {
+    const { addSession, renameSession } = useTerminalStore.getState()
+    addSession({ id: 'a', title: 'Terminal', cwd: '.' })
+    renameSession('a', 'Terminal')
+    expect(useTerminalStore.getState().sessions[0].title).toBe('Terminal')
+  })
+})

@@ -19,6 +19,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSwarmStore } from '../../stores/swarmStore'
 import { loadTabSnapshot, clearTabSnapshot } from '../../lib/tabSnapshot'
+import { openQuickLaunchSession } from '../../lib/sessionLaunch'
 import { SidebarView } from '../../lib/types'
 
 export function AppLayout() {
@@ -95,14 +96,7 @@ export function AppLayout() {
   const handleQuickLaunch = useCallback(() => {
     setSettingsOpen(false)
     setActiveView(null)
-    const cwd = useWorkspaceStore.getState().currentPath
-    useTerminalStore.getState().addSession({
-      id: `term-quicklaunch-${Date.now()}`,
-      title: 'New Session',
-      cwd,
-      showQuickLaunch: true,
-      sessionType: 'ghostcode',
-    })
+    openQuickLaunchSession()
   }, [])
 
   const handleSpawnTerminal = useCallback(() => {
@@ -205,9 +199,8 @@ export function AppLayout() {
         }
       }
 
-      if (snapshot.viewMode) {
-        setViewMode(snapshot.viewMode)
-      }
+      // One workspace at a time: a snapshot saved in grid mode still opens as tabs.
+      setViewMode('tabs')
       setTabsCollapsed(!!snapshot.tabsCollapsed)
 
       if (restoredSessionIds.length > 0) {
@@ -234,7 +227,13 @@ export function AppLayout() {
       }
     }
 
+    // Nothing restored → open straight on the agent setup screen instead of
+    // an empty canvas.
     restore()
+      .catch((err) => console.error('[GhostShell] Failed to restore tabs:', err))
+      .finally(() => {
+        if (useTerminalStore.getState().sessions.length === 0) openQuickLaunchSession()
+      })
   }, [])
 
   const handleToggleSidebar = useCallback(() => {
@@ -260,11 +259,6 @@ export function AppLayout() {
     }
   }, [activeSwarmId, activeView])
 
-  // Refit on activeView / swarm view mode change so terminal resizes if panel covers it
-  useEffect(() => {
-    setTimeout(() => window.dispatchEvent(new CustomEvent('ghostshell:refit')), 50)
-  }, [activeView, monitorOpen, swarmViewMode])
-
   useEffect(() => {
     const handleOpenSettings = () => openSettings('appearance')
     window.addEventListener('ghostshell:open-settings', handleOpenSettings)
@@ -278,7 +272,9 @@ export function AppLayout() {
         onSpawnTerminal={handleSpawnTerminal}
       />
 
-      <div className="relative flex min-h-0 flex-1 px-3 pb-3">
+      {/* px, not rem: the UI font size is configurable, and a rem-sized frame
+          would put the pane grid on a fractional pixel. */}
+      <div className="relative flex min-h-0 flex-1 px-[10px] pb-[10px]">
         {/* Main Content Area */}
         <div className="flex-1 min-w-0 relative">
           {/* Dashboard overlay (full-width, shown when in dashboard mode) */}

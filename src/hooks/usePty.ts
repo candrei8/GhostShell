@@ -1498,6 +1498,12 @@ export function usePty({ sessionId, terminal, cwd, shell, agentId, autoLaunch, r
           window.ghostshell.ptyResize(sessionId, cols, rows)
         })
         cleanups.push(() => onResizeDisposable.dispose())
+        // The PTY was spawned with the size read before `await ptyCreate`; a fit
+        // that landed during that await never reached it. Sync once so the TUI
+        // doesn't draw its first frame for a size xterm no longer has.
+        if (terminal.cols !== cols || terminal.rows !== rows) {
+          window.ghostshell.ptyResize(sessionId, terminal.cols, terminal.rows)
+        }
 
         // Exit - set offline
         const removeExitListener = window.ghostshell.ptyOnExit(sessionId, (_exitCode) => {

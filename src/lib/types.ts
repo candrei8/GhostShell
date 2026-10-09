@@ -297,6 +297,7 @@ declare global {
       windowMaximize: () => void
       windowClose: () => void
       windowIsMaximized: () => Promise<boolean>
+      setWindowBackgroundColor?: (color: string) => void
       ptyCreate: (options: { id: string; shell?: string; cwd?: string; cols?: number; rows?: number; provider?: Provider; env?: Record<string, string> }) => Promise<{ success: boolean; error?: string }>
       ptyWrite: (id: string, data: string) => void
       ptyAck: (id: string, charCount: number) => void
@@ -340,6 +341,7 @@ declare global {
       onUpdaterStatus: (cb: (status: Record<string, unknown>) => void) => () => void
       onBeforeClose: (callback: () => void) => () => void
       closeReady: () => void
+      onWindowState?: (callback: (state: 'minimized' | 'restored') => void) => () => void
       // Swarm file locks
       swarmAcquireLocks: (swarmRoot: string, taskId: string, agentName: string, files: string[]) => Promise<{ success: boolean; conflict?: string }>
       swarmReleaseLocks: (swarmRoot: string, taskId: string) => Promise<{ success: boolean }>

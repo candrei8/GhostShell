@@ -582,7 +582,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
             const remainingSessionIds = sessionIds.slice(1)
             useTerminalStore.getState().addGroup({
               id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              name: `Session (${remainingSessionIds.length + 1})`,
+              name: `Agents (${remainingSessionIds.length + 1})`,
               sessionIds: [sessionId, ...remainingSessionIds],
               createdAt: Date.now(),
             })
@@ -592,7 +592,7 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
         // Normal behavior: create group for multiple sessions
         useTerminalStore.getState().addGroup({
           id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          name: `Session (${sessionIds.length})`,
+          name: `Agents (${sessionIds.length})`,
           sessionIds,
           createdAt: Date.now(),
         })
@@ -615,19 +615,16 @@ export function QuickLaunch({ onLaunched, sessionId }: QuickLaunchProps) {
     >
       <StepBar step={step} />
 
-      <button
-        onClick={() => {
-          if (sessionId) {
-            // Inside a tab: remove the empty session
-            useTerminalStore.getState().removeSession(sessionId)
-          }
-          onLaunched()
-        }}
-        className="absolute top-10 right-10 flex h-9 w-9 items-center justify-center rounded-xl text-white/40 transition-all hover:bg-white/[0.06] hover:text-white"
-        aria-label="Close"
-      >
-        <X className="h-5 w-5" />
-      </button>
+      {/* Inside a pane the header's × already closes it. */}
+      {!sessionId && (
+        <button
+          onClick={onLaunched}
+          className="absolute top-10 right-10 flex h-9 w-9 items-center justify-center rounded-xl text-white/40 transition-all hover:bg-white/[0.06] hover:text-white"
+          aria-label="Close"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
