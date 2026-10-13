@@ -18,6 +18,7 @@
     "package": "electron-vite build --config electron.vite.config.mjs && electron-builder --win",
     "prerelease": "node scripts/ensure-electron-install.js",
     "release": "electron-vite build --config electron.vite.config.mjs && electron-builder --win --publish always",
+    "package:mac": "electron-vite build --config electron.vite.config.mjs && electron-builder --mac --x64 --arm64",
     "package:dir": "electron-vite build --config electron.vite.config.mjs && electron-builder --win --dir",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -10,6 +10,7 @@ out/
 build/*
 !build/icon.ico
 !build/icon.png
+!build/entitlements.mac.plist
 *.tsbuildinfo
 
 # Development

@@ -10,7 +10,18 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            builder_args: --win
+          # Apple Silicon runner; node-pty ships darwin-x64 and darwin-arm64 prebuilds,
+          # so both architectures can be packaged from the same machine.
+          - os: macos-latest
+            builder_args: --mac --x64 --arm64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -29,23 +40,47 @@ jobs:
         run: npx electron-vite build
 
       - name: Package installer
-        run: npx electron-builder --win --publish never
+        run: npx electron-builder ${{ matrix.builder_args }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple Developer certificate: ship the macOS build unsigned
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: List dist artifacts
         run: ls -la dist/
         shell: bash
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest*.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Create GitHub Release and upload assets
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
+          ls -la dist/
           # Delete draft/failed release for this tag if it exists
-          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
           gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "GhostShell $TAG" \
             --generate-notes \
-            dist/*.exe dist/*.blockmap dist/latest.yml
-        shell: bash
+            dist/*
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

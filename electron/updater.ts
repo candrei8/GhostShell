@@ -1,5 +1,11 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
+
+const RELEASES_URL = 'https://github.com/candrei8/GhostShell/releases'
+
+// macOS builds ship unsigned, and Squirrel.Mac refuses to install unsigned
+// updates — so on macOS we only detect new versions and send the user to the release page.
+const canSelfInstall = process.platform !== 'darwin'
 
 let mainWindow: BrowserWindow | null = null
 let checkInterval: ReturnType<typeof setInterval> | null = null
@@ -51,7 +57,7 @@ function registerUpdaterListeners(): void {
   listenersRegistered = true
 
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = canSelfInstall
 
   autoUpdater.on('checking-for-update', () => {
     log('Checking for updates...')
@@ -104,6 +110,14 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('updater:download', async () => {
+    if (!canSelfInstall) {
+      const url = lastAvailableVersion
+        ? `${RELEASES_URL}/tag/v${lastAvailableVersion}`
+        : `${RELEASES_URL}/latest`
+      await shell.openExternal(url)
+      return { success: true }
+    }
+
     try {
       isDownloading = true
       await autoUpdater.downloadUpdate()

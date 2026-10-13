@@ -1,4 +1,4 @@
-# Windows-only app: packaged and released for Windows (NSIS installer).
+# Released for Windows (NSIS installer) and macOS (unsigned dmg, x64 + arm64).
 appId: com.ghostshell.app
 productName: GhostShell
 directories:
@@ -33,3 +33,13 @@ publish:
   owner: candrei8
   repo: GhostShell
   releaseType: release
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - dmg
+    # zip + latest-mac.yml let electron-updater detect new versions on macOS
+    - zip
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}

@@ -108,7 +108,7 @@ export function UpdateBanner() {
               className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 transition-colors"
             >
               <ExternalLink size={12} />
-              Get .exe
+              Get installer
             </button>
           </>
         )}
